@@ -5185,6 +5185,235 @@ document.addEventListener('pointerdown',event=>{
 const p8SmallCSS=`.p8-gift-duration,.p8-click-option{border:1px solid #efd3e2;border-radius:15px;background:#fff8fc;padding:15px;display:grid;gap:8px;min-width:0}.p8-gift-duration input{width:100%;max-width:100%}.p8-gift-duration h4{margin:0}`;
 document.head.insertAdjacentHTML('beforeend',`<style>${p8SmallCSS}</style>`);
 
+/* ===========================================================
+  Family Sync Preview refinement: daily UX, review corrections,
+  settings, and email-link cloud sign-in (opt-in).
+  All state changes pass through existing IndexedDB helpers.
+ =========================================================== */
+const p9OldHistory=guardianHistory;
+guardianHistory=function(){
+ const doc=document.createElement('div');doc.innerHTML=p9OldHistory();
+ let section=[...doc.querySelectorAll('section.panel')].find(x=>/^Guardian Corrections/i.test(x.querySelector('h3')?.textContent||''));
+ if(!section){section=document.createElement('section');section.className='panel p9-undo-section';doc.appendChild(section);}
+ if(section){const entries=state.summary.transactions.filter(t=>['welcome','bonus','task','challenge','rule-earned'].includes(t.type)).slice(0,35);
+  section.innerHTML=`<div class="panel-head"><h3>↩ Undo Star Award</h3><span class="chip">Guardian corrections</span></div><p class="p2-muted">Reverse a mistaken star award. A separate correction is kept in History. For an entirely mistaken task completion, use Undo Completion below.</p><div class="p9-compact-rows">${entries.length?entries.map(t=>`<div class="p9-ledger-row"><span class="p9-row-icon">${t.type==='task'?'📖':t.type==='challenge'?'🏆':'⭐'}</span><div class="grow"><strong>${esc(t.reason||t.type)}</strong><small>${esc(fmtDate(t.createdAt))} · +${money(t.amount)} ⭐</small></div>${t.reversedAt?'<span class="p2-tag">Undone</span>':`<button type="button" class="btn btn-soft p2-mini" data-p9-action="undo-stars" data-id="${esc(t.id)}">Undo Star Award</button>`}</div>`).join(''):'<p class="p2-muted">No star awards to correct yet.</p>'}</div>`;
+ }
+ const completions=[...state.p2Completions].filter(c=>!c.migratedFrom&&!c.correctedAt).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,60);
+ const completedSection=[...doc.querySelectorAll('section.panel')].find(x=>/^Task Completions/i.test(x.querySelector('h3')?.textContent||''));
+ if(completedSection){completedSection.innerHTML=`<div class="panel-head"><h3>📖 Task Completions</h3><span class="chip">${state.p2Completions.length} records</span></div><p class="p2-muted">Latest records. Undo a mistaken completion to reopen its earning opportunity; this also reverses its associated stars if applicable.</p><div class="p9-compact-rows">${completions.length?completions.map(c=>`<div class="p9-ledger-row"><span class="p9-row-icon">${esc(p2Task(c.taskId)?.icon||'📖')}</span><div class="grow"><strong>${esc(c.taskName||p2Task(c.taskId)?.name||'Archived quest')}</strong><small>${esc(c.date||'')} ${c.slot?`· ${esc(c.slot)}`:''} · ${Number(c.starsAwarded||0)>0?'+'+money(c.starsAwarded)+' ⭐':'No stars'}</small></div><button type="button" class="btn btn-plain p2-mini" data-p9-action="undo-completion" data-id="${esc(c.id)}">↩ Undo</button></div>`).join(''):empty('🌷','No completions yet','Completed activities will appear here.')}</div>`;}
+ return doc.innerHTML;
+};
+async function p9UndoCompletion(id){
+ if(!safeGuardian())throw Error('Unlock Guardian Mode to undo a completion.');
+ const c=state.p2Completions.find(x=>x.id===id);if(!c||c.correctedAt||c.migratedFrom)throw Error('This completion is no longer available to undo.');
+ const linked=state.summary.transactions.find(t=>t.completionId===c.id&&t.type==='task'&&!t.reversedAt);
+ const amount=Number(linked?.amount||0);
+ if(Number(c.starsAwarded||0)>0&&!linked)throw Error('This completion has stars but no safely matched award transaction. Use History to review the linked award before changing the completion.');
+ if(amount>0&&state.summary.wallet<amount)throw Error(`Cannot reverse ${amount} stars because the wallet has already spent them. Correct spending first or use Guardian History to reconcile.`);
+ const name=c.taskName||p2Task(c.taskId)?.name||'this task';
+ if(!confirm(`Undo completion of “${name}” on ${c.date}? ${amount?`Its ${amount} awarded stars will also be reversed.`:'No stars will change.'} This may affect Challenge progress. The correction will be recorded.`))return;
+ const stamp=iso(),auditKey='p9-completion-undo:'+c.id;
+ await atomic(linked?['completions','transactions','records']:['completions','records'],tx=>{
+  const completions=tx.objectStore('completions');
+  if(typeof completions.delete==='function')completions.delete(c.id);
+  else{completions.clear();for(const other of state.p2Completions.filter(row=>row.id!==c.id))completions.put(other);}
+  tx.objectStore('records').put({key:auditKey,completionId:c.id,taskId:c.taskId,date:c.date,starsReversed:amount,guardianId:state.p64CurrentGuardian||null,createdAt:stamp});
+  if(linked){const correctionId='correction:'+linked.id;tx.objectStore('transactions').put({...linked,reversedAt:stamp,reversalId:correctionId});tx.objectStore('transactions').add({id:correctionId,type:'earning-correction',amount:-amount,reason:`Undo completion: ${name} (${c.date})`,originalTransactionId:linked.id,createdAt:stamp,source:'guardian',guardianId:state.p64CurrentGuardian||null});}
+ });
+ await refresh();notice(`Completion undone. ${amount} awarded star${amount===1?'':'s'} reversed.`);
+}
+const p9OldDashboard=guardianDashboard;
+guardianDashboard=function(){const root=document.createElement('div');root.innerHTML=p9OldDashboard();const quick=root.querySelector('.quick-actions');if(quick){
+ const bonus=quick.querySelector('[data-action="open-bonus"]');const gift=quick.querySelector('[data-p31-action="gift-open"]');
+ if(bonus)quick.appendChild(bonus);
+ if(gift)quick.appendChild(gift);
+ }
+ return root.innerHTML;
+};
+const p9OldManage=guardianManage;
+guardianManage=function(){const root=document.createElement('div');root.innerHTML=p9OldManage();
+ if(state.p2ManageTab==='rules'){
+  const list=root.querySelector('.p5b-card-grid')||root.querySelector('.p2-list');
+  if(list){list.querySelectorAll(':scope > .p2-card').forEach((card,index)=>{
+   card.classList.add('p9-rule-card');
+   const title=card.querySelector('h3');const icon=card.querySelector('.p2-symbol');
+   if(title&&icon){title.classList.add('p9-rule-title');const copy=icon.cloneNode(true);icon.remove();title.prepend(copy);}
+   const actions=card.querySelector('.p2-actions');if(actions)actions.classList.add('p9-rule-actions');
+  });}
+ }
+ return root.innerHTML;
+};
+const p9OldTaskEditor=p2TaskEditor;
+p2TaskEditor=function(){const root=document.createElement('div');root.innerHTML=p9OldTaskEditor();const form=root.querySelector('#p2-task-form');if(form){
+ const draft=form.querySelector('input[name="draft"]')?.closest('label');
+ const actions=[...form.querySelectorAll('.p2-actions')].find(x=>x.querySelector('button[type="submit"]'));
+ if(draft&&actions){draft.classList.add('p9-draft-control');actions.before(draft);}
+ }
+ return root.innerHTML;
+};
+const p9OldTaskDetail=p3ChildTaskDetail;
+p3ChildTaskDetail=function(t,date){const root=document.createElement('div');root.innerHTML=p9OldTaskDetail(t,date);
+ const status=root.querySelector('.p8-award-state');if(status){
+  const anchor=[...root.querySelectorAll('h2,h3,p,div')].find(x=>x.childElementCount===0&&/^(Your adventure today|Ready when you are)/i.test((x.textContent||'').trim()));
+  if(anchor){const wrap=anchor.closest('.p2-row')||anchor.parentElement;if(wrap){wrap.classList.add('p9-task-status-row');wrap.appendChild(status);}}
+  else{const pageTitle=root.querySelector('h1.page-title');if(pageTitle){let row=pageTitle.parentElement;if(row)row.classList.add('p9-task-status-row');pageTitle.after(status);}}
+ }
+ return root.innerHTML;
+};
+const p9OldQuests=childQuests;
+childQuests=function(){const root=document.createElement('div');root.innerHTML=p9OldQuests();
+ if(state.p2ChildTask)return root.innerHTML;
+ root.querySelectorAll('.p61-child-grid').forEach(grid=>{
+  const cards=[...grid.children],routines=cards.filter(card=>card.classList.contains('p61-routine-card'));
+  if(routines.length!==1||cards.length<3)return;
+  const main=routines[0];const others=cards.filter(c=>c!==main);grid.classList.add('p9-adventure-columns');grid.replaceChildren();
+  const left=document.createElement('div'),right=document.createElement('div');left.className='p9-adventure-column';right.className='p9-adventure-column';left.appendChild(main);
+  others.forEach((card,i)=>{if(i<2)right.appendChild(card);else (i%2?right:left).appendChild(card);});grid.append(left,right);
+ });return root.innerHTML;
+};
+// Guardian Mode is already PIN-authorized; only Child Mode needs a PIN to
+// approve sharing a daily-progress image. Use the same underlying PNG card.
+const p9OldDailyModal=p8DailyModal;
+p8DailyModal=function(){
+ if(state.view!=='guardian'||!safeGuardian())return p9OldDailyModal();
+ return `<div class="p68-share-overlay" role="presentation"><div class="p68-share-dialog" role="dialog" aria-modal="true" aria-label="Share daily progress"><h2>🌟 Share Today's Progress</h2><p>${esc(state.profile?.nickname||'Little Star')} earned <strong>${p8DailySnapshot().stars} ⭐</strong> today.</p><p class="p2-muted">You're already signed in as a Guardian. No second PIN is needed.</p><div class="p2-actions"><button type="button" class="btn btn-primary" data-p9-action="guardian-daily-png">Create Daily Progress PNG</button><button type="button" class="btn btn-plain" data-p8-action="daily-close">Cancel</button></div></div></div>`;
+};
+async function p9CreateGuardianDailyShare(){
+ if(!safeGuardian()||state.view!=='guardian')throw Error('Guardian Mode must be unlocked.');
+ const id=state.p64CurrentGuardian||'owner';const guardian=state.p64Profiles.find(p=>p.id===id);
+ const guardianName=guardian?.name||state.settings?.ownerGuardianName||'Primary Guardian';
+ const day=p8Today(),snapshot=p8DailySnapshot(day),canvas=p8DailyCard(snapshot,guardianName),blob=await p68CanvasBlob(canvas);
+ p68CloseShare();state.p68ShareFile=new File([blob],`My-Little-Star-Garden-${day}-Progress.png`,{type:'image/png'});state.p68ShareUrl=URL.createObjectURL(state.p68ShareFile);state.p68ShareReady=true;state.p8DailyShareOpen=false;
+ await put('records',{key:`p68-share-approval:${uniqueId()}`,kind:'daily-summary',targetId:day,targetName:'Daily Progress',completedOn:day,approvedBy:id,guardianName,approvedAt:iso()});
+ await refresh();render();
+}
+const p9OldSettings=guardianSettings;
+guardianSettings=function(){const root=document.createElement('div');root.innerHTML=p9OldSettings();
+ const profile=root.querySelector('#profile-form');if(profile){profile.classList.add('p9-profile-layout');const panel=profile.closest('section.panel');panel?.classList.add('p9-settings-profile');}
+ const appearance=[...root.querySelectorAll('section.panel')].find(x=>/Appearance/i.test(x.querySelector('h3')?.textContent||''));
+ if(appearance){appearance.classList.add('p9-settings-appearance');const click=appearance.querySelector('.p8-click-option');if(click){click.classList.add('p9-click-sound');click.classList.remove('p8-click-option');}}
+ const full=[...root.querySelectorAll('section.panel')].find(x=>/JSON Backup & Restore/i.test(x.querySelector('h3')?.textContent||''));
+ const config=[...root.querySelectorAll('section.panel')].find(x=>/Configuration & Backups/i.test(x.querySelector('h3')?.textContent||''));
+ if(full&&config){config.classList.add('p9-backup-panel');const head=config.querySelector('h3');if(head){const header=document.createElement('div');header.className='panel-head';head.before(header);header.append(head);header.insertAdjacentHTML('beforeend','<span class="chip">Setup only</span>');}}
+ return root.innerHTML;
+};
+// Save the new checkbox, which predates the original Settings change handler.
+app.addEventListener('change',async e=>{if(e.target?.dataset?.setting!=='buttonClickSounds')return;
+ e.stopImmediatePropagation();if(!safeGuardian()){notice('Guardian PIN required.',true);return;}
+ try{const checked=Boolean(e.target.checked);state.settings=await updateSetting('buttonClickSounds',checked);notice(checked?'Cute button sounds enabled!':'Cute button sounds muted.');}
+ catch(err){notice(err.message||'Could not save button sounds.',true);}
+},true);
+// A small tap-sound control to verify the preference without leaving Settings.
+const p9OldSettingWithTest=guardianSettings;
+guardianSettings=function(){const root=document.createElement('div');root.innerHTML=p9OldSettingWithTest();const box=root.querySelector('.p9-click-sound');if(box)box.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-plain p2-mini" data-p9-action="test-click-sound">▶ Try Sound</button>');return root.innerHTML;};
+function p9PlayClickSound(){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)throw Error('This browser does not support sound effects.');
+ const audio=state.p8ClickAudio||(state.p8ClickAudio=new AC());if(audio.state==='suspended')audio.resume();const now=audio.currentTime+.01;
+ [660,880].forEach((hz,i)=>{const osc=audio.createOscillator(),g=audio.createGain(),at=now+i*.06;osc.type='sine';osc.frequency.setValueAtTime(hz,at);g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.038,at+.012);g.gain.exponentialRampToValueAtTime(.0001,at+.11);osc.connect(g).connect(audio.destination);osc.start(at);osc.stop(at+.115);});
+}
+document.addEventListener('click',async event=>{const button=event.target.closest('[data-p9-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();try{
+ if(!safeGuardian())throw Error('Unlock Guardian Mode to do this.');
+ const action=button.dataset.p9Action;
+ if(action==='guardian-daily-png'){await p9CreateGuardianDailyShare();return;}
+ if(action==='undo-stars'){await p2UndoTransaction(button.dataset.id);return;}
+ if(action==='undo-completion'){await p9UndoCompletion(button.dataset.id);return;}
+ if(action==='test-click-sound'){p9PlayClickSound();return;}
+ if(action==='email-send'){await p9SendEmailSignIn(String(document.querySelector('#p9-email-input')?.value||''));render();return;}
+ if(action==='export-family-html'){await p9ExportConfiguredFamilyHTML();return;}
+ }catch(err){notice(err.message||'Action failed.',true);}
+},true);
+
+// Email-link authentication. No passwords are put in HTML, links, or Firestore.
+// Unlike auto-overwrite, "Sync after sign-in" acts only with a compatible baseline.
+const P9_EMAIL_KEY='mlsg-email-link-request';
+function p9EmailLinkReturnUrl(){if(location.protocol!=='https:')throw Error('Email-link sign-in requires an HTTPS hosted copy of the app.');return location.origin+location.pathname;}
+async function p9SendEmailSignIn(rawEmail){
+ const email=rawEmail.trim().toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw Error('Enter a valid email address.');
+ const c=await p8CloudInit();const url=p9EmailLinkReturnUrl();
+ await c.auth.sendSignInLinkToEmail(email,{url,handleCodeInApp:true});
+ localStorage.setItem(P9_EMAIL_KEY,JSON.stringify({email,projectId:c.config.projectId,createdAt:Date.now()}));
+ p8CloudStatus('Sign-in link sent. Open the email on this device and tap the link. No password needed.');
+}
+async function p9HandleEmailLink(){
+ if(location.protocol!=='https:'||!/[?&]oobCode=/.test(location.search))return;
+ try{
+  const c=await p8CloudInit();if(!c.auth.isSignInWithEmailLink(location.href))return;
+  let pending=null;try{pending=JSON.parse(localStorage.getItem(P9_EMAIL_KEY)||'null');}catch{}
+  const email=pending?.projectId===c.config.projectId?pending?.email:null;
+  const safeEmail=email||prompt('Confirm the email address to finish signing in:');
+  if(!safeEmail)throw Error('Email confirmation was cancelled. Open the link again when ready.');
+  const signed=await c.auth.signInWithEmailLink(safeEmail,location.href);c.user=signed.user;
+  localStorage.removeItem(P9_EMAIL_KEY);
+  history.replaceState(null,'',location.pathname+location.hash);
+  p8CloudStatus(`Signed in by email: ${c.user.email}.`);
+  if(c.familyId)await p8FamilyCheck();
+  // First device sync is never allowed to overwrite local progress silently.
+  const baseline=p8GetBaseline();if(c.family&&baseline){try{await p8CloudSyncNow();}catch(error){p8CloudStatus(`Signed in. Sync needs your review: ${error.message}`,true);}}
+  else if(c.family)p8CloudStatus(`Signed in as ${c.user.email}. Tap Sync Now to review cloud progress on this device.`);
+  if(state.guardianTab==='p8-cloud')render();
+ }catch(err){p8CloudStatus(`Email-link sign-in needs attention: ${err.message}`,true);if(state.guardianTab==='p8-cloud')render();}
+}
+// The owner can publish a preconfigured copy so other guardians need only
+// enter their email. Firebase web app config and family ID are public; do not
+// package credentials, user data, or actual PIN hashes into the hosted HTML.
+function p9ReadBootstrap(){
+ const node=document.getElementById('p9-cloud-bootstrap');if(!node)return;
+ try{const setup=JSON.parse(node.textContent||'{}');const config=p8ValidatedFirebaseConfig(setup.config);
+  if(!state.p8Cloud.config){state.p8Cloud.config=config;localStorage.setItem(P8_FIREBASE_CONFIG_KEY,JSON.stringify(config));}
+  if(!state.p8Cloud.familyId&&/^[a-zA-Z0-9_-]{10,128}$/.test(setup.familyId||'')){state.p8Cloud.familyId=setup.familyId;localStorage.setItem(P8_FIREBASE_FAMILY_KEY,setup.familyId);}
+ }catch(error){console.warn('Family Sync bootstrap ignored:',error.message);}
+}
+async function p9ExportConfiguredFamilyHTML(){
+ const c=await p8CloudSignedIn();
+ if(c.role!=='owner'||!c.config||!c.familyId)throw Error('Only the family owner can prepare the family-ready hosted copy. Configure and connect your workspace first.');
+ if(location.protocol!=='https:')throw Error('Open the original app on your HTTPS host to prepare the family-ready HTML.');
+ const response=await fetch(location.origin+location.pathname,{cache:'no-store'});if(!response.ok)throw Error('Could not retrieve the clean hosted app source.');
+ let clean=await response.text();if(!clean.includes('</head>')||!clean.includes('p9ReadBootstrap'))throw Error('The hosted file is not this app version. Upload this refined HTML first.');
+ const boot=JSON.stringify({config:c.config,familyId:c.familyId}).replace(/</g,'\\u003c');
+ clean=clean.replace(/<script id="p9-cloud-bootstrap"[^>]*>[\s\S]*?<\/script>/g,'');
+ clean=clean.replace('</head>',`<script id="p9-cloud-bootstrap" type="application/json">${boot}<${'/script'}>\n</head>`);
+ const blob=new Blob([clean],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');a.href=url;a.download='My-Little-Star-Garden-Family-Ready.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);
+ p8CloudStatus('Family-ready HTML downloaded. Replace the hosted page with this new copy. Other guardians can then sign in using only their email.');render();
+}
+const p9OldCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p9OldCloudPage();
+ const login=root.querySelector('#p8-cloud-login-form')?.closest('section.panel');
+ if(login){login.classList.add('p9-cloud-login');login.insertAdjacentHTML('afterbegin',`<h3>📧 Easy Sign-in for Family</h3><p class="p2-muted">Your parent enters their email, opens a private sign-in link, and returns here. No Firebase password to remember. Your family owner must authorize their account in the family workspace.</p><div class="p9-email-row"><label class="field">Email address<input id="p9-email-input" type="email" autocomplete="email" placeholder="mom@example.com"></label><button type="button" class="btn btn-primary" data-p9-action="email-send">💌 Email Me a Sign-in Link</button></div><p class="p2-note">The link returns to this hosted HTTPS page. Existing cloud sessions can still tap Sync Now; changes on different devices are never silently overwritten.</p>`);
+  const oldForm=login.querySelector('#p8-cloud-login-form');if(oldForm){const detail=document.createElement('details');detail.className='p9-advanced-login';detail.innerHTML='<summary>Advanced: email and password login</summary>';oldForm.before(detail);detail.append(oldForm);}
+ }
+ const ownerPanel=[...root.querySelectorAll('section.panel')].find(x=>/Family workspace/i.test(x.querySelector('h3')?.textContent||''));
+ if(ownerPanel&&state.p8Cloud.role==='owner')ownerPanel.insertAdjacentHTML('beforeend',`<div class="p9-family-export"><h4>For less-techy family members 💌</h4><p class="p2-muted">Once the accounts are authorized, prepare a clean hosted file with the public Firebase configuration and family workspace already filled in. Your parents only enter their email and tap the sign-in link.</p><button class="btn btn-soft" type="button" data-p9-action="export-family-html">⬇ Download Family-Ready HTML</button></div>`);
+ const cloudActions=root.querySelector('.p8-cloud-actions');if(cloudActions){cloudActions.insertAdjacentHTML('afterend','<p class="p2-note">Tip: After email sign-in, the app can check cloud revision automatically. Use Sync Now if a new device has not established a safe baseline. Local and cloud changes are never merged without your review.</p>');}
+ return root.innerHTML;
+};
+
+const p9CSS=`
+.p9-ledger-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f1dce6;min-width:0}.p9-ledger-row:last-child{border-bottom:0}
+.p9-ledger-row .grow{min-width:0;overflow-wrap:anywhere}.p9-ledger-row strong{display:block}.p9-ledger-row small{display:block;color:var(--muted);margin-top:4px}
+.p9-row-icon{font-size:1.4rem;flex:0 0 34px;text-align:center}.p9-ledger-row button{flex:0 0 auto}
+.p9-rule-card{display:flex;flex-direction:column;min-width:0;gap:10px;justify-content:space-between}
+.p9-rule-card .p9-rule-title{display:flex;align-items:center;gap:9px;min-width:0;line-height:1.3}.p9-rule-card .p2-symbol{flex:0 0 43px;width:43px;height:43px;font-size:1.35rem}
+.p9-rule-card .p9-rule-actions,.p9-rule-card .p2-actions{margin-top:auto;justify-content:flex-start}
+.p9-draft-control{margin:18px 0 12px;padding:14px;border:1px solid #ecd4e1;border-radius:14px;background:#fffafd;display:flex;align-items:center;gap:10px}
+.p9-task-status-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.p9-award-inline,.p9-task-status-row .p8-award-state{display:inline-flex;align-items:center;border:1px solid #edd1e0;border-radius:99px;padding:8px 12px;margin:0!important;background:#fff6fb;font-size:.83rem;max-width:100%}
+.p9-adventure-columns{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.p9-adventure-column{display:grid;gap:16px;align-content:start;min-width:0}
+.p9-adventure-column>.p2-card{height:auto!important;min-width:0}
+.p9-settings-profile,.p9-settings-appearance,.p9-backup-panel{grid-column:1/-1;min-width:0}
+.p9-profile-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;align-items:end;gap:12px}
+.p9-profile-layout .field{min-width:0}.p9-profile-layout input,.p9-profile-layout select{width:100%;min-width:0}
+.p9-click-sound{border:none!important;background:transparent!important;padding:6px 0!important;display:flex;flex-direction:column;gap:8px}
+.p9-backup-panel .panel-head{margin-bottom:12px}
+.p9-cloud-login{display:grid;gap:12px}.p9-email-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}
+.p9-email-row .field{min-width:0}.p9-email-row input{width:100%;min-width:0}.p9-advanced-login{border-top:1px solid #ead4df;padding-top:12px}.p9-advanced-login summary{cursor:pointer;font-weight:700}.p9-family-export{display:grid;gap:10px;margin-top:15px;padding:15px;background:#fff8fc;border:1px solid #edd3e0;border-radius:14px}.p9-family-export h4{margin:0}
+@media(max-width:720px){.p9-adventure-columns{grid-template-columns:minmax(0,1fr)}.p9-profile-layout,.p9-email-row{grid-template-columns:minmax(0,1fr)}.p9-ledger-row{flex-wrap:wrap}.p9-ledger-row .grow{flex:1 1 calc(100% - 60px)}.p9-ledger-row button{margin-left:46px}.p9-advanced-login .p2-actions{display:flex;flex-wrap:wrap}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style>${p9CSS}</style>`);
+p9ReadBootstrap();
+window.addEventListener('load',()=>{if(/[?&]oobCode=/.test(location.search))p9HandleEmailLink();});
+
 initialize();
 
 </script>
