@@ -68,7 +68,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media print{body{background:white;color:#222}.sidebar,.topbar,.btn,.no-print{display:none!important}.shell{display:block;padding:0}.main{padding:0}.panel{border:0;box-shadow:none}.voucher-sheet{page-break-inside:avoid;border:2px dashed #c9a0ba;border-radius:18px;padding:36px;text-align:center;max-width:165mm;margin:auto}}
 
 </style>
-<script id="p9-cloud-bootstrap" type="application/json">{"config":{"apiKey":"AIzaSyDixb-NvSUB6W7f5Qa1LKdWyzkJ-DfCXAs","authDomain":"my-little-star-garden.firebaseapp.com","projectId":"my-little-star-garden","storageBucket":"my-little-star-garden.firebasestorage.app","messagingSenderId":"674019445550","appId":"1:674019445550:web:87894a016e45c7cb1508bf"},"familyId":"8eh6P1jH48dUWGHAl9pdCeo2tfN2"}</script>
 </head>
 <body>
   <div id="app"><main class="loading-scene"><div class="loading-flower" aria-hidden="true">🌸</div><h1>My Little Star Garden</h1><p>Opening your little world…</p></main></div>
@@ -6114,6 +6113,293 @@ const pcStyle=`
 @media(max-width:680px){.pc-dashboard-sync-notice{padding:13px}.pc-manual-used-form{padding:12px}.pc-family-gateway{padding:20px}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${PC_BUILD_ID}">${pcStyle}</style>`);
+
+/* ===== My Little Star Garden · Family identities + landscape day card refinement ===== */
+const p10BuildVersion='Family Sync · Linked Guardians + Landscape Cards';
+
+// Rule amounts are independent, no cross-field or relative limit. Browser-level
+// validation is only applied to each numeric field's own allowed range.
+const p10PriorRuleEditor=p2RuleEditor;
+p2RuleEditor=function(){
+ const root=document.createElement('div');root.innerHTML=p10PriorRuleEditor();
+ const form=root.querySelector('#p2-rule-form');if(!form)return root.innerHTML;
+ const deduction=form.querySelector('[name="stars"]'),earn=form.querySelector('[name="earnStars"]');
+ if(deduction){deduction.min='1';deduction.max='20';deduction.removeAttribute('data-equals-earned');}
+ if(earn){earn.min='0';earn.max='40';}
+ const oldHint=form.querySelector('.pb-rule-independent');
+ if(oldHint)oldHint.textContent='Independent amounts: deductions may be higher than stars earned (for example, 8 deducted and 2 earned). No stars are deducted automatically.';
+ return root.innerHTML;
+};
+// Route the save through a single canonical handler, rather than through
+// historical wrappers with competing field-dependent defaults.
+// Preserve every existing optional rule field, ID, dates, icon and creator.
+p2SaveRule=async function(form){
+ if(!safeGuardian())throw Error('Unlock Guardian Mode before saving a rule.');
+ const fd=new FormData(form),id=String(fd.get('editId')||''),old=id?p2Rule(id):null;
+ const name=String(fd.get('name')||'').trim(),expected=String(fd.get('expected')||'').trim();
+ const stars=Number(fd.get('stars')),earnStars=Number(fd.get('earnStars')),dailyMax=Number(fd.get('dailyMax'));
+ const consequence=String(fd.get('consequence')||'none');
+ if(!name||name.length>90||!expected||expected.length>400)throw Error('Enter a rule name and expected behavior.');
+ if(!Number.isSafeInteger(stars)||stars<1||stars>20)throw Error('Choose between 1 and 20 stars to deduct. This is independent of the stars earned.');
+ if(!Number.isSafeInteger(earnStars)||earnStars<0||earnStars>40)throw Error('Choose between 0 and 40 positive stars. It may be lower than the deduction.');
+ if(!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000)throw Error('Choose a valid maximum deductions per day (zero means no daily cap).');
+ if(!['none','reminder','repair','deduction'].includes(consequence))throw Error('Choose a valid default consequence.');
+ const existing=old||{},actor=state.p64CurrentGuardian||'owner';
+ const row={...existing,id:old?.id||uniqueId(),name,expected,
+  icon:p2Icon(fd.get('icon')||old?.icon||'🛡️'),
+  why:String(fd.get('why')||'').trim().slice(0,400),
+  reminder:String(fd.get('reminder')||'').trim().slice(0,400),
+  repair:String(fd.get('repair')||'').trim().slice(0,400),
+  consequence,stars,earnStars,dailyMax,
+  archived:Boolean(old?.archived),
+  createdAt:old?.createdAt||iso(),updatedAt:iso(),
+  createdByGuardianId:old?.createdByGuardianId||(old?'':actor),updatedByGuardianId:actor,
+  childFriendly:String(fd.has('childFriendly')?fd.get('childFriendly'):old?.childFriendly||'').trim().slice(0,300),
+  showToChild:fd.has('showToChild'),incidentChildVisible:fd.has('incidentChildVisible')
+ };
+ const visibility=form.querySelector('[name="showChild"]');
+ if(visibility)row.showChild=Boolean(visibility.checked);
+ const practice=form.querySelector('[name="showPractice"]');
+ if(practice)row.showPractice=Boolean(practice.checked);
+ // Preserve all other visibility flags when old field layouts differ.
+ await put('rules',row);await refresh();state.guardianTab='manage';state.p2ManageTab='rules';
+ notice(`Rule “${row.name}” saved. Deduction ${stars} ⭐; followed award ${earnStars} ⭐.`);
+};
+
+// ------ Landscape 16:9 daily celebration PNG with genuine daily details ------
+const p10PreviousSnapshot=p8DailySnapshot;
+p8DailySnapshot=function(day=p8Today()){
+ const base=p10PreviousSnapshot(day);
+ const eligible=(state.p2Completions||[]).filter(c=>c.date===day&&!c.correctedAt);
+ const groups=new Map();
+ for(const c of eligible){
+  const id=c.taskId||c.taskName;if(!id)continue;
+  const current=groups.get(id)||{id,name:c.taskName||p2Task(c.taskId)?.name||'Quest',icon:p2Task(c.taskId)?.icon||'📖',count:0,stars:0};
+  current.count++;current.stars+=Math.max(0,Number(c.starsAwarded)||0);groups.set(id,current);
+ }
+ const topQuests=[...groups.values()].sort((a,b)=>b.stars-a.stars||b.count-a.count||a.name.localeCompare(b.name)).slice(0,3);
+ const topRules=(state.p2Rules||[]).filter(r=>!r.archived&&p41RuleFollowed(r.id,day)).slice(0,3)
+  .map(r=>({name:r.childFriendly||r.name,icon:r.icon||'🌷',stars:Number(r.earnStars||0)}));
+ const txs=(state.summary?.transactions||[]).filter(t=>p64DateOfStamp(t.createdAt||'')===day&&!t.reversedAt&&t.amount>0&&['welcome','bonus','task','challenge','rule-earned'].includes(t.type));
+ const stars=txs.reduce((n,t)=>n+Number(t.amount||0),0);
+ return {...base,stars,topQuests,topRules,completedTasks:groups.size,followedRules:(state.p2Rules||[]).filter(r=>!r.archived&&p41RuleFollowed(r.id,day)).length};
+};
+function p10RoundRect(ctx,x,y,w,h,r,fill,stroke){ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.stroke();}}
+function p10TextLine(ctx,raw,x,y,maxWidth,lineHeight=36,maxLines=2){
+ const words=String(raw||'').replace(/\s+/g,' ').trim().split(' '),lines=[];let line='';
+ for(const word of words){const next=line?line+' '+word:word;
+  if(ctx.measureText(next).width>maxWidth&&line){lines.push(line);line=word;}else line=next;}
+ if(line)lines.push(line);
+ for(let i=0;i<Math.min(maxLines,lines.length);i++){
+  let lineText=lines[i];if(i===maxLines-1&&lines.length>maxLines){while(ctx.measureText(lineText+'…').width>maxWidth&&lineText.length>1)lineText=lineText.slice(0,-1);lineText+='…';}
+  ctx.fillText(lineText,x,y+i*lineHeight);
+ }
+ return Math.min(maxLines,lines.length);
+}
+function p10ShareMessage(){return String(document.querySelector('[name="p10DailyMessage"]')?.value||'').trim().slice(0,150);}
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=900;const ctx=canvas.getContext('2d');if(!ctx)throw Error('This browser cannot create PNG images.');
+ const gradient=ctx.createLinearGradient(0,0,1600,900);gradient.addColorStop(0,'#fff7fa');gradient.addColorStop(.55,'#fff1f7');gradient.addColorStop(1,'#e7effe');ctx.fillStyle=gradient;ctx.fillRect(0,0,1600,900);
+ // Original, simple decorative stars, garlands and flower motifs: no external imagery.
+ const doodles=[['✦',65,110],['✿',1450,145],['✧',1520,650],['✦',94,747],['✿',1390,812]];
+ ctx.textAlign='center';ctx.fillStyle='#eab6ce';for(const [glyph,x,y] of doodles){ctx.font='64px serif';ctx.fillText(glyph,x,y);}
+ p10RoundRect(ctx,44,38,1512,824,42,'#ffffffea','#e7bed3');
+ ctx.textAlign='left';ctx.fillStyle='#aa6488';ctx.font='800 25px system-ui';ctx.fillText('MY LITTLE STAR GARDEN  ✦  DAILY ADVENTURES',95,99);
+ const dateLabel=new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+ ctx.fillStyle='#765168';ctx.font='31px system-ui';ctx.textAlign='right';ctx.fillText(dateLabel,1495,99);
+ ctx.textAlign='left';ctx.fillStyle='#673d58';ctx.font='800 49px system-ui';
+ p10TextLine(ctx,`${String(snapshot.nickname||'Little Star').slice(0,25)}'s Little Victories`,100,173,1420,60,1);
+ // Featured stars earned today.
+ p10RoundRect(ctx,95,207,420,468,30,'#f8e1ee');ctx.textAlign='center';ctx.font='104px serif';ctx.fillText('⭐',305,326);
+ ctx.fillStyle='#823f66';ctx.font='800 113px system-ui';ctx.fillText(String(snapshot.stars),305,457);
+ ctx.font='700 29px system-ui';ctx.fillText('STARS EARNED TODAY',305,508);
+ ctx.font='24px system-ui';ctx.fillStyle='#986f88';ctx.fillText(`${snapshot.completedTasks} quests · ${snapshot.followedRules} rules`,305,570);
+ ctx.font='68px serif';ctx.fillText('🌷 ✨ 🎀',305,636);
+ // Two independently arranged lists; status matters more than exact ranking.
+ const rightX=549,rightW=943,sectionH=210;
+ function listSection(title,rows,y,empty){
+  p10RoundRect(ctx,rightX,y,rightW,sectionH,24,'#fffafdf9','#eddae4');
+  ctx.textAlign='left';ctx.fillStyle='#934f75';ctx.font='800 27px system-ui';ctx.fillText(title,rightX+28,y+43);
+  if(!rows.length){ctx.font='26px system-ui';ctx.fillStyle='#967a8b';ctx.fillText(empty,rightX+32,y+112);return;}
+  const colW=rightW/3-30;
+  rows.slice(0,3).forEach((row,i)=>{const x=rightX+26+i*(rightW/3);p10RoundRect(ctx,x,y+59,colW,135,18,'#fff0f6');
+   ctx.textAlign='left';ctx.fillStyle='#743d5a';ctx.font='35px serif';ctx.fillText(row.icon||'⭐',x+14,y+101);
+   ctx.font='700 21px system-ui';p10TextLine(ctx,row.name,x+62,y+96,colW-76,26,3);
+  });
+ }
+ listSection('📖  TOP QUESTS COMPLETED',snapshot.topQuests||[],207,'A new quest adventure is waiting!');
+ listSection('🌼  RULES FOLLOWED',snapshot.topRules||[],446,'Little victories can be celebrated every day!');
+ const written=String(message||'').trim().slice(0,150)||'Every little star is a reason to celebrate!';
+ p10RoundRect(ctx,95,697,1397,100,24,'#fff0f7');ctx.fillStyle='#874b6b';ctx.textAlign='left';ctx.font='italic 700 28px system-ui';
+ p10TextLine(ctx,'💌 '+written,125,741,1320,33,2);
+ ctx.textAlign='right';ctx.fillStyle='#a27891';ctx.font='19px system-ui';ctx.fillText(`Shared with love · Guardian ${String(guardianName||'approved').slice(0,38)}`,1490,831);
+ return canvas;
+};
+// Both child/PIN and guardian/already-unlocked use the same message field.
+const p10PriorDailyModal=p8DailyModal;
+p8DailyModal=function(){const html=p10PriorDailyModal();if(!html||!state.p8DailyShareOpen)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const actions=root.querySelector('.p8-daily-summary')||root.querySelector('.p2-actions');
+ const field=document.createElement('label');field.className='field p10-share-message';
+ field.innerHTML='<strong>Optional message for your family 💌</strong><textarea name="p10DailyMessage" maxlength="150" rows="2" placeholder="You can write a happy little message here!"></textarea><span class="field-help">Appears on the PNG card. Leave blank for a cheerful default.</span>';
+ if(root.querySelector('form#p8-daily-share-form'))root.querySelector('form#p8-daily-share-form .p2-actions')?.before(field);
+ else actions?.before(field);
+ root.querySelector('h2')?.insertAdjacentHTML('afterend','<p class="p10-share-format">Landscape PNG · top three quests · rules followed · stars earned</p>');
+ return root.innerHTML;
+};
+
+// ------ Cloud account ↔ local Guardian identity (owner-controlled) ------
+state.p10MemberMappings=[];
+state.p10MappingsReady=false;
+function p10ProfileChoices(){return [{id:'owner',name:state.settings?.ownerGuardianName||'Primary Guardian',icon:state.settings?.ownerGuardianIcon||'🔑'},
+ ...((state.p64Profiles||[]).map(g=>({id:g.id,name:g.name,icon:g.icon||'💗'})))];}
+function p10LinkedName(id){const entry=p10ProfileChoices().find(p=>p.id===id);return entry?`${entry.icon} ${entry.name}`:id?'Profile not present on this device':'Not linked';}
+function p10ValidProfileId(profileId){return p10ProfileChoices().some(p=>p.id===profileId);}
+async function p10LoadMappings(){const c=state.p8Cloud;
+ if(!c?.user||c.role!=='owner'||!c.family)return;
+ const results=await p8FamilyRef().collection('members').get({source:'server'});
+ state.p10MemberMappings=results.docs.map(d=>({uid:d.id,...d.data()}));state.p10MappingsReady=true;
+}
+const p10PriorFamilyCheck=p8FamilyCheck;
+p8FamilyCheck=async function(){await p10PriorFamilyCheck();const c=state.p8Cloud;
+ if(!c.user||!c.family)return;
+ if(c.user.uid===c.family.ownerUid)c.profileId='owner';
+ else{
+  const doc=await p8FamilyRef().collection('members').doc(c.user.uid).get({source:'server'});
+  const profileId=doc.data()?.profileId||'';
+  c.profileId=profileId==='owner'?'':profileId;
+ }
+ if(c.role==='owner'){try{await p10LoadMappings();}catch(e){state.p10MappingsReady=false;p8CloudStatus(`Connected, but account links could not be loaded: ${e.message}`,true);}}
+ if(!c.profileId)p8CloudStatus('This Firebase account is authorized but not yet linked to a Guardian profile. Ask the family owner to assign one.',true);
+};
+const p10PriorInvite=p8CloudInviteMember;
+p8CloudInviteMember=async function(uid,role){
+ const c=await p8CloudSignedIn();if(c.role!=='owner'||c.family?.ownerUid!==c.user.uid)throw Error('Only the family owner can link Firebase accounts.');
+ const selected=document.querySelector('#p8-cloud-invite-form [name="p10ProfileId"]')?.value||'';
+ if(!selected||selected==='owner'||!p10ValidProfileId(selected))throw Error('Choose an existing non-owner Guardian profile first. You can create Mom or Dad under Manage Guardian Profiles.');
+ if(state.p10MemberMappings.some(m=>m.uid!==uid&&m.profileId===selected))throw Error('This Guardian profile is already linked to another Firebase account. Choose a different profile.');
+ if(!/^[a-zA-Z0-9_-]{10,128}$/.test(uid)||uid===c.user.uid)throw Error('Enter a valid Firebase UID for another account.');
+ if(!['guardian','viewer'].includes(role))throw Error('Choose a valid cloud role.');
+ await p8FamilyRef().collection('members').doc(uid).set({role,profileId:selected,addedBy:c.user.uid,addedAt:window.firebase.firestore.FieldValue.serverTimestamp()});
+ await p10LoadMappings();p8CloudStatus(`Linked Firebase account ${uid.slice(0,10)}… to ${p10LinkedName(selected)}. The account can now sign in as its own Guardian identity.`);
+};
+async function p10SaveProfileLink(uid,profileId){
+ const c=await p8CloudSignedIn();if(c.role!=='owner'||c.family?.ownerUid!==c.user.uid||!safeGuardian())throw Error('Only a signed-in family owner in Guardian Mode can change account links.');
+ if(!p10ValidProfileId(profileId)||profileId==='owner')throw Error('Choose an existing non-owner Guardian profile.');
+ if(state.p10MemberMappings.some(m=>m.uid!==uid&&m.profileId===profileId))throw Error('Another account already uses this Guardian profile.');
+ const member=state.p10MemberMappings.find(m=>m.uid===uid);if(!member)throw Error('Authorized account not found.');
+ await p8FamilyRef().collection('members').doc(uid).update({profileId});await p10LoadMappings();
+ p8CloudStatus(`Account linked to ${p10LinkedName(profileId)}. It will use this identity after signing in and syncing.`);render();
+}
+function p10ProfileSelect(selected,{excludeOwner=true}={}){
+ return `<select name="p10ProfileId" aria-label="Linked Guardian profile"><option value="">Select Guardian profile…</option>${p10ProfileChoices().filter(p=>!excludeOwner||p.id!=='owner').map(p=>`<option value="${esc(p.id)}" ${p.id===selected?'selected':''}>${esc(p.icon+' '+p.name)}</option>`).join('')}</select>`;
+}
+const p10PriorCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p10PriorCloudPage();
+ const c=state.p8Cloud;
+ const status=root.querySelector('.p8-cloud-alert')||root.querySelector('.pa-sticky-cloud-status');
+ if(c.user&&c.family){const row=document.createElement('p');row.className='p10-cloud-link-banner';
+  row.innerHTML=`<strong>Signed in as ${esc(c.user.email||'Firebase account')}</strong> · In-app Guardian: <strong>${esc(p10LinkedName(c.profileId||''))}</strong>${!c.profileId?' · Ask the owner to assign this account to a profile.':''}`;
+  status?.append(row);
+ }
+ if(c.role==='owner'&&c.family){
+  const invite=root.querySelector('#p8-cloud-invite-form');if(invite){const label=document.createElement('label');label.className='field';label.innerHTML=`Guardian profile for this account ${p10ProfileSelect('')}`;invite.querySelector('button[type=submit]')?.before(label);}
+  const panel=document.createElement('section');panel.className='panel p10-cloud-links';
+  panel.innerHTML=`<div class="p2-row"><div><h3>👨‍👩‍👧 Linked Guardian Accounts</h3><p class="p2-muted">Owner-controlled: assign each authorized Firebase UID to one Guardian profile. The original owner stays Primary Guardian.</p></div><button type="button" class="btn btn-soft" data-p10-action="refresh-links">Refresh</button></div>
+  ${!state.p64Profiles?.length?'<p class="p2-note">Create Mom and Dad in Settings → Manage Guardian Profiles, then upload the latest family setup before linking their accounts.</p>':''}
+  <div class="p10-account-links">${state.p10MemberMappings.length?state.p10MemberMappings.map(m=>`<div class="p10-account-link"><div class="grow"><strong>${esc(m.uid)}</strong><p class="p2-muted">${esc(m.role)} · ${esc(p10LinkedName(m.profileId||''))}</p></div>${p10ProfileSelect(m.profileId||'')}<button type="button" class="btn btn-soft" data-p10-action="save-link" data-uid="${esc(m.uid)}">Save Link</button></div>`).join(''):'<p class="p2-muted">No other authorized family accounts yet.</p>'}</div>`;
+  const sections=[...root.querySelectorAll('section.panel')];const family=sections.find(el=>el.querySelector('#p8-cloud-family-form'));
+  if(family)family.after(panel);else root.append(panel);
+ }
+ return root.innerHTML;
+};
+// Link the newly restored browser's original PIN to the mapped in-app person;
+// never package this binding in the shared JSON snapshot.
+const p10PriorFirstRestore=pcFamilyFirstRestore;
+pcFamilyFirstRestore=async function(){
+ const c=state.p8Cloud;if(!c.profileId)throw Error('Your Firebase account is not linked to a Guardian profile. Ask the family owner to link it before loading the garden.');
+ const preflight=await p8CloudFetchSnapshot();
+ if(c.profileId!=='owner'&&preflight.snapshot&&!preflight.snapshot.data.records.some(r=>r.key==='p64-guardian:'+c.profileId))throw Error('The linked Guardian profile is missing from the family cloud snapshot. Ask the owner to sync their latest Guardian profiles first. No local data was changed.');
+ await p10PriorFirstRestore();
+ if(state.view==='restore-pin'||state.view==='child'){
+  if(c.profileId!=='owner'&&!p10ValidProfileId(c.profileId))throw Error('The linked Guardian profile was not found in the downloaded family data. Ask the owner to sync the Guardian profiles first.');
+  await put('auth',{key:'p10-cloud-local-identity',projectId:c.config.projectId,familyId:c.familyId,uid:c.user.uid,profileId:c.profileId,linkedAt:iso()});
+ }
+};
+const p10PriorVerifyPin=verifyPin;
+verifyPin=async function(pin){const result=await p10PriorVerifyPin(pin);
+ if(!result.ok||state.p64CurrentGuardian!=='owner')return result;
+ const link=await get('auth','p10-cloud-local-identity');if(!link||!link.profileId||link.profileId==='owner')return result;
+ const c=state.p8Cloud;
+ // Offline sign-in may use its locally linked identity. A *different* cloud
+ // account cannot silently take over the stored person's PIN attribution.
+ if(c?.user&&c.user.uid!==link.uid)return {...result,warning:'This browser PIN is bound to another Firebase Guardian; sync is unavailable until the accounts match.'};
+ if(!p10ValidProfileId(link.profileId))return result;
+ state.p64CurrentGuardian=link.profileId;
+ const profile=p10ProfileChoices().find(p=>p.id===link.profileId);
+ return {...result,guardianId:link.profileId,guardianName:profile?.name||'Guardian'};
+};
+async function p10CloudIdentityCheck(){const c=state.p8Cloud;
+ if(c?.role==='guardian'&&!c.profileId)throw Error('Ask the family owner to link your Firebase account to a Guardian profile before syncing.');
+ const link=await get('auth','p10-cloud-local-identity');
+ if(c?.role==='guardian'&&await hasPin()&&(!link||link.uid!==c.user?.uid||link.profileId!==c.profileId))throw Error('This browser’s original PIN is not yet linked to this Firebase Guardian profile. Open Family Sync and use “Link My Local PIN” before syncing. No progress was overwritten.');
+ if(link&&c?.user&&link.uid!==c.user.uid)throw Error('This device’s PIN is linked to a different Firebase Guardian account. Sign in with the correct email; no changes were uploaded.');
+}
+const p10PriorCloudSync=p8CloudSyncNow;
+p8CloudSyncNow=async function(){await p10CloudIdentityCheck();return p10PriorCloudSync();};
+const p10PriorCloudUpload=p8CloudUpload;
+p8CloudUpload=async function(...args){await p10CloudIdentityCheck();return p10PriorCloudUpload(...args);};
+const p10PriorCloudDownload=p8CloudDownload;
+p8CloudDownload=async function(...args){await p10CloudIdentityCheck();return p10PriorCloudDownload(...args);};
+// Existing devices may have configured their original PIN as owner. Allow an
+// explicit authenticated migration of that local PIN, not a silent takeover.
+async function p10BindThisDevice(pin){
+ if(!safeGuardian())throw Error('Unlock Guardian Mode before changing a local PIN binding.');
+ const c=await p8CloudSignedIn();
+ if(!c.profileId||!p10ValidProfileId(c.profileId))throw Error('Ask the family owner to link this Firebase UID to a Guardian profile first.');
+ const raw=await get('auth','guardian');if(!raw)throw Error('This browser has no original Guardian PIN.');
+ if(!isPin(pin)||!constantTimeSame(await digest(pin,unbase64(raw.pinSalt)),raw.pinHash))throw Error('Incorrect original Guardian PIN. The account was not linked.');
+ if(!confirm(`Link THIS browser's original PIN to ${p10LinkedName(c.profileId)}? This changes the identity recorded for future actions on this browser, without changing the PIN itself.`))return;
+ await put('auth',{key:'p10-cloud-local-identity',projectId:c.config.projectId,familyId:c.familyId,uid:c.user.uid,profileId:c.profileId,linkedAt:iso()});
+ p8CloudStatus(`This browser's PIN is now linked to ${p10LinkedName(c.profileId)}. Lock and unlock to activate the identity.`);render();
+}
+const p10PriorCloudPageBind=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p10PriorCloudPageBind();
+ const c=state.p8Cloud;
+ if(c.user&&c.family&&c.profileId&&safeGuardian()){
+  const panel=document.createElement('section');panel.className='panel';panel.innerHTML=`<h3>🔐 Match This Device's PIN</h3><p class="p2-muted">For a browser that already had an original Guardian PIN before profile linking, you can explicitly associate that PIN with ${esc(p10LinkedName(c.profileId))}. New family devices are linked automatically after their first cloud restore. This does not change the PIN or cloud permissions.</p><form class="p10-local-binding-form" id="p10-link-local-form"><label>Original six-digit Guardian PIN<input type="password" name="pin" minlength="6" maxlength="6" inputmode="numeric" autocomplete="off" required></label><button type="submit" class="btn btn-soft">Link My Local PIN</button></form>`;
+  root.append(panel);
+ }
+ return root.innerHTML;
+};
+app.addEventListener('click',async event=>{const b=event.target.closest('[data-p10-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ try{
+  if(!safeGuardian())throw Error('Unlock Guardian Mode first.');
+  if(b.dataset.p10Action==='refresh-links'){await p10LoadMappings();render();return;}
+  if(b.dataset.p10Action==='save-link'){
+   const item=b.closest('.p10-account-link'),profileId=item?.querySelector('select[name="p10ProfileId"]')?.value||'';
+   await p10SaveProfileLink(b.dataset.uid,profileId);return;
+  }
+ }catch(err){p8CloudStatus(err.message||'Could not link account.',true);render();}
+},true);
+app.addEventListener('submit',async event=>{if(event.target.id!=='p10-link-local-form')return;
+ event.preventDefault();event.stopImmediatePropagation();
+ try{await p10BindThisDevice(String(new FormData(event.target).get('pin')||''));}
+ catch(err){p8CloudStatus(err.message||'Could not link local PIN.',true);render();}
+},true);
+
+const p10Styles=`
+.p10-share-message{display:grid;gap:7px;margin:12px 0 16px}.p10-share-message textarea{width:100%;min-height:65px;min-width:0}
+.p10-share-format{font-size:.86rem;color:#98778a}
+.p10-cloud-link-banner{padding:12px 14px;border-radius:13px;background:#eff8f2;border:1px solid #cee6d2;color:#456b54;line-height:1.5;overflow-wrap:anywhere}
+.p10-cloud-links .p2-row{gap:14px;flex-wrap:wrap}
+.p10-account-links{display:grid;gap:10px;margin-top:15px}.p10-account-link{display:flex;gap:12px;align-items:center;border:1px solid #ecd6e2;border-radius:15px;padding:13px;min-width:0;flex-wrap:wrap}
+.p10-account-link .grow{min-width:180px;flex:1 1 280px;overflow-wrap:anywhere}.p10-account-link .grow strong{word-break:break-all;font-size:.83rem}
+.p10-account-link select{width:min(100%,250px);min-width:0;flex:0 1 250px}.p10-local-binding-form{display:flex;flex-wrap:wrap;gap:12px;align-items:end}.p10-local-binding-form label{display:grid;gap:6px;flex:1 1 210px}.p10-local-binding-form input{width:100%}
+@media(max-width:640px){.p10-account-link{display:grid}.p10-account-link select,.p10-account-link .btn{width:100%;max-width:none}.p10-local-binding-form .btn{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p10-refinement">${p10Styles}</style>`);
 
 initialize();
 
