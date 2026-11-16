@@ -68,7 +68,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media print{body{background:white;color:#222}.sidebar,.topbar,.btn,.no-print{display:none!important}.shell{display:block;padding:0}.main{padding:0}.panel{border:0;box-shadow:none}.voucher-sheet{page-break-inside:avoid;border:2px dashed #c9a0ba;border-radius:18px;padding:36px;text-align:center;max-width:165mm;margin:auto}}
 
 </style>
-<script id="p9-cloud-bootstrap" type="application/json">{"config":{"apiKey":"AIzaSyDixb-NvSUB6W7f5Qa1LKdWyzkJ-DfCXAs","authDomain":"my-little-star-garden.firebaseapp.com","projectId":"my-little-star-garden","storageBucket":"my-little-star-garden.firebasestorage.app","messagingSenderId":"674019445550","appId":"1:674019445550:web:87894a016e45c7cb1508bf"},"familyId":"8eh6P1jH48dUWGHAl9pdCeo2tfN2"}</script>
 </head>
 <body>
   <div id="app"><main class="loading-scene"><div class="loading-flower" aria-hidden="true">🌸</div><h1>My Little Star Garden</h1><p>Opening your little world…</p></main></div>
@@ -5656,6 +5655,464 @@ document.head.insertAdjacentHTML('beforeend',`<style id="${PA_BUILD_ID}">${paCSS
 // Apply the preconfigured family settings after all declarations are ready.
 // Initialization must proceed even if localStorage is blocked.
 try{p9ReadBootstrap();}catch(error){console.warn('Cloud bootstrap skipped; launching Offline Only.',error);}
+
+/* ==============================================================
+ * My Little Star Garden — Family Sync Pass B
+ * Small UI and wishlist-cap improvements; preserves existing data.
+ * ============================================================ */
+const PB_BUILD_ID='mlsg-family-pass-b-20261116';
+
+// Onboarding: restoration is a first-class path, before new setup begins.
+const pbPriorWelcome=welcome;
+welcome=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorWelcome();
+ const card=root.querySelector('.welcome-card');
+ const restore=[...card?.querySelectorAll('.row.spread')||[]].find(e=>(e.textContent||'').includes('Already have a Star Garden?'));
+ if(card&&restore){
+  restore.remove();restore.classList.add('pb-restore-first');
+  card.prepend(restore);
+  restore.insertAdjacentHTML('afterend','<div class="pb-or-divider" aria-label="or create a new garden"><span>OR</span></div>');
+  const sep=card.querySelector('hr.sep');if(sep)sep.remove();
+ }
+ return root.innerHTML;
+};
+
+// Shop: one wallet summary above, and separate from, the reward catalog.
+const pbPriorShop=childShop;
+childShop=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorShop();
+ if(state.p4SelectedRewardId||state.p64WishOpen)return root.innerHTML;
+ const label=[...root.querySelectorAll('.panel-head')].find(e=>e.querySelector('h3')?.textContent.trim()==='My Star Wallet');
+ const panel=label?.closest('section.panel');
+ if(panel){
+  label.remove();
+  const wallet=document.createElement('section');wallet.className='panel panel-subtle pb-shop-wallet';
+  wallet.innerHTML=`<p class="eyebrow">My Star Wallet</p><div class="big-number">⭐ ${money(state.summary.wallet)}</div><p class="muted sm">Stars saved for future rewards</p>`;
+  panel.before(wallet);panel.classList.add('pb-reward-catalog');
+  const grid=panel.querySelector('.p4-shop-grid');if(grid)grid.style.marginTop='0';
+ }
+ return root.innerHTML;
+};
+
+// Three NEW wishes per Manila calendar day. Edits retain their original wish
+// ID/date and never consume a second slot; converting/declining still counts.
+const pbWishDay=w=>{try{return dateStamp(new Date(w.createdAt));}catch(e){return ''}};
+const pbWishCountForDay=(day=p2Date())=>state.p64Wishes.filter(w=>w.createdAt&&pbWishDay(w)===day).length;
+const pbPriorWishPage=p64WishPage;
+p64WishPage=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorWishPage();
+ const form=root.querySelector('#p64-wish-form');
+ if(form){
+  const editing=Boolean(form.querySelector('[name="editId"]')?.value);
+  const count=pbWishCountForDay(),remaining=Math.max(0,3-count);
+  const hint=document.createElement('p');hint.className='pb-wish-limit p2-note';hint.setAttribute('role','status');
+  hint.textContent=editing?`Editing this wish does not use another daily wish slot. ${remaining} of 3 new wishes remaining today.`:remaining?`${count} of 3 wishes added today · ${remaining} more ${remaining===1?'wish':'wishes'} available.`:'All 3 wishes for today have been added. You can still edit your existing wishes, or make another wish tomorrow.';
+  const submit=form.querySelector('[type="submit"]');if(submit){submit.before(hint);if(!editing&&!remaining){submit.disabled=true;submit.setAttribute('aria-disabled','true');}}
+ }
+ return root.innerHTML;
+};
+const pbPriorWishSave=p64SaveWish;
+p64SaveWish=async function(form){
+ const fd=new FormData(form),editing=Boolean(String(fd.get('editId')||''));
+ if(!editing){
+  // Read storage, not just a stale page snapshot, for the authoritative cap.
+  const rows=(await getAll('records')).filter(r=>r.key?.startsWith('p64-wish:'));
+  const created=rows.filter(w=>w.createdAt&&pbWishDay(w)===p2Date()).length;
+  if(created>=3)throw new Error('You have already added three wishes today. You can edit a wish or add another tomorrow.');
+ }
+ return pbPriorWishSave(form);
+};
+
+// Keep the homepage lightweight; remove the old explanatory filler beneath
+// Share My Day, without changing Guardian approval or share actions.
+const pbPriorChildHome=childHome;
+childHome=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorChildHome();
+ root.querySelectorAll('.p8-daily-actions span,.p8-daily-actions p').forEach(el=>{
+  if(/A cheerful progress card for family/i.test(el.textContent||''))el.remove();
+ });
+ return root.innerHTML;
+};
+
+// The daily sharing button is inserted by the outer Child renderer after
+// childHome(), so remove its stale helper copy at the final rendering layer.
+const pbPriorChildRenderer=child;
+child=function(){
+ const html=pbPriorChildRenderer();
+ if(state.view!=='child'||state.childTab!=='home')return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ root.querySelectorAll('.p8-daily-actions span,.p8-daily-actions p').forEach(el=>{
+  if(/A cheerful progress card for family/i.test(el.textContent||''))el.remove();
+ });
+ return root.innerHTML;
+};
+
+// The Guardian session is already represented by the signed-in name in the
+// header. Remove the old duplicative Unlocked pill, not milestone status.
+const pbPriorGuardianDashboard=guardianDashboard;
+guardianDashboard=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorGuardianDashboard();
+ root.querySelectorAll('.guardian-heading > .chip.good').forEach(el=>{
+  if(/Unlocked/i.test(el.textContent||''))el.remove();
+ });
+ return root.innerHTML;
+};
+
+// Make rule values explicitly independent, while preserving the existing
+// validation and transaction safeguards. A 4-star deduction vs. 2-star
+// positive award is valid and remains entirely guardian-controlled.
+const pbPriorRuleEditor=p2RuleEditor;
+p2RuleEditor=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorRuleEditor();
+ const form=root.querySelector('#p2-rule-form');
+ const deduct=form?.querySelector('input[name="stars"]');
+ const earned=form?.querySelector('input[name="earnStars"]');
+ if(deduct&&earned){
+  const hint=document.createElement('p');hint.className='field-help pb-rule-independent';
+  hint.textContent='Stars deducted and stars earned are separate values. The deduction may be greater (for example, −4 stars for an incident and +2 stars for a followed rule). No deduction happens automatically.';
+  deduct.closest('.field')?.append(hint);
+ }
+ return root.innerHTML;
+};
+
+// A real two-column Profile form on wide screens with the Save button in its
+// own final row. On mobile, inputs and button stack cleanly.
+const pbPriorSettings=guardianSettings;
+guardianSettings=function(){
+ const root=document.createElement('div');root.innerHTML=pbPriorSettings();
+ const form=root.querySelector('#profile-form');if(form)form.classList.add('pb-profile-form');
+ return root.innerHTML;
+};
+
+const pbStyles=`
+/* Family Sync Pass B: cohesive, compact, accessible forms */
+#setup-form .avatar-item{position:relative;display:inline-block;width:56px;height:56px;flex:0 0 56px}
+#setup-form .avatar-item input[type="radio"]{position:absolute!important;left:50%!important;top:50%!important;width:1px!important;height:1px!important;min-width:1px!important;min-height:1px!important;padding:0!important;margin:0!important;border:0!important;opacity:0!important}
+.pb-restore-first{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;width:100%;padding:5px 0 15px}
+.pb-restore-first label{flex:0 0 auto}
+.pb-or-divider{position:relative;display:flex;align-items:center;justify-content:center;gap:14px;margin:12px 0 22px;color:#99778c;font-size:.8rem;font-weight:900;letter-spacing:.13em}
+.pb-or-divider:before,.pb-or-divider:after{content:"";height:1px;min-width:0;flex:1;background:var(--line,#ead4df)}
+.pb-or-divider span{background:white;padding:0 8px}
+.pb-shop-wallet{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;width:100%;min-height:142px;padding:24px 28px}
+.pb-shop-wallet .eyebrow{margin:0}.pb-shop-wallet .big-number{margin:0;line-height:1.12}.pb-shop-wallet p:last-child{margin:0}
+.pb-reward-catalog{min-width:0}
+.pb-wish-limit{margin:4px 0 12px!important;line-height:1.5}
+#p2-rule-form .pb-rule-independent{margin:9px 0 0;line-height:1.5;max-width:580px}
+#profile-form.pa-profile-form.pb-profile-form{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:16px!important;align-items:start!important;width:100%!important;min-width:0}
+#profile-form.pa-profile-form.pb-profile-form .field{width:100%;min-width:0;max-width:none;align-self:start}
+#profile-form.pa-profile-form.pb-profile-form>button{grid-column:1 / -1!important;grid-row:auto!important;justify-self:end!important;align-self:end!important;min-width:185px;max-width:100%;width:auto!important;margin-top:2px}
+@media(max-width:700px){
+ .pb-restore-first{align-items:flex-start}
+ .pb-shop-wallet{padding:19px 20px;min-height:130px}
+ #profile-form.pa-profile-form.pb-profile-form{grid-template-columns:minmax(0,1fr)!important;gap:12px!important}
+ #profile-form.pa-profile-form.pb-profile-form>button{grid-column:1!important;justify-self:stretch!important;width:100%!important;min-width:0}
+}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${PB_BUILD_ID}">${pbStyles}</style>`);
+
+/* ================================================================
+   My Little Star Garden — Family Sync Pass C (2026-11-16)
+   Historical compatibility: keeps previous transaction schemas and
+   local/backup data intact. Family cloud remains revision-protected.
+   ================================================================ */
+const PC_BUILD_ID='mlsg-family-pass-c-20261116';
+
+/* 1) Incidents: suggested TOTAL is the sum of selected, deduction-enabled
+   rule values. It remains editable, single-incident and guardian-confirmed. */
+function pcIncidentSuggested(form){
+ const ids=[...new FormData(form).getAll('ruleIds')].map(String);
+ return ids.reduce((sum,id)=>{const r=p2Rule(id);return sum+(r&&!r.archived&&r.consequence==='deduction'?Math.max(0,Number(r.stars)||0):0);},0);
+}
+const pcPreviousIncidentPage=p2IncidentPage;
+p2IncidentPage=function(){
+ const root=document.createElement('div');root.innerHTML=pcPreviousIncidentPage();
+ const form=root.querySelector('#p2-incident-form'),field=form?.querySelector('input[name="deductionStars"]');
+ if(form&&field){
+  field.value=String(pcIncidentSuggested(form));field.setAttribute('value',field.value);field.max=String(Math.max(0,pcIncidentSuggested(form)));
+  field.dataset.suggested=field.value;
+  const helper=field.closest('.field')?.querySelector('.field-help');
+  if(helper)helper.textContent='Suggested total: sum of configured deductions for the selected rules. You may choose a smaller amount. This remains ONE incident and ONE manually confirmed deduction.';
+  field.setAttribute('aria-label','Total stars to deduct for this event');
+ }
+ return root.innerHTML;
+};
+app.addEventListener('change',event=>{
+ const form=event.target.closest('#p2-incident-form');
+ if(!form||!event.target.matches('[name="ruleIds"]'))return;
+ const field=form.querySelector('[name="deductionStars"]');if(!field)return;
+ const next=pcIncidentSuggested(form);
+ // Recalculate on selection. If the guardian subsequently types their own
+ // smaller value, the next rule-selection change starts a new suggestion.
+ field.value=String(next);field.dataset.suggested=String(next);field.max=String(next);
+ const hint=form.querySelector('.pc-incident-total-hint');if(hint)hint.textContent=`Configured rule total: ${next} ⭐ · One event, one deduction.`;
+},true);
+const pcPreviousIncidentSave=p2SaveIncident;
+p2SaveIncident=async function(form){
+ if(!safeGuardian())throw new Error('Unlock Guardian Mode to record an incident.');
+ const fd=new FormData(form),ids=[...new Set(fd.getAll('ruleIds').map(String))],rules=ids.map(id=>p2Rule(id));
+ const date=String(fd.get('date')||''),outcome=String(fd.get('outcome')||''),reason=String(fd.get('reason')||'').trim();
+ if(!ids.length||rules.some(r=>!r||r.archived))throw new Error('Select at least one active rule.');
+ if(!p2ValidDate(date)||date>p2Date())throw new Error('Choose a valid date, today or earlier.');
+ if(!['reminder','repair','deduction'].includes(outcome))throw new Error('Choose a valid outcome.');
+ if(reason.length<3||reason.length>400)throw new Error('Please include a short, factual explanation.');
+ if(!fd.has('reviewed'))throw new Error('Confirm that you reviewed the situation.');
+ let amount=0;
+ if(outcome==='deduction'){
+  const allowed=rules.filter(r=>r.consequence==='deduction');
+  if(!allowed.length)throw new Error('Selected rules do not allow deductions. Choose Reminder instead.');
+  const total=allowed.reduce((sum,r)=>sum+Math.max(0,Number(r.stars)||0),0);
+  amount=Number(fd.get('deductionStars'));
+  if(!Number.isSafeInteger(amount)||amount<1||amount>total)throw new Error(`Choose a deduction between 1 and ${total} stars (the total of the selected rules).`);
+  if(amount>state.summary.wallet)throw new Error('The wallet does not contain enough stars. Choose a smaller amount or record a reminder.');
+  for(const rule of allowed){
+   const count=state.p2Incidents.filter(i=>i.date===date&&!i.reversedAt&&i.starsDeducted>0&&(Array.isArray(i.ruleIds)?i.ruleIds.includes(rule.id):i.ruleId===rule.id)).length;
+   if(rule.dailyMax>0&&count>=rule.dailyMax)throw new Error(`The daily deduction cap for “${rule.name}” was reached. Record a reminder instead.`);
+  }
+  if(!confirm(`Deduct ${amount} stars ONCE for this one event, referencing ${ids.length} selected rule${ids.length===1?'':'s'}? The calculated maximum is ${total}.`))return null;
+ }
+ const stamp=iso(),id=uniqueId(),names=rules.map(r=>r.name),incident={id,ruleId:ids[0],ruleIds:ids,ruleName:names.join(' · '),ruleNames:names,date,outcome,reason,starsDeducted:amount,createdAt:stamp,guardianId:state.p64CurrentGuardian||'owner',showToChild:rules.some(r=>r.incidentChildVisible)};
+ await atomic(amount?['incidents','transactions']:['incidents'],tx=>{
+  tx.objectStore('incidents').add(incident);
+  if(amount)tx.objectStore('transactions').add({id:`deduction:${id}`,type:'deduction',amount:-amount,reason:`${names.join(' / ')}: ${reason.slice(0,160)}`,incidentId:id,createdAt:stamp,source:'guardian',guardianId:incident.guardianId});
+ });
+ return incident;
+};
+
+/* 2) Cute click sound: reuses the existing optional preference but enables
+   it in Guardian Mode too; no music/audio file/network requirement. */
+const pcPriorSettings=guardianSettings;
+guardianSettings=function(){
+ const root=document.createElement('div');root.innerHTML=pcPriorSettings();
+ const label=root.querySelector('.p9-click-sound .inline-check')||[...root.querySelectorAll('label')].find(l=>/Cute button-click sounds in Child Mode/.test(l.textContent));
+ if(label){for(const n of label.childNodes)if(n.nodeType===Node.TEXT_NODE&&/Cute button-click sounds/.test(n.textContent))n.textContent=' 🎀 Cute button-click sounds in Child & Guardian Mode';}
+ return root.innerHTML;
+};
+document.addEventListener('pointerdown',event=>{
+ if(state.view!=='guardian'||!state.settings?.buttonClickSounds||state.settings?.calm||state.p64FullTimer)return;
+ const button=event.target.closest('button,[role="button"]');if(!button||button.disabled)return;
+ try{
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+  const audio=state.p8ClickAudio||(state.p8ClickAudio=new AC());if(audio.state==='suspended')audio.resume();
+  const now=audio.currentTime+.004;
+  [760,990].forEach((freq,i)=>{const t=now+i*.046,osc=audio.createOscillator(),gain=audio.createGain();osc.type='sine';osc.frequency.value=freq;gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.024,t+.012);gain.gain.exponentialRampToValueAtTime(.0001,t+.078);osc.connect(gain);gain.connect(audio.destination);osc.start(t);osc.stop(t+.082);});
+ }catch(e){/* Audio is optional, and must never break a control */}
+},{capture:true,passive:true});
+
+/* 3) Mark vouchers already used in real life, with a dated audit trail.
+   Timed rewards also add a confirmed session so weekly usage and shared
+   screen-time reports are accurate. This does not spend/refund stars again. */
+const pcPriorVoucherPage=p4VoucherPage;
+p4VoucherPage=function(){
+ const root=document.createElement('div');root.innerHTML=pcPriorVoucherPage();
+ const v=p4Voucher(state.p4SelectedVoucherId);
+ if(!v)return root.innerHTML;
+ const panel=root.querySelector('.p4-ticket-preview'),actions=panel?.querySelector('.p2-actions');
+ if(!panel)return root.innerHTML;
+ const canRecord=['claimed','paused'].includes(v.status)&&!p4LiveSession(v.id);
+ if(actions&&canRecord){
+  const b=document.createElement('button');b.type='button';b.className='btn btn-rose';b.textContent='✓ Mark Voucher as Used';b.setAttribute('data-pc-action','voucher-used-open');b.dataset.id=v.id;
+  actions.prepend(b);
+ }
+ if(actions&&v.status==='redeemed'&&v.pcManualUsed&&!v.pcManualUseReversedAt){
+  const b=document.createElement('button');b.type='button';b.className='btn btn-soft';b.textContent='↶ Undo Manual Use Record';b.setAttribute('data-pc-action','voucher-used-undo');b.dataset.id=v.id;
+  actions.append(b);
+ }
+ if(panel&&state.pcVoucherUseEditing===v.id){
+  const time=v.type==='timed';
+  const form=document.createElement('form');form.id='pc-manual-use-form';form.className='form-grid pc-manual-used-form';
+  form.innerHTML=`<h3>Record a Voucher Already Used</h3><p class="p2-muted">For rewards already enjoyed outside the app. This marks one existing ticket used; it never spends stars again. This bypasses claiming/use-day requirements only to record what actually happened.</p><input type="hidden" name="voucherId" value="${esc(v.id)}">${p2Field('Actual date used',`<input type="date" name="usedDate" value="${p2Date()}" max="${p2Date()}" required>`)}${time?p2Field('Actual time used (minutes)',`<input type="number" name="actualMinutes" step="0.01" min="0" max="${Math.floor((v.remainingSeconds||0)/60)}" value="${Math.floor((v.remainingSeconds||0)/60)}" required>`,'For a fully used ticket. Remaining entitlement is closed, even if she played fewer minutes.'):''}${p2Field('Guardian note (optional)',`<textarea name="note" maxlength="240" placeholder="Used yesterday at home, confirmed by Mom"></textarea>`)}<label class="inline-check"><input type="checkbox" name="confirmed" required> I confirmed this voucher was really used, and understand it cannot be used again.</label><div class="p2-actions"><button class="btn btn-primary" type="submit">✓ Confirm Used</button>${btn('Cancel','not-used','btn-plain',`data-pc-action="voucher-used-cancel"`)}</div>`;
+  actions.after(form);
+ }
+ return root.innerHTML;
+};
+state.pcVoucherUseEditing=null;
+async function pcManualUseVoucher(form){
+ if(!safeGuardian())throw new Error('Guardian PIN is required.');
+ const fd=new FormData(form),id=String(fd.get('voucherId')||''),v=p4Voucher(id),day=String(fd.get('usedDate')||''),note=String(fd.get('note')||'').trim();
+ if(!v||!['claimed','paused'].includes(v.status)||p4LiveSession(id))throw new Error('This voucher is not available for manual use recording.');
+ if(!p2ValidDate(day)||day>p2Date())throw new Error('Enter a date today or in the past.');
+ if(!fd.has('confirmed'))throw new Error('Please confirm that this reward was used.');
+ const isTimed=v.type==='timed',used=isTimed?Math.round(Number(fd.get('actualMinutes'))*60):0;
+ if(isTimed&&(!Number.isSafeInteger(used)||used<0||used>v.remainingSeconds))throw new Error('Enter actual minutes no greater than the voucher time remaining.');
+ if(!confirm(`Record ticket ${v.ticketNumber} as USED on ${day}? This does not deduct any new stars.`))return;
+ const stamp=iso(),sessionId=isTimed?`pc-manual-session:${v.id}`:null;
+ await p4MutateVoucher(id,isTimed?['usageSessions']:[],(fresh,tx)=>{
+  if(!['claimed','paused'].includes(fresh.status))throw new Error('Voucher state changed. Reload and review it before recording use.');
+  const previousStatus=fresh.status,previousRemaining=fresh.remainingSeconds,previousUsed=fresh.usedSeconds||0;
+  if(isTimed){tx.objectStore('usageSessions').add({id:sessionId,voucherId:id,rewardId:fresh.rewardId,group:fresh.group,usageDate:day,startedAt:stamp,endedAt:stamp,sessionCapSeconds:fresh.remainingSeconds,usedSeconds:used,status:'confirmed',note:note.slice(0,240)||'Recorded as used outside the app',pcManual:true});}
+  tx.objectStore('vouchers').put({...fresh,status:'redeemed',remainingSeconds:isTimed?0:fresh.remainingSeconds,usedSeconds:previousUsed+used,redeemedAt:`${day}T12:00:00.000Z`,pcManualUsed:true,pcManualUseReversedAt:null,pcManualUsedDate:day,pcManualUsedAt:stamp,pcManualUsedBy:state.p64CurrentGuardian||'owner',pcManualUseNote:note.slice(0,240),pcPreviousStatus:previousStatus,pcPreviousRemainingSeconds:previousRemaining,pcPreviousUsedSeconds:previousUsed,pcManualSessionId:sessionId});
+ });
+ state.pcVoucherUseEditing=null;await refresh();state.guardianTab='voucher-detail';notice('✅ Voucher recorded as used. No extra stars were spent.');
+}
+async function pcUndoManualUse(id){
+ if(!safeGuardian())throw new Error('Guardian PIN is required.');
+ const v=p4Voucher(id);if(!v||v.status!=='redeemed'||!v.pcManualUsed||v.pcManualUseReversedAt)throw new Error('Only a manually recorded voucher can be reopened here.');
+ if(!confirm(`Undo manual use of ticket ${v.ticketNumber}? This reopens the remaining voucher time without changing stars.`))return;
+ await p4MutateVoucher(id,v.pcManualSessionId?['usageSessions']:[],(fresh,tx)=>{
+  if(!fresh.pcManualUsed||fresh.status!=='redeemed')throw new Error('Voucher changed since it was opened.');
+  tx.objectStore('vouchers').put({...fresh,status:fresh.pcPreviousStatus||'claimed',remainingSeconds:fresh.pcPreviousRemainingSeconds,usedSeconds:fresh.pcPreviousUsedSeconds||0,redeemedAt:null,pcManualUseReversedAt:iso()});
+  if(fresh.pcManualSessionId){const old=state.p4Sessions.find(s=>s.id===fresh.pcManualSessionId);if(old)tx.objectStore('usageSessions').put({...old,usedSeconds:0,note:`Use record reversed: ${old.note||''}`,pcManualReversedAt:iso()});}
+ });
+ await refresh();notice('↶ The manual use record has been reversed.');
+}
+app.addEventListener('click',async event=>{
+ const b=event.target.closest('[data-pc-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ try{
+  if(b.dataset.pcAction==='family-send-email'){await pcFamilyEmailSignIn();return;}
+  if(b.dataset.pcAction==='family-download'){await pcFamilyFirstRestore();return;}
+  if(b.dataset.pcAction==='family-check'){await p8FamilyCheck();render();return;}
+  if(b.dataset.pcAction==='family-offline'){state.pcFamilyOfflineOptIn=true;render();return;}
+  if(!safeGuardian())throw new Error('Unlock Guardian Mode first.');
+  if(b.dataset.pcAction==='voucher-used-open'){state.pcVoucherUseEditing=b.dataset.id;state.p4SelectedVoucherId=b.dataset.id;state.guardianTab='voucher-detail';render();}
+  else if(b.dataset.pcAction==='voucher-used-cancel'){state.pcVoucherUseEditing=null;render();}
+  else if(b.dataset.pcAction==='voucher-used-undo'){await pcUndoManualUse(b.dataset.id);}
+  else if(b.dataset.pcAction==='dashboard-sync'){await pcDashboardSync();}
+ }catch(error){if(b.dataset.pcAction?.startsWith('family-')){state.pcFamilyError=error.message;render();}else notice(error.message||'Action failed.',true);}
+},true);
+app.addEventListener('submit',async event=>{
+ if(event.target.id!=='pc-manual-use-form')return;
+ event.preventDefault();event.stopImmediatePropagation();
+ try{await pcManualUseVoucher(event.target);}catch(error){notice(error.message||'Could not record voucher use.',true);}
+},true);
+
+/* 4) Safe one-tap manual sync in Guardian Dashboard. This is NOT auto-merge:
+   independent devices remain protected by Firestore revision checks. */
+const pcPriorDashboard=guardianDashboard;
+guardianDashboard=function(){
+ const root=document.createElement('div');root.innerHTML=pcPriorDashboard();
+ const c=state.p8Cloud;
+ if(c.config&&c.familyId){
+  const actions=root.querySelector('.quick-actions');
+  if(actions){
+   const btnEl=document.createElement('button');btnEl.type='button';btnEl.className='action-card pc-sync-card';btnEl.dataset.pcAction='dashboard-sync';
+   btnEl.innerHTML=`<span class="action-icon">☁️</span><span class="action-name">${c.user&&c.family?'Sync Family Progress':'Connect Family Sync'}</span><span class="action-note">${c.user&&c.family?`Revision ${c.revision||0} · Compare this device with cloud`:'Sign in to share updates with your family'}</span>`;
+   actions.prepend(btnEl);
+  }
+  const alert=document.createElement('section');alert.className='pc-dashboard-sync-notice';alert.setAttribute('role','status');
+  alert.innerHTML=`<strong>☁️ ${c.user&&c.family?'Family Sync is connected':'Family Sync needs sign-in'}</strong><p>${esc(state.pcDashboardSyncResult||c.status||'Elle’s activities on this device are NOT shared until an authorized guardian syncs. Never overwrite a newer device without backing up.')}</p><p class="pc-sync-guidance">Elle’s tasks and requests made on her device remain local until that device syncs. Keep full JSON backups and use Sync Now on the device with the newest updates.</p>`;
+  const quick=actions?.closest('section.panel');if(quick)quick.before(alert);
+ }
+ return root.innerHTML;
+};
+async function pcDashboardSync(){
+ if(!safeGuardian())throw new Error('Unlock Guardian Mode to sync family progress.');
+ const c=state.p8Cloud;
+ if(!c.config||!c.familyId){state.guardianTab='p8-cloud';render();return;}
+ if(!c.auth||!c.user||!c.family){state.guardianTab='p8-cloud';render();return;}
+ if(c.busy)throw new Error('Another sync is in progress.');
+ c.busy=true;
+ try{await p8CloudSyncNow();state.pcDashboardSyncResult=c.status||'Sync finished.';}
+ catch(e){p8CloudStatus(e.message||'Sync failed.',true);state.pcDashboardSyncResult=`⚠️ ${c.status}`;}
+ finally{c.busy=false;state.guardianTab='dashboard';render();}
+}
+
+/* 5) Family-Ready HTML startup: a new hosted family browser signs in FIRST.
+   Only after authenticated, authorized cloud access can it offer a guarded
+   restore into persistent storage and a new local PIN. Without persistence,
+   do not restore cloud progress into memory where it will disappear. */
+function pcFamilyReady(){return Boolean(document.getElementById('p9-cloud-bootstrap')&&state.p8Cloud?.config&&state.p8Cloud?.familyId);}
+state.pcFamilyOfflineOptIn=false;
+state.pcFamilyError='';
+const pcPriorWelcome=welcome;
+welcome=function(){
+ if(!pcFamilyReady()||state.pcFamilyOfflineOptIn)return pcPriorWelcome();
+ const c=state.p8Cloud,hosted=location.protocol==='https:',signed=Boolean(c.user),connected=Boolean(c.user&&c.family),persisted=getStorageMode()!=='memory';
+ const status=state.pcFamilyError||c.status||'';
+ return `<main class="center-layout"><section class="welcome-card pc-family-gateway"><div class="welcome-header"><div class="empty-icon">💌</div><p class="eyebrow">Your family's Star Garden</p><h1>Welcome to Our Family Garden</h1><p class="muted sm">This is a Family-Ready copy. Sign in first to bring back your family's garden—no need to create a new one.</p></div>
+ <div class="pc-family-state ${state.pcFamilyError?'pc-family-error':''}" role="status" aria-live="polite">${esc(status)}</div>
+ ${!hosted?`<p class="p2-notice">☁️ This downloaded copy cannot sign in to Firebase. Please open the <strong>hosted HTTPS link</strong> given by your family owner in Safari or Chrome (not the Files preview).</p>`:''}
+ ${!persisted?`<p class="p2-notice">⚠️ This browser cannot save Star Garden data. You may sign in to inspect your account, but cloud progress cannot safely be restored here. Open the hosted website in a normal browser tab with storage enabled.</p>`:''}
+ ${!signed?`<div class="field"><label for="pc-family-email">Guardian email address</label><input type="email" id="pc-family-email" placeholder="parent@example.com" autocomplete="email" ${hosted?'':'disabled'}></div><button type="button" class="btn btn-primary btn-wide" data-pc-action="family-send-email" ${hosted?'':'disabled'}>💌 Email Me a Sign-in Link</button><p class="p2-muted sm">Open the email link in this browser. You'll confirm your email again if the browser doesn't allow local storage.</p>`:
+ `<div class="pc-family-signed"><strong>✓ Signed in as ${esc(c.user.email||'a Guardian')}</strong><p class="p2-muted">${connected?'This family workspace is accessible.':'Checking family workspace authorization...'}</p></div>${connected?`<button type="button" class="btn btn-primary btn-wide" data-pc-action="family-download" ${persisted?'':'disabled'}>⬇ Load Our Family Garden</button>`:`<button type="button" class="btn btn-soft btn-wide" data-pc-action="family-check">☁️ Check Family Access</button>`}`}
+ <p class="pc-family-security p2-muted">Only authorized family accounts may load cloud progress. This browser will ask you to create a new local Guardian PIN after loading, because PIN credentials are not stored in cloud snapshots.</p>
+ <details class="pc-family-offline"><summary>Start a completely new, offline-only garden instead</summary><p class="p2-muted">Use only if this is intentional. A separate offline garden will not be synchronized automatically.</p><button type="button" class="btn btn-plain" data-pc-action="family-offline" ${persisted?'':'disabled'}>Use Offline Setup</button></details></section></main>`;
+};
+async function pcFamilyEmailSignIn(){
+ if(location.protocol!=='https:')throw new Error('Open your Family-Ready HTML on its HTTPS website to sign in.');
+ const field=document.getElementById('pc-family-email'),email=String(field?.value||'').trim();
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('Enter a valid guardian email address.');
+ const c=await p8CloudInit();
+ await c.auth.sendSignInLinkToEmail(email,{url:p9EmailLinkReturnUrl(),handleCodeInApp:true});
+ try{localStorage.setItem(P9_EMAIL_KEY,JSON.stringify({email,projectId:c.config.projectId,createdAt:Date.now()}));}catch{/* Firebase will ask for email confirmation when link opens */}
+ state.pcFamilyError='';p8CloudStatus('Sign-in link sent. Open it in this browser; if asked, confirm the same email address.');render();
+}
+const pcPriorEmailFinish=p9HandleEmailLink;
+p9HandleEmailLink=async function(){
+ await pcPriorEmailFinish();
+ if(state.view==='onboarding'&&pcFamilyReady()){
+  if(state.p8Cloud.user&&state.p8Cloud.familyId&&!state.p8Cloud.family){try{await p8FamilyCheck();}catch(e){state.pcFamilyError=e.message;}}
+  render();
+ }
+};
+async function pcFamilyFirstRestore(){
+ if(state.view!=='onboarding'||!pcFamilyReady())throw new Error('Open the Family-Ready sign-in screen first.');
+ if(getStorageMode()==='memory')throw new Error('This browser is not saving data. Open the hosted site in normal Safari/Chrome and allow site storage before restoring cloud progress.');
+ if(state.profile)throw new Error('This device already has a garden. Use Guardian Mode → Family Sync to compare revisions safely.');
+ const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();
+ const remote=await p8CloudFetchSnapshot();if(!remote.snapshot)throw new Error('The family owner has not uploaded a garden yet. Sync the original device first.');
+ previewBackup(remote.snapshot);
+ if(!confirm(`Load ${remote.snapshot.data.tasks.length} tasks and ${remote.snapshot.data.vouchers.length} vouchers from cloud revision ${remote.revision} on this device? You will set a new local Guardian PIN. No cloud data will be changed.`))return;
+ const before=await exportBackup();
+ // On a fresh browser the stores should be empty, but preserve a safety copy
+ // if configuration data was cached by an earlier aborted setup.
+ const local=await getBackupData();
+ if(DATA_STORES.some(k=>local[k].length>0))downloadText(`Star-Garden-Before-First-Cloud-${p2Date()}.json`,JSON.stringify(before,null,2),'application/json');
+ await replaceBackupData(remote.snapshot.data);await refresh();
+ const hash=await p8LocalHash(await getBackupData());p8SaveBaseline(remote.revision,hash);
+ state.pcFamilyError='';p8CloudStatus(`Family garden loaded from cloud revision ${remote.revision}. Create a local guardian PIN to finish.`);
+ state.view=(await hasPin())?'child':'restore-pin';render();
+}
+
+/* Cloud baseline fallback for browsers where localStorage is disabled but
+   IndexedDB is available. Kept in local auth store, NOT in exported snapshots;
+   never assume this baseline means a second device's changes can be merged. */
+const pcBaselines=new Map();
+const pcBaselinePrefix='pc-sync-baseline:';
+const pcPriorRefresh=refresh;
+refresh=async function(){
+ await pcPriorRefresh();
+ try{for(const row of await getAll('auth'))if(row.key?.startsWith(pcBaselinePrefix))pcBaselines.set(row.key.slice(pcBaselinePrefix.length),row.value);}catch{}
+};
+const pcPriorGetBaseline=p8GetBaseline;
+p8GetBaseline=function(){
+ const local=pcPriorGetBaseline();return local||pcBaselines.get(p8BaselineKey())||null;
+};
+const pcPriorSaveBaseline=p8SaveBaseline;
+p8SaveBaseline=function(revision,hash){
+ pcPriorSaveBaseline(revision,hash);
+ const key=p8BaselineKey(),value={revision,hash,savedAt:Date.now()};pcBaselines.set(key,value);
+ // An async local write is deliberate: failure makes the next sync
+ // stop and ask for confirmation, not overwrite cloud progress.
+ put('auth',{key:pcBaselinePrefix+key,value}).catch(()=>{});
+};
+
+/* 6) Make cloud status clearer and avoid dangerous automatic overwrite.
+   An uninitialized browser NEVER uploads its blank snapshot. */
+const pcPriorCloudPage=p8CloudPage;
+p8CloudPage=function(){
+ const root=document.createElement('div');root.innerHTML=pcPriorCloudPage();
+ const head=root.querySelector('section:first-child');
+ if(head){const advice=document.createElement('p');advice.className='pc-sync-advice';advice.textContent='To prevent data loss: sync the device where Elle made the latest changes; keep a JSON backup before restoring; and if two devices have changed, resolve the conflict instead of replacing one blindly. Child Mode updates are local until the guardian syncs this device.';head.append(advice);}
+ return root.innerHTML;
+};
+
+const pcStyle=`
+.pc-manual-used-form{background:#fff8fc;border:1px solid #eed2df;border-radius:17px;padding:18px;margin-top:16px;min-width:0}
+.pc-manual-used-form .field{min-width:0}.pc-manual-used-form input,.pc-manual-used-form textarea{width:100%;max-width:100%;min-width:0}
+.pc-dashboard-sync-notice{border:1px solid #d9c9e7;border-radius:16px;background:#f9f5ff;padding:16px 18px;display:grid;gap:6px;color:#6d4b78}
+.pc-dashboard-sync-notice p{font-size:.84rem;margin:0;line-height:1.5;overflow-wrap:anywhere}.pc-dashboard-sync-notice .pc-sync-guidance{opacity:.85}
+.pc-family-gateway{display:grid;gap:16px;max-width:620px}.pc-family-gateway .welcome-header{margin-bottom:3px}
+.pc-family-state{background:#f4eef9;border:1px solid #e7d3eb;border-radius:13px;padding:11px 13px;color:#695273;font-size:.85rem;overflow-wrap:anywhere}
+.pc-family-state.pc-family-error{background:#fff0f1;border-color:#e3a3b0;color:#8b4256}
+.pc-family-gateway .field,.pc-family-gateway input{width:100%;min-width:0}.pc-family-gateway .field{margin:0}
+.pc-family-signed{background:#eff9f1;border:1px solid #d2e7d8;border-radius:14px;padding:14px;color:#456b52}
+.pc-family-security{font-size:.82rem;line-height:1.5}
+.pc-family-offline{border-top:1px solid #ecd3e0;padding-top:13px}.pc-family-offline summary{cursor:pointer;font-size:.86rem;color:#80576f;font-weight:800}.pc-family-offline p{margin:9px 0}
+.pc-sync-advice{background:#fff7ef;border:1px solid #edd9bd;padding:12px;border-radius:12px;margin-top:14px;font-size:.85rem;color:#80623a;line-height:1.5}
+@media(max-width:680px){.pc-dashboard-sync-notice{padding:13px}.pc-manual-used-form{padding:12px}.pc-family-gateway{padding:20px}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${PC_BUILD_ID}">${pcStyle}</style>`);
 
 initialize();
 
