@@ -68,6 +68,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media print{body{background:white;color:#222}.sidebar,.topbar,.btn,.no-print{display:none!important}.shell{display:block;padding:0}.main{padding:0}.panel{border:0;box-shadow:none}.voucher-sheet{page-break-inside:avoid;border:2px dashed #c9a0ba;border-radius:18px;padding:36px;text-align:center;max-width:165mm;margin:auto}}
 
 </style>
+<script id="p9-cloud-bootstrap" type="application/json">{"config":{"apiKey":"AIzaSyDixb-NvSUB6W7f5Qa1LKdWyzkJ-DfCXAs","authDomain":"my-little-star-garden.firebaseapp.com","projectId":"my-little-star-garden","storageBucket":"my-little-star-garden.firebasestorage.app","messagingSenderId":"674019445550","appId":"1:674019445550:web:87894a016e45c7cb1508bf"},"familyId":"8eh6P1jH48dUWGHAl9pdCeo2tfN2"}</script>
 </head>
 <body>
   <div id="app"><main class="loading-scene"><div class="loading-flower" aria-hidden="true">🌸</div><h1>My Little Star Garden</h1><p>Opening your little world…</p></main></div>
@@ -5370,52 +5371,6 @@ async function p9ExportConfiguredFamilyHTML(){
  const response=await fetch(location.origin+location.pathname,{cache:'no-store'});if(!response.ok)throw Error('Could not retrieve the clean hosted app source.');
  let clean=await response.text();if(!clean.includes('</head>')||!clean.includes('p9ReadBootstrap'))throw Error('The hosted file is not this app version. Upload this refined HTML first.');
  const boot=JSON.stringify({config:c.config,familyId:c.familyId}).replace(/</g,'\\u003c');
- clean=clean.replace(/<script id="p9-cloud-bootstrap"[^>]*>[\s\S]*?<\/script>/g,'');
- clean=clean.replace('</head>',`<script id="p9-cloud-bootstrap" type="application/json">${boot}<${'/script'}>\n</head>`);
- const blob=new Blob([clean],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);
- const a=document.createElement('a');a.href=url;a.download='My-Little-Star-Garden-Family-Ready.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);
- p8CloudStatus('Family-ready HTML downloaded. Replace the hosted page with this new copy. Other guardians can then sign in using only their email.');render();
-}
-const p9OldCloudPage=p8CloudPage;
-p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p9OldCloudPage();
- const login=root.querySelector('#p8-cloud-login-form')?.closest('section.panel');
- if(login){login.classList.add('p9-cloud-login');login.insertAdjacentHTML('afterbegin',`<h3>📧 Easy Sign-in for Family</h3><p class="p2-muted">Your parent enters their email, opens a private sign-in link, and returns here. No Firebase password to remember. Your family owner must authorize their account in the family workspace.</p><div class="p9-email-row"><label class="field">Email address<input id="p9-email-input" type="email" autocomplete="email" placeholder="mom@example.com"></label><button type="button" class="btn btn-primary" data-p9-action="email-send">💌 Email Me a Sign-in Link</button></div><p class="p2-note">The link returns to this hosted HTTPS page. Existing cloud sessions can still tap Sync Now; changes on different devices are never silently overwritten.</p>`);
-  const oldForm=login.querySelector('#p8-cloud-login-form');if(oldForm){const detail=document.createElement('details');detail.className='p9-advanced-login';detail.innerHTML='<summary>Advanced: email and password login</summary>';oldForm.before(detail);detail.append(oldForm);}
- }
- const ownerPanel=[...root.querySelectorAll('section.panel')].find(x=>/Family workspace/i.test(x.querySelector('h3')?.textContent||''));
- if(ownerPanel&&state.p8Cloud.role==='owner')ownerPanel.insertAdjacentHTML('beforeend',`<div class="p9-family-export"><h4>For less-techy family members 💌</h4><p class="p2-muted">Once the accounts are authorized, prepare a clean hosted file with the public Firebase configuration and family workspace already filled in. Your parents only enter their email and tap the sign-in link.</p><button class="btn btn-soft" type="button" data-p9-action="export-family-html">⬇ Download Family-Ready HTML</button></div>`);
- const cloudActions=root.querySelector('.p8-cloud-actions');if(cloudActions){cloudActions.insertAdjacentHTML('afterend','<p class="p2-note">Tip: After email sign-in, the app can check cloud revision automatically. Use Sync Now if a new device has not established a safe baseline. Local and cloud changes are never merged without your review.</p>');}
- return root.innerHTML;
-};
-
-const p9CSS=`
-.p9-ledger-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f1dce6;min-width:0}.p9-ledger-row:last-child{border-bottom:0}
-.p9-ledger-row .grow{min-width:0;overflow-wrap:anywhere}.p9-ledger-row strong{display:block}.p9-ledger-row small{display:block;color:var(--muted);margin-top:4px}
-.p9-row-icon{font-size:1.4rem;flex:0 0 34px;text-align:center}.p9-ledger-row button{flex:0 0 auto}
-.p9-rule-card{display:flex;flex-direction:column;min-width:0;gap:10px;justify-content:space-between}
-.p9-rule-card .p9-rule-title{display:flex;align-items:center;gap:9px;min-width:0;line-height:1.3}.p9-rule-card .p2-symbol{flex:0 0 43px;width:43px;height:43px;font-size:1.35rem}
-.p9-rule-card .p9-rule-actions,.p9-rule-card .p2-actions{margin-top:auto;justify-content:flex-start}
-.p9-draft-control{margin:18px 0 12px;padding:14px;border:1px solid #ecd4e1;border-radius:14px;background:#fffafd;display:flex;align-items:center;gap:10px}
-.p9-task-status-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;min-width:0}
-.p9-award-inline,.p9-task-status-row .p8-award-state{display:inline-flex;align-items:center;border:1px solid #edd1e0;border-radius:99px;padding:8px 12px;margin:0!important;background:#fff6fb;font-size:.83rem;max-width:100%}
-.p9-adventure-columns{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
-.p9-adventure-column{display:grid;gap:16px;align-content:start;min-width:0}
-.p9-adventure-column>.p2-card{height:auto!important;min-width:0}
-.p9-settings-profile,.p9-settings-appearance,.p9-backup-panel{grid-column:1/-1;min-width:0}
-.p9-profile-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;align-items:end;gap:12px}
-.p9-profile-layout .field{min-width:0}.p9-profile-layout input,.p9-profile-layout select{width:100%;min-width:0}
-.p9-click-sound{border:none!important;background:transparent!important;padding:6px 0!important;display:flex;flex-direction:column;gap:8px}
-.p9-backup-panel .panel-head{margin-bottom:12px}
-.p9-cloud-login{display:grid;gap:12px}.p9-email-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}
-.p9-email-row .field{min-width:0}.p9-email-row input{width:100%;min-width:0}.p9-advanced-login{border-top:1px solid #ead4df;padding-top:12px}.p9-advanced-login summary{cursor:pointer;font-weight:700}.p9-family-export{display:grid;gap:10px;margin-top:15px;padding:15px;background:#fff8fc;border:1px solid #edd3e0;border-radius:14px}.p9-family-export h4{margin:0}
-@media(max-width:720px){.p9-adventure-columns{grid-template-columns:minmax(0,1fr)}.p9-profile-layout,.p9-email-row{grid-template-columns:minmax(0,1fr)}.p9-ledger-row{flex-wrap:wrap}.p9-ledger-row .grow{flex:1 1 calc(100% - 60px)}.p9-ledger-row button{margin-left:46px}.p9-advanced-login .p2-actions{display:flex;flex-wrap:wrap}}
-`;
-document.head.insertAdjacentHTML('beforeend',`<style>${p9CSS}</style>`);
-p9ReadBootstrap();
-window.addEventListener('load',()=>{if(/[?&]oobCode=/.test(location.search))p9HandleEmailLink();});
-
-initialize();
-
-</script>
+ clean=clean.replace(/
 </body>
 </html>
