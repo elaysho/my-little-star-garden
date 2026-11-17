@@ -10781,7 +10781,7 @@ const p31LessonsNew=[
   'Open Manage Vouchers from the Dashboard, or Manage Activities → Rewards → Vouchers. Find the issued ticket and select Manage.',
   'For an item or experience already given, choose Mark as Fulfilled. For timed rewards, choose Activate Timer, then Pause & Confirm Usage after the session.',
   'If a voucher was already used outside the app, use Mark Voucher as Used to record the real use and close the ticket. Do not record it as used before the child receives the reward.'
- ],where:'This Manage Vouchers list contains issued tickets. Select Manage on the appropriate ticket. From its detail page you can fulfill an item, run a timer, or record actual use.',absent:'No vouchers have been issued yet. After a reward claim is approved, its ticket will appear on this page.'},
+ ],where:'This Manage Vouchers list contains issued tickets. Select Manage on the appropriate ticket. From its detail page you can fulfill an item, run a timer, or record actual use.',absent:''},
  {icon:'⭐',title:'Understand Star Changes',tab:'history',focus:'#p5b-history-filter',fallbackFocus:'.page-title',details:'History & Reports shows why stars were earned, spent, deducted, or corrected. Rewards spend stars when a voucher is claimed—not when that same voucher is later marked used. A completed routine summarizes stars already earned by its tasks without adding them again.',where:'Use the History & Reports filters to find a particular task award, rule award, reward purchase, deduction, or correction.'},
  {icon:'☁️',title:'Check Family Sync',tab:'dashboard',focus:'.pc-sync-card',fallbackFocus:'.quick-actions',details:'Changes are saved on the current device immediately. The garden normally waits about two quiet minutes to share them, or up to ten minutes while edits continue. You can check sharing progress or tap Sync Now from the Dashboard.',where:'Select Check Family Sync to open the sharing status and countdown. Use Sync Now if you want to share pending changes sooner.'},
  {icon:'🔒',title:'Finish Safely',tab:'dashboard',focus:'.topbar [data-action="lock"]',fallbackFocus:'.topbar',details:'Before leaving, check the Dashboard’s Family Sync status. If changes are waiting and you need to close the browser, select Sync Now and check the result. Then select Lock to return to Child Mode.',where:'The Lock button in the top-right header closes Guardian Mode when you are finished.'}
@@ -11053,6 +11053,168 @@ const P32_CSS=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="p32-style">${P32_CSS}</style>`);
 /* ===== End Phase 6C.2B.2E.4 ===== */
+
+
+/* ===== Phase 6C.2B.2E.5 — Shared routines, mailbox, journal, and sharing quality ===== */
+state.p33=state.p33||{mailPage:1,mailBusy:false,routineBusy:''};
+const P33_PAGE_SIZE=10;
+const p33Unique=rows=>[...new Map(rows.map(x=>[x.id,x])).values()];
+function p33TaskEligible(task,day=p2Date()){
+ if(!task||task.archived||task.draft||task.type==='checklist'||!p2Due(task,day)||task.skippable&&p5bExcused(task.id,day))return false;
+ if(task.frequency==='checkin')return (task.checkins||['morning']).some(slot=>p2CompletionEligibility(task,day,slot,null).ok);
+ return p2CompletionEligibility(task,day,'',null).ok;
+}
+// One task can be shown within multiple routines; the store still has one award per task/date.
+const p33ReviewPrior=p2ReviewPage;
+p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=p33ReviewPrior();const form=root.querySelector('#p2-review-form');const list=form?.querySelector('.p32-review-groups');if(!list)return root.innerHTML;
+ const day=state.p2ReviewDate||p2Date();const tasks=(state.p2Tasks||[]).filter(t=>t.type!=='checklist'&&!t.archived&&!t.draft&&p2Due(t,day)&&t.frequency!=='checkin'&&!(t.skippable&&p5bExcused(t.id,day)));
+ const byId=new Map(tasks.map(t=>[t.id,t])),appearing=new Set(),groups=[];
+ const row=(t,shared=false)=>{const e=p2CompletionEligibility(t,day,'',null),done=p32CreditedTask(t.id,day);
+ return `<label class="p32-review-task"><input type="checkbox" name="taskIds" value="${esc(t.id)}" data-p33-shared-task="${esc(t.id)}" ${!e.ok?'disabled':''}><span class="p32-task-icon">${esc(t.icon||'📖')}</span><span class="p32-task-detail"><strong>${esc(t.name)}</strong><small>${done?'✓ Already recorded':e.ok?`+${money(t.stars||0)} stars`:(e.reason||'Not currently eligible')}${shared?' · Also in another routine; counted once':''}</small></span></label>`;};
+ for(const r of (state.p2Tasks||[]).filter(t=>t.type==='checklist'&&!t.archived&&!t.draft&&Array.isArray(t.routineItems)&&p2Due(t,day))){
+  const members=p3Members(r,day),visible=members.map(({task})=>byId.get(task.id)).filter(Boolean);const excused=members.filter(({task})=>task.skippable&&p5bExcused(task.id,day)).length;
+  if(!visible.length&&!excused)continue;
+  const rows=visible.map(t=>{const shared=appearing.has(t.id);appearing.add(t.id);return row(t,shared);});const p=p32RoutineEvidence(r,day);
+  groups.push(`<div class="p32-review-routine"><div class="p32-review-routine-head"><span class="p32-routine-emoji">${esc(r.icon||'📋')}</span><div><strong>${esc(r.name)}</strong><small>${p.completed.length} completed${p.excused.length?' · '+p.excused.length+' excused':''} · ${p.total} scheduled steps</small></div></div>${rows.length?`<div class="p32-review-task-list">${rows.join('')}</div>`:'<p class="p32-only-excused">There are no tasks to award from this routine for this date.</p>'}${excused?'<p class="p32-excuse-count">🕊️ Excused steps are not eligible for stars.</p>':''}</div>`);
+ }
+ const individual=tasks.filter(t=>!appearing.has(t.id));
+ list.innerHTML=groups.join('')+(individual.length?`<div class="p32-review-routine"><div class="p32-review-routine-head"><span class="p32-routine-emoji">📖</span><strong>Individual Tasks</strong></div><div class="p32-review-task-list">${individual.map(t=>row(t)).join('')}</div></div>`:'')+(!groups.length&&!individual.length?'<div class="empty"><h3>Nothing to award for this date</h3><p>Choose another day or review your activities.</p></div>':'');
+ const hint=form.querySelector('.p2-note');if(hint)hint.textContent='Shared tasks appear in every routine they belong to. Checking either copy selects both; stars are awarded only once.';
+ return root.innerHTML;
+};
+// Keep duplicate instances of one shared task in sync as the user checks boxes.
+document.addEventListener('change',ev=>{const cb=ev.target;if(!cb.matches?.('input[data-p33-shared-task]'))return;document.querySelectorAll('input[data-p33-shared-task]').forEach(peer=>{if(peer!==cb&&peer.value===cb.value&&!peer.disabled)peer.checked=cb.checked;});},true);
+// The original batch method reads FormData again; suppress duplicate selected IDs only for its duration.
+const p33PriorBatch=p2BatchReview;
+p2BatchReview=async function(form){const seen=new Set(),disabled=[];
+ for(const input of form.querySelectorAll('input[name="taskIds"]:checked')){if(seen.has(input.value)){disabled.push(input);input.disabled=true;}else seen.add(input.value);}
+ try{return await p33PriorBatch(form);}finally{disabled.forEach(i=>i.disabled=false);}
+};
+// Keep the detailed single-task completion form for check-ins and non-award completions.
+const p33PriorDashboard=guardianDashboard;
+guardianDashboard=function(){const root=document.createElement('div');root.innerHTML=p33PriorDashboard();root.querySelectorAll('[data-p2-action="quick-complete"]').forEach(x=>x.remove());return root.innerHTML;};
+// Manage Activities: stop offering one-click awards once the task's frequency cap is reached.
+// Routines get an explicit bulk action for their eligible, not-yet-credited member tasks.
+function p33RoutinePending(r,day=p2Date()){
+ const members=p3Members(r,day).map(({task})=>task).filter(t=>!(t.skippable&&p5bExcused(t.id,day)));
+ const unique=p33Unique(members);
+ const pending=unique.filter(t=>!p32CreditedTask(t.id,day));
+ const special=pending.filter(t=>t.frequency==='checkin'||t.type==='timed'||p3HasTimer(t));
+ const awardable=pending.filter(t=>!special.includes(t)&&p33TaskEligible(t,day));
+ return {members:unique,pending,special,awardable,complete:p2TaskFinished(r,day)};
+}
+const p33PriorManage=guardianManage;
+guardianManage=function(){const root=document.createElement('div');root.innerHTML=p33PriorManage();if(!['tasks','routines'].includes(state.p2ManageTab))return root.innerHTML;
+ const cards=[...root.querySelectorAll('.p2-list .p2-card,.p5a-task-grid .p2-card')];
+ for(const card of cards){const action=card.querySelector('[data-p2-action="complete-open"],[data-p2-action="routine-manage-steps"]');if(!action)continue;
+  const task=p2Task(action.dataset.id);if(!task)continue;
+  if(task.type!=='checklist'){const ok=p33TaskEligible(task,p2Date());if(!ok){action.disabled=true;action.title='No star awards remain for this task at the moment.';action.textContent='✓ Award limit reached';}continue;}
+  if(!Array.isArray(task.routineItems))continue;
+  const plan=p33RoutinePending(task);const box=card.querySelector('.p2-task-actions')||card;
+  const button=document.createElement('button');button.type='button';button.className='btn btn-rose p2-mini p33-routine-award';button.dataset.p33Action='routine-award';button.dataset.id=task.id;
+  const disabled=plan.complete||!plan.awardable.length||!!plan.special.length||plan.pending.some(t=>!plan.awardable.includes(t));button.disabled=disabled;
+  button.textContent=plan.complete?'✓ Routine finished':!plan.pending.length?'✓ Already awarded':plan.special.length?'Complete special steps separately':`⭐ Complete Routine (${plan.awardable.length} task${plan.awardable.length===1?'':'s'})`;
+  button.title=plan.complete?'This routine is already finished.':plan.special.length?'Use individual completion for check-ins and timed activities.':!plan.awardable.length?'No remaining eligible star awards today.':'Awards all eligible, unfinished routine tasks once. Shared tasks are not duplicated.';
+  box.prepend(button);
+ }
+ return root.innerHTML;
+};
+const p33PriorTaskCard=p2TaskCard;
+p2TaskCard=function(t,guardian=false,day=p2Date()){const root=document.createElement('div');root.innerHTML=p33PriorTaskCard(t,guardian,day);if(guardian&&t?.type!=='checklist'){
+ root.querySelectorAll('[data-p2-action="complete-open"]').forEach(b=>{if(!p33TaskEligible(t,day)){b.disabled=true;b.textContent='✓ Award limit reached';b.title='No additional star award is available.';}});
+ }return root.innerHTML;};
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-p33-action="routine-award"]');if(!b)return;
+ e.preventDefault();e.stopImmediatePropagation();if(state.p33.routineBusy||!safeGuardian())return;
+ const r=p2Task(b.dataset.id),date=p2Date();if(!r||r.type!=='checklist')return;
+ const plan=p33RoutinePending(r,date);
+ if(plan.complete||!plan.pending.length){notice('This routine is already complete.');return;}
+ if(plan.special.length||plan.pending.some(t=>!plan.awardable.includes(t))){notice('Some steps need individual completion or are no longer eligible. Open View Steps to review them.',true);return;}
+ if(!confirm(`Record ${plan.awardable.length} eligible task${plan.awardable.length===1?'':'s'} in “${r.name}” for today? Stars will be awarded only once per task.`))return;
+ state.p33.routineBusy=r.id;b.disabled=true;
+ try{const form=document.createElement('form');form.innerHTML=`<input name="date" value="${esc(date)}"><textarea name="note">Completed through routine ${esc(r.name)}</textarea>`+plan.awardable.map(t=>`<input name="taskIds" value="${esc(t.id)}">`).join('');
+ const awarded=await p2BatchReview(form);await refresh();render();notice(`Recorded ${awarded} task${awarded===1?'':'s'} from ${r.name}. No duplicate routine stars were added.`);
+ }catch(err){notice(err.message||'Could not record the routine.',true);render();}finally{state.p33.routineBusy='';}
+},true);
+// Mailbox: one unified list and one empty state, independent pagination and mass read.
+function p33MailRows(){const requests=p62Messages().map(m=>({...m,stamp:m.stamp||'',kind:m.type,ref:m.row||m.request}));
+ const events=(state.p64NoticeEvents||[]).map(m=>({kind:'event',id:m.id,stamp:m.at||'',unread:!!m.unread,ref:m}));
+ return [...new Map(requests.map(m=>[m.kind+':'+m.id,m])).values(),...events].sort((a,b)=>String(b.stamp).localeCompare(String(a.stamp)));
+}
+function p33MailFiltered(){const filter=state.p62NotificationFilter||'all';return p33MailRows().filter(m=>filter==='all'||filter==='notes'&&m.kind==='note'||filter==='waiting'&&m.kind==='request'&&m.ref?.status==='pending'||filter==='updates'&&(m.kind==='event'||m.kind==='request'&&m.ref?.status!=='pending'));}
+function p33MailCard(m){if(m.kind==='event'){
+  const n=m.ref,negative=['deduction','purchase','earning-correction'].includes(n.transactionType)||Number(n.amount)<0,canCelebrate=!negative&&!(n.transactionType==='refund');
+  const sign=n.transactionType==='deduction'?'🛡️':n.transactionType==='purchase'?'🎁':n.transactionType==='earning-correction'?'📝':n.kind==='stars'?'⭐':'🎁';
+  return `<article class="p62-message ${m.unread?'p62-unread':''}"><div class="p62-message-symbol">${sign}</div><div class="grow"><strong>${esc(n.title)}</strong><p class="p2-muted">${esc(n.detail||'')} · ${esc(String(n.at||'').slice(0,10))}</p><div class="p62-message-actions">${canCelebrate?btn('🎉 Celebrate!','not-used','btn-rose p2-mini',`data-p64-action="notice-celebrate" data-id="${esc(n.id)}"`):''}${m.unread?btn('✓ Got it','not-used','btn-soft p2-mini',`data-p64-action="notice-seen" data-id="${esc(n.id)}"`):''}</div></div></article>`;
+ }
+ if(m.kind==='note'){const n=m.ref;return `<article class="p62-message ${m.unread?'p62-unread':''}"><div class="p62-message-symbol">✏️</div><div class="grow"><strong>Guardian replied · ${esc(p2Task(n.taskId)?.name||n.taskName||'Quest')}</strong><p class="p2-muted">${esc(n.date||'')}</p><p class="p62-message-quote">${esc(n.text||'')}</p><p class="p62-message-reply">💌 ${esc(n.feedback||'')}</p><div class="p62-message-actions">${m.unread?btn('✓ Mark as read','not-used','btn-soft p2-mini',`data-p62-action="note-seen" data-id="${esc(n.key)}"`):''}</div></div></article>`;}
+ const r=m.ref||{},wait=r.status==='pending',approved=r.status==='approved';return `<article class="p62-message ${m.unread?'p62-unread':''}"><div class="p62-message-symbol">${r.kind==='task'?'📖':r.kind==='claim'?'🎟️':'💌'}</div><div class="grow"><strong>${esc(r.targetName||'Your request')}</strong><p class="p2-muted">${wait?'Waiting for review':approved?'Approved by Guardian':'Guardian replied'} · ${esc(String(r.resolvedAt||r.createdAt||'').slice(0,10))}</p>${r.guardianNote?`<p class="p62-message-reply">${esc(r.guardianNote)}</p>`:''}<div class="p62-message-actions">${approved?btn(r.kind==='task'?'🎊 Celebrate My Stars':'✨ Celebrate My Voucher','not-used','btn-rose p2-mini',`data-p62-action="request-celebrate" data-id="${esc(r.id)}"`):''}${m.unread&&!wait?btn('✓ Got it','not-used','btn-soft p2-mini',`data-p62-action="request-seen" data-id="${esc(r.id)}"`):''}</div></div></article>`;
+}
+p62NotificationsDialog=function(){if(!state.p62NotificationsOpen)return '';
+ const rows=p33MailFiltered(),pages=Math.max(1,Math.ceil(rows.length/P33_PAGE_SIZE));state.p33.mailPage=Math.max(1,Math.min(state.p33.mailPage||1,pages));const page=state.p33.mailPage,start=(page-1)*P33_PAGE_SIZE,chunk=rows.slice(start,start+P33_PAGE_SIZE);
+ const unread=p33MailRows().filter(m=>m.unread&&!(m.kind==='request'&&m.ref?.status==='pending')).length;
+ return `<div class="p62-overlay" data-p62-action="notifications-backdrop"><div class="p62-dialog p33-mail-dialog" role="dialog" aria-modal="true" aria-label="My Notifications"><div class="p62-dialog-header"><div><p class="eyebrow">A little letter for you</p><h2>💌 My Notifications</h2></div>${btn('✕ Close','not-used','btn-plain',`data-p62-action="notifications-close"`)}</div><div class="p33-mail-actions"><span class="p2-muted">${rows.length} message${rows.length===1?'':'s'}</span><button type="button" class="btn btn-soft btn-small" data-p33-action="mark-all-read" ${unread&&!state.p33.mailBusy?'':'disabled'}>${state.p33.mailBusy?'Saving…':'✓ Mark all as read'}</button></div><div class="p62-dialog-tabs">${[['all','All'],['updates','Updates'],['waiting','Waiting'],['notes','Quest Notes']].map(([v,label])=>`<button type="button" class="tab-btn ${state.p62NotificationFilter===v?'active':''}" data-p62-action="notifications-filter" data-value="${v}">${label}</button>`).join('')}</div><div class="p62-message-list">${chunk.length?chunk.map(p33MailCard).join(''):'<div class="p33-mail-empty">💌 Nothing in this section yet.</div>'}</div><div class="p33-pager"><button type="button" class="btn btn-soft btn-small" data-p33-action="mail-page" data-page="${page-1}" ${page===1?'disabled':''}>← Previous</button><span>Page ${page} of ${pages}</span><button type="button" class="btn btn-soft btn-small" data-p33-action="mail-page" data-page="${page+1}" ${page>=pages?'disabled':''}>Next →</button></div></div></div>`;
+};
+// When changing filters, always return to the first page.
+document.addEventListener('click',e=>{const n=e.target.closest('[data-p62-action="notifications-filter"],[data-p62-action="notifications-open"]');if(n)state.p33.mailPage=1;},true);
+document.addEventListener('click',async e=>{const btn=e.target.closest('[data-p33-action="mail-page"],[data-p33-action="mark-all-read"]');if(!btn)return;
+ e.preventDefault();e.stopImmediatePropagation();const action=btn.dataset.p33Action;
+ if(action==='mail-page'){state.p33.mailPage=Math.max(1,Number(btn.dataset.page)||1);render();return;}
+ if(!state.p33.mailBusy){state.p33.mailBusy=true;render();try{
+ const rows=p33MailRows().filter(m=>m.unread&&!(m.kind==='request'&&m.ref?.status==='pending'));const time=iso();
+ if(rows.length){await atomic(['records'],tx=>{const store=tx.objectStore('records');rows.forEach(m=>{
+  if(m.kind==='event')store.put({key:`p64-notice-seen:${m.id}`,seenAt:time});
+  else if(m.ref)store.put({...m.ref,childSeenAt:time});
+ });});}
+ await refresh();notice(`${rows.length} message${rows.length===1?'':'s'} marked as read.`);
+ }catch(err){notice(err.message||'Could not mark messages as read.',true);}finally{state.p33.mailBusy=false;render();}}
+},true);
+// More descriptive rule-earned notifications. Preserve the stored private incident notes.
+const p33PriorRefresh=refresh;
+refresh=async function(){await p33PriorRefresh();for(const msg of state.p64NoticeEvents||[]){if(msg.transactionType!=='rule-earned')continue;
+ const tx=(state.summary?.transactions||[]).find(t=>'tx-'+t.id===msg.id);const rule=tx?.ruleId&&(state.p2Rules||[]).find(r=>r.id===tx.ruleId);
+ const name=rule?.childFriendly||rule?.name||tx?.ruleName||String(tx?.reason||'').replace(/^Rule followed:\s*/i,'').trim();
+ if(name&&name!=='Rule followed')msg.detail=`For following “${name.slice(0,90)}”. Great job!`;
+ }};
+// Child Adventure Journal: add rule incidents without exposing private Guardian notes.
+function p33Incidents(day){return (state.p2Incidents||[]).filter(i=>i.date===day&&!i.reversedAt).map(i=>{
+ const ids=Array.isArray(i.ruleIds)?i.ruleIds:[i.ruleId].filter(Boolean);const rules=ids.map(id=>(state.p2Rules||[]).find(r=>r.id===id)?.childFriendly||(state.p2Rules||[]).find(r=>r.id===id)?.name).filter(Boolean);
+ const visible=i.showToChild===true;return {id:i.id,date:i.date,name:visible?(rules.join(' · ')||i.ruleName||'Rule to practice'):'Rule to practice',stars:Math.max(0,Number(i.starsDeducted)||0),outcome:i.outcome||'reminder',detail:visible?i.childExplanation||'Talk with your guardian about how to improve next time.':'Ask your guardian about this day.'};
+ });}
+const p33PriorJournal=p11JournalPage;
+p11JournalPage=function(){const root=document.createElement('div');root.innerHTML=p33PriorJournal();const day=state.p11JournalDay||p2Date(),incidents=p33Incidents(day);
+ const main=[...root.querySelectorAll('.p11-journal-heading')].map(x=>x.closest('section.panel'))[0];if(!main)return root.innerHTML;
+ const ruled=main.querySelector('.p11-journal-detail');if(ruled){const block=document.createElement('div');block.className='p33-journal-incidents';block.innerHTML=`<h3>🛡️ What to Improve</h3>${incidents.length?incidents.map(i=>`<div class="p33-journal-incident"><span>${i.stars?'⭐ −'+i.stars:'🌷'}</span><div><strong>${esc(i.name)}</strong><small>${esc(i.detail)}</small></div></div>`).join(''):'<p class="p2-muted">No rule incidents recorded for this day.</p>'}`;ruled.after(block);}
+ return root.innerHTML;
+};
+// Larger daily-share image, with child-appropriate incident summary and no private notes.
+const p33PriorDailyCard=p8DailyCard;
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const original=p33PriorDailyCard(snapshot,guardianName,message),incidents=p33Incidents(snapshot.day),scale=1.5;
+ const canvas=document.createElement('canvas');canvas.width=Math.round(original.width*scale);canvas.height=Math.round((original.height+300)*scale);const ctx=canvas.getContext('2d');if(!ctx)return original;
+ ctx.fillStyle='#fdf2f9';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(original,0,0,canvas.width,Math.round(original.height*scale));ctx.save();ctx.scale(scale,scale);
+ const top=original.height+18;p10RoundRect(ctx,44,top,original.width-88,255,28,'#fffefe','#e8c8d9');
+ ctx.fillStyle='#825475';ctx.textAlign='left';ctx.font='800 34px system-ui';ctx.fillText('🌷 WHAT TO IMPROVE?',84,top+61);
+ const total=incidents.reduce((n,i)=>n+i.stars,0),count=incidents.length;
+ ctx.font='24px system-ui';ctx.fillStyle='#786276';ctx.fillText(count?`${count} recorded rule event${count===1?'':'s'} · ${total} star${total===1?'':'s'} deducted`:'No rule incidents recorded on this day.',84,top+105);
+ let y=top+149;for(const i of incidents.slice(0,2)){ctx.font='700 26px system-ui';ctx.fillStyle='#74445e';const label=`${i.stars?'−'+i.stars+' ⭐ · ':''}${i.name}`;p10TextLine(ctx,label,84,y,1450,33,1);y+=39;}
+ if(incidents.length>2){ctx.font='22px system-ui';ctx.fillStyle='#836a7a';ctx.fillText(`…and ${incidents.length-2} more event${incidents.length-2===1?'':'s'} to discuss together.`,84,y);}
+ ctx.restore();return canvas;
+};
+// Narrow-device date-input containment: iOS date controls have wide intrinsic sizing.
+const P33_CSS=String.raw`
+#app input[type="date"],#app input[type="datetime-local"]{display:block;box-sizing:border-box!important;inline-size:100%!important;max-inline-size:100%!important;min-inline-size:0!important;min-width:0!important;width:100%!important;font-size:16px;}
+#app .field,#app .form-grid,#app .p2-card,#app .p32-excuse-date-row,#app .p11-date-field,#app .p2-review-form,#app .grid2,#app .p32-review-routine,#app .p12-share-form,#app .panel{min-width:0;max-width:100%;box-sizing:border-box}
+#app .p32-excuse-date-row input[type="date"]{flex:1 1 140px!important;width:auto!important;min-width:0!important;max-width:100%!important}
+#app .p33-routine-award{min-height:38px}#app .p33-mail-dialog .p33-mail-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:9px 0 10px}
+#app .p33-mail-dialog .p62-message-list{display:grid;gap:10px}#app .p33-mail-empty{padding:25px 16px;text-align:center;color:#886d81}
+#app .p33-pager{display:flex;align-items:center;justify-content:space-between;gap:7px;margin:14px 0 3px;flex-wrap:wrap;color:#8f7589;font-size:.85rem}
+#app .p33-journal-incidents{margin-top:18px;border-top:1px solid #eadce6;padding-top:15px}#app .p33-journal-incident{display:flex;align-items:start;gap:12px;margin:8px 0;padding:11px 12px;border-radius:12px;background:#fff8fb}
+#app .p33-journal-incident>span{flex:none;font-weight:800;color:#98647f}#app .p33-journal-incident>div{min-width:0}#app .p33-journal-incident strong{display:block;color:#68516a}#app .p33-journal-incident small{display:block;color:#8a7888;line-height:1.5;margin-top:4px}
+@media(max-width:620px){#app .p33-pager .btn{font-size:.79rem;padding:8px 11px}#app .p32-review-routine{min-width:0}#app .p33-mail-dialog{max-width:calc(100vw - 22px);box-sizing:border-box}#app input[type="date"]{appearance:auto!important;-webkit-appearance:auto!important}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p33-style">${P33_CSS}</style>`);
+/* ===== End Phase 6C.2B.2E.5 ===== */
 
 </script>
 </body>
