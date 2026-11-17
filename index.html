@@ -9255,6 +9255,175 @@ state.p22.todaySeen=p22ManilaDate();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const today=p22ManilaDate();if(today!==state.p22.todaySeen){state.p22.todaySeen=today;if(state.view==='child'&&state.childTab==='p22-word')state.p22.notice='A new day has begun! Visit My Word Garden to see today’s word.';render();}});
 
 
+
+/* 6C.2B.1 — Guardian and Child navigation polish + optional Firebase password login.
+   Supplements the existing state model; no migration or Firestore data changes. */
+const P23_BUILD='mlsg-6c2b1-usability-20261117';
+state.p23={authBusy:false,authError:'',authInfo:'',passwordOpen:false,setupOpen:false,archiveId:null,archiveError:''};
+/* Keep the mobile and sidebar order consistent with the child's stated journey. */
+p68ChildNav.splice(0,p68ChildNav.length,
+ ['home','🏡','Home'],['quests','📖','Quests'],['rules','🛡️','My Rules']);
+p68ChildExtras.splice(0,p68ChildExtras.length,
+ ['p22-garden','🌼','My Word Garden'],['journal','📔','Adventure Journal'],
+ ['world','🌷','Stickers'],['shop','🎁','Star Shop'],['tickets','🎟️','Tickets'],['wishes','💌','My Wishes']);
+/* The two Review Center subpages already have their parent menu. Avoid a misleading extra Back. */
+const p23NotesOriginal=p6GuardianNotesPage;
+p6GuardianNotesPage=function(){const root=document.createElement('div');root.innerHTML=p23NotesOriginal();
+ root.querySelectorAll('[data-p61-action="review-page"],[data-p6-action="guardian-notes-back"]').forEach(x=>x.remove());
+ return root.innerHTML;
+};
+const p23RequestsOriginal=p31RequestsPage;
+p31RequestsPage=function(){const root=document.createElement('div');root.innerHTML=p23RequestsOriginal();
+ root.querySelectorAll('[data-p31-action="back-dashboard"]').forEach(x=>x.remove());return root.innerHTML;
+};
+/* Self-service password enrollment on the already signed-in, verified account.
+   NEVER createUserWithEmailAndPassword: doing so can create a different UID. */
+function p23PasswordSetup(){const c=state.p8Cloud;
+ if(!safeGuardian()||!c?.user?.uid||!c?.user?.email||!c.family)return '';
+ return `<section class="p23-auth-settings"><div class="p2-row"><div><h3>🔑 Another way to sign in</h3><p class="p2-muted">Set a password for <strong>${esc(c.user.email)}</strong>. Your Guardian PIN stays separate.</p></div></div>
+ <button type="button" class="btn btn-soft" data-p23-action="toggle-setup">${state.p23.setupOpen?'Hide Password Setup':'Set Up / Change Sign-In Password'}</button>
+ ${state.p23.setupOpen?`<form id="p23-password-setup-form" class="form-grid p23-auth-form"><p class="p2-muted">Use this when your email-link allowance runs out. It keeps this exact Firebase account and its Guardian profile.</p><div class="field"><label for="p23-new-password">New password (at least 10 characters)</label><input type="password" id="p23-new-password" name="password" autocomplete="new-password" minlength="10" maxlength="128" required></div><div class="field"><label for="p23-repeat-password">Confirm password</label><input type="password" id="p23-repeat-password" name="confirm" autocomplete="new-password" minlength="10" maxlength="128" required></div><button type="submit" class="btn btn-primary" ${state.p23.authBusy?'disabled':''}>${state.p23.authBusy?p16Spinner()+' Saving…':'Save Sign-In Password'}</button><p class="p2-muted tiny">If Firebase requests a recent sign-in, return using your existing email link, then try again. Your password is never stored in the garden's local database.</p></form>`:''}
+ ${state.p23.authInfo?`<p class="p23-auth-success" role="status">${esc(state.p23.authInfo)}</p>`:''}
+ ${state.p23.authError?`<p class="p23-auth-error" role="alert">${esc(state.p23.authError)}</p>`:''}</section>`;
+}
+const p23PreviousCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p23PreviousCloudPage();
+ const adminCard=root.querySelector('.p22-owner-config-card');if(adminCard)adminCard.classList.add('p23-white-owner-config');
+ const account=root.querySelector('.p14-account');if(account&&safeGuardian()&&state.p8Cloud?.user?.email)account.insertAdjacentHTML('beforeend',p23PasswordSetup());
+ root.querySelectorAll('[data-p19-action="snapshot-archive"]').forEach(btn=>{
+  const busy=Boolean(state.p23.archiveId);btn.disabled=busy;
+  if(state.p23.archiveId===btn.dataset.id){btn.innerHTML=p16Spinner()+(btn.dataset.archived==='1'?' Unarchiving…':' Archiving…');btn.setAttribute('aria-busy','true');}
+ });
+ return root.innerHTML;
+};
+const p23PreviousSendUI=p16SendUI;
+p16SendUI=function(opts={}){const orig=p23PreviousSendUI(opts);
+ // Password login is optional; only existing authorized Firebase accounts can use it.
+ const extra=`<details class="p23-password-alternative" ${state.p23.passwordOpen?'open':''}><summary>🔑 Sign in with a password instead</summary><div class="p23-password-inner"><p class="p2-muted">Already set up a password for your family account? Use it without requesting an email link.</p><form id="p23-password-login-form" class="form-grid"><div class="field"><label for="p23-login-email">Guardian email</label><input id="p23-login-email" type="email" name="email" autocomplete="username" inputmode="email" value="${esc(state.p16Email||'')}" required></div><div class="field"><label for="p23-login-password">Account password</label><input id="p23-login-password" type="password" name="password" autocomplete="current-password" required></div><button class="btn btn-primary btn-wide" type="submit" ${state.p23.authBusy?'disabled':''}>${state.p23.authBusy?p16Spinner()+' Signing in…':'Sign In with Password'}</button></form><button type="button" class="btn btn-plain btn-small" data-p23-action="reset-password" ${state.p23.authBusy?'disabled':''}>Forgot your password?</button><p class="p2-muted tiny">New here? Sign in once with your email link, then choose “Set Up / Change Sign-In Password” in Family Sync. This is your Firebase account password, not the six-digit Guardian PIN.</p></div></details>`;
+ return orig+extra;
+};
+const p23PreviousFriendly=p16FriendlyError;
+p16FriendlyError=function(err,context){if(/too-many-requests|quota-exceeded/i.test(String(err?.code||'')+' '+String(err?.message||'')))state.p23.passwordOpen=true;return p23PreviousFriendly(err,context);};
+function p23AuthMessage(err){const code=String(err?.code||'');
+ if(/invalid-credential|wrong-password|user-not-found|invalid-login-credentials|invalid-email/.test(code))return 'The email or password is not recognized. Please check both, or use your original email sign-in link.';
+ if(/too-many-requests|quota-exceeded/.test(code))return 'Firebase has temporarily limited sign-in attempts. Please stop retrying for now; use an existing signed-in device or try later.';
+ if(/operation-not-allowed/.test(code))return 'Password sign-in is not enabled for this Firebase project. The family owner must enable Email/Password in Firebase Authentication.';
+ if(/requires-recent-login/.test(code))return 'For security, Firebase needs a recent sign-in. Sign in with your usual email link before adding or changing a password.';
+ if(/provider-already-linked|credential-already-in-use|email-already-in-use/.test(code))return 'This credential is already linked to an account. Nothing was changed; sign in with that original account and contact the owner if needed.';
+ return 'Could not complete password sign-in. '+String(err?.message||'Please try again.').slice(0,180);
+}
+/* Events run in document capture to avoid the original Guardian submit delegation. */
+document.addEventListener('click',async event=>{const btn=event.target.closest('[data-p23-action]');if(!btn)return;
+ event.preventDefault();event.stopImmediatePropagation();const action=btn.dataset.p23Action;
+ if(state.p23.authBusy||state.p16Busy)return;
+ if(action==='toggle-setup'){state.p23.setupOpen=!state.p23.setupOpen;state.p23.authError='';state.p23.authInfo='';render();return;}
+ if(action==='reset-password'){
+  const email=String(document.querySelector('#p23-login-email')?.value||state.p16Email||'').trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){state.p23.authError='Enter your family email address first.';state.p23.passwordOpen=true;render();return;}
+  state.p23.authBusy=true;state.p23.authError='';state.p23.passwordOpen=true;render();
+  try{const c=await p8CloudInit();await c.auth.sendPasswordResetEmail(email);state.p23.authInfo='If this email has a password account, check its inbox for reset instructions.';}
+  catch(err){state.p23.authError=p23AuthMessage(err);}
+  finally{state.p23.authBusy=false;render();}
+ }
+},true);
+document.addEventListener('toggle',event=>{if(event.target.matches?.('details.p23-password-alternative'))state.p23.passwordOpen=event.target.open;},true);
+document.addEventListener('submit',async event=>{const form=event.target;if(!['p23-password-login-form','p23-password-setup-form'].includes(form?.id))return;
+ event.preventDefault();event.stopImmediatePropagation();if(state.p23.authBusy||state.p16Busy)return;
+ const data=new FormData(form),email=String(data.get('email')||'').trim().toLowerCase(),password=String(data.get('password')||'');
+ state.p23.authBusy=true;state.p16Busy=true;state.p23.authError='';state.p23.authInfo='';state.p23.passwordOpen=true;
+ const button=form.querySelector('[type="submit"]');if(button){button.disabled=true;button.innerHTML=p16Spinner()+' Please wait…';}
+ try{
+  const c=await p8CloudInit();
+  if(form.id==='p23-password-setup-form'){
+   const owner=c.user;if(!safeGuardian()||!owner||!c.family||!owner.email||!owner.emailVerified||!state.p16AuthVerified)throw Error('Open Guardian Mode with your verified family email before setting a password.');
+   if(p16GuardianIdentity()!==state.p64CurrentGuardian)throw Error('Please unlock your own Guardian profile before changing its sign-in password.');
+   await p8FamilyCheck();
+   if(password.length<10||password.length>128||password!==String(data.get('confirm')||''))throw Error('Choose matching passwords of at least 10 characters.');
+   const cred=window.firebase.auth.EmailAuthProvider.credential(owner.email,password);
+   try{await owner.linkWithCredential(cred);}catch(err){if(err?.code==='auth/provider-already-linked'){await owner.updatePassword(password);}else throw err;}
+   // Ensure the verified family UID was not changed by account linking.
+   if(c.auth.currentUser?.uid!==owner.uid)throw Error('Account identity changed unexpectedly. Sign in again and ask the owner for assistance.');
+   state.p23.setupOpen=false;state.p23.authInfo='Password sign-in is ready for your existing family account. You will still need your Guardian PIN.';
+  }else{
+   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!password)throw Error('Enter your email and password.');
+   const result=await c.auth.signInWithEmailAndPassword(email,password);c.user=result.user;
+   try{await p8FamilyCheck();}catch(err){await c.auth.signOut();c.user=null;throw Error('This account is not authorized for the family garden. Ask the owner to confirm the account link.');}
+   state.p16AuthVerified=true;state.p16Email=email;state.p16Error='';state.p23.authInfo='';
+   if(state.view==='p16-profiles'&&state.p16Selected){
+    const match=p16GuardianIdentity();
+    if(match!==state.p16Selected){state.p16Entry='mismatch';state.p16Error='This email belongs to a different Guardian profile. Choose the matching profile to continue.';}
+    else await p16SelectPinStage(state.p16Selected);
+   }else if(!state.profile){state.view='onboarding';}
+   else if(state.view==='p16-profiles'){state.p16Entry='';}
+   else if(state.view==='guardian'){/* already in a protected Guardian session */}
+   else{await p16EnterGuardian();}
+  }
+ }catch(err){state.p23.authError=err?.code?p23AuthMessage(err):String(err?.message||err);}
+ finally{state.p23.authBusy=false;state.p16Busy=false;render();}
+},true);
+/* In-place working indicator for snapshot Archive and Unarchive. */
+document.addEventListener('click',async event=>{
+ const btn=event.target.closest('[data-p19-action="snapshot-archive"]');if(!btn)return;
+ event.preventDefault();event.stopImmediatePropagation();if(state.p23.archiveId||state.p19.archiving)return;
+ const id=btn.dataset.id,archive=btn.dataset.archived!=='1';state.p23.archiveId=id;render();
+ try{await p19SetArchive(id,archive);}catch(err){notice(String(err?.message||err),true);}
+ finally{state.p23.archiveId=null;render();}
+},true);
+const p23OldRender=render;
+render=function(){p23OldRender();document.title='My Little Star Garden';
+ if(state.view==='child'){
+  const order=['home','quests','rules','p22-garden','journal','world','shop','tickets','wishes'];
+  const sidebar=app.querySelector('.sidebar nav.nav');if(sidebar){order.forEach(id=>{const el=sidebar.querySelector(`[data-child-tab="${id}"]`);if(el)sidebar.append(el);});
+   // Keep currently selected Word of the Day highlighted as part of My Word Garden.
+   if(state.childTab==='p22-word')sidebar.querySelector('[data-child-tab="p22-garden"]')?.classList.add('active');}
+  const more=app.querySelector('.p68-menu-grid');if(more){order.forEach(id=>{const el=more.querySelector(`[data-tab="${id}"]`);if(el)more.append(el);});}
+ }
+ if(state.view==='guardian'&&safeGuardian()){
+  if(['quest-notes','requests'].includes(state.guardianTab))app.querySelectorAll('main .p19-back,main [data-p61-action="review-page"],main [data-p31-action="back-dashboard"]').forEach(x=>x.remove());
+  if(state.guardianTab==='milestones'){
+   const main=app.querySelector('main .layout-stack');
+   const header=main?.querySelector(':scope > section:first-child'),panel=[...main?.querySelectorAll(':scope > section.panel')||[]].find(x=>(x.querySelector('.panel-head h3')?.textContent||'').startsWith('Your Milestones'));
+   const row=panel?.querySelector('.panel-head');
+   if(header){let back=main.querySelector('[data-p5b-action="back-manage"],[data-p40-action="back-dashboard"]');
+    if(back){back.textContent='← Back';back.classList.add('p23-milestone-back');header.append(back);}else{
+      back=document.createElement('button');back.className='btn btn-plain p23-milestone-back';back.type='button';back.dataset.p23Action='milestone-back';back.textContent='← Back';header.append(back);
+    }
+    header.querySelectorAll('.p19-back').forEach(x=>x.remove());
+   }
+   if(row){const add=panel.querySelector('[data-p40-action="milestone-new"]');if(add){row.append(add);add.classList.add('p23-milestone-add');}}
+  }
+ }
+};
+document.addEventListener('click',event=>{const b=event.target.closest('[data-p23-action="milestone-back"]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();state.p40MilestoneId=null;state.guardianTab='manage';render();},true);
+const P23_CSS=String.raw`
+/* Daily Journey uses a truly compact, plain stacked history list. */
+main .p19-daily-list,main .p2-list.p22-daily-compact{display:block!important;margin-top:10px!important;max-height:520px;overflow-y:auto}
+main .p19-daily-item{display:flex!important;align-items:center!important;gap:16px!important;padding:13px 8px!important;margin:0!important;background:transparent!important;border:0!important;border-radius:0!important;border-bottom:1px solid #ebd7e3!important;box-shadow:none!important;min-height:58px}
+main .p19-daily-item>span:first-child{font-size:1.6rem!important;flex:0 0 30px;text-align:center}
+main .p19-daily-item>div{display:block!important;min-width:0;flex:1}
+main .p19-daily-item strong{display:block;color:#604960;line-height:1.35;overflow-wrap:anywhere}
+main .p19-daily-item small{display:block;margin-top:3px;color:#967a8d;line-height:1.4}
+/* Owner Firebase setup: one white card, divisions rather than nested cards. */
+.p22-owner-config-card,.p22-owner-config-card.p23-white-owner-config{background:#fff!important;border-color:#ead7e2!important}
+.p22-owner-config-card>.p14-admin-block{background:transparent!important;border:0!important;border-bottom:1px solid #ead7e2!important;border-radius:0!important;padding:17px 0!important;margin:0!important;box-shadow:none!important}
+.p22-owner-config-card>.p14-admin-block:last-child{border-bottom:0!important}
+/* Milestones page: Back is in page header, Add is in heading row. */
+.p23-milestone-back{margin-left:auto;flex-shrink:0}.p23-milestone-add{margin-left:auto;white-space:nowrap}
+/* Archive progress, authentication and proper form hierarchy. */
+.p22-archive-danger:disabled{opacity:.7;cursor:progress}
+.p23-password-alternative{margin-top:12px;padding:12px 15px;border:1px solid #edd1e0;border-radius:16px;background:#fffafb}
+.p23-password-alternative>summary{cursor:pointer;font-weight:750;color:#875677;list-style-position:inside}
+.p23-password-inner{padding-top:14px;display:grid;gap:10px}
+.p23-password-inner p{margin:0}.p23-password-inner form{margin:0}
+.p23-auth-settings{border-top:1px solid #ead9e5;padding:15px 0 0;margin:14px 0 0;display:grid;gap:12px}
+.p23-auth-settings h3{margin:0}.p23-auth-settings p{margin:5px 0 0}
+.p23-auth-form{padding:15px;background:#fff9fc;border:1px solid #efd7e4;border-radius:15px;max-width:600px}
+.p23-auth-success{color:#356950;background:#eff9f1;border-radius:12px;padding:12px}
+.p23-auth-error{color:#92344d;background:#fff1f3;border-radius:12px;padding:12px}
+@media(max-width:680px){.p23-milestone-add{width:auto!important;min-width:0}.p23-milestone-back{margin:10px 0 0}.p23-auth-settings{min-width:0}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P23_BUILD}">${P23_CSS}</style>`);
+
 initialize();
 
 </script>
