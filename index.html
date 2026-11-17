@@ -7,7 +7,7 @@
   <meta name="description" content="A little world for growing routines, collecting stars, and celebrating progress.">
   <meta name="color-scheme" content="light">
   
-  <title>My Little Star Garden — Phase 6B.4 Family Experience</title>
+  <title>My Little Star Garden — Phase 6B.5 Guided Merge</title>
 <style>
 :root{
  --ink:#594459;--muted:#8a7186;--rose:#d88cad;--rose-dark:#914b73;--rose-light:#f9dfeb;
@@ -7312,6 +7312,728 @@ const p14CSS=`
 @media(max-width:690px){.p14-cloud-head>.btn{width:100%}.p14-overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.p14-dialog{border-radius:20px;max-height:95dvh}.p14-dialog-head{padding:20px 18px 15px}.p14-dialog-head h2{font-size:1.3rem}.p14-dialog-body{padding:18px 16px 20px}.p14-compare-grid{grid-template-columns:1fr}.p14-dialog-actions>.btn,.p14-confirm .btn{width:100%}.p14-history .p14-row button{width:100%}.p14-snapshot{padding:10px 12px}.p14-admin-block .grid2{grid-template-columns:1fr}.p14-admin-block .actions>.btn{width:100%}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P14_BUILD}">${p14CSS}</style>`);
+
+/* ============================================================
+ My Little Star Garden — Phase 6B.5
+ Conservative, guardian-reviewed, three-way cloud merge.
+ It never guesses the common ancestor or mutates local data before
+ a conditional, revision-checked cloud publish succeeds.
+ ============================================================ */
+const P15_BUILD='mlsg-6b5-guided-merge-20261117';
+state.p15Merge=null;state.p15MergeBusy=false;
+const P15_SENSITIVE=new Set(['transactions','vouchers','usageSessions','timers','incidents']);
+const P15_MAX_ROWS=35000;
+function p15Stable(value){
+ if(value===undefined)return 'undefined';
+ if(value===null||typeof value!=='object')return JSON.stringify(value);
+ if(Array.isArray(value))return '['+value.map(p15Stable).join(',')+']';
+ return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+p15Stable(value[k])).join(',')+'}';
+}
+function p15Same(a,b){return p15Stable(a)===p15Stable(b);}
+function p15RowId(store,row){return row[store==='records'?'key':'id'];}
+function p15Changes(base,now){const result=[];for(const store of DATA_STORES){
+ const b=new Map((base[store]||[]).map(row=>[p15RowId(store,row),row]));
+ const n=new Map((now[store]||[]).map(row=>[p15RowId(store,row),row]));
+ let added=0,edited=0,removed=0;
+ for(const id of new Set([...b.keys(),...n.keys()])){
+  if(!b.has(id))added++;else if(!n.has(id))removed++;else if(!p15Same(b.get(id),n.get(id)))edited++;
+ }
+ if(added||edited||removed)result.push({store,added,edited,removed});
+ }return result;}
+function p15Plan(base,local,cloud){
+ if(DATA_STORES.some(s=>![base,local,cloud].every(d=>Array.isArray(d[s]))))throw Error('The three backup versions do not share the current garden schema.');
+ if(DATA_STORES.some(s=>base[s].length+local[s].length+cloud[s].length>P15_MAX_ROWS))throw Error('A garden collection is too large for browser merge. Keep backups and review it separately.');
+ const combined={},conflicts=[],auto=[],sensitive=[];
+ for(const store of DATA_STORES){
+  const field=store==='records'?'key':'id';
+  const baseMap=new Map(base[store].map(r=>[r[field],r]));
+  const localMap=new Map(local[store].map(r=>[r[field],r]));
+  const cloudMap=new Map(cloud[store].map(r=>[r[field],r]));
+  const rows=[];
+  for(const id of [...new Set([...baseMap.keys(),...localMap.keys(),...cloudMap.keys()])].sort()){
+   const b=baseMap.get(id),l=localMap.get(id),c=cloudMap.get(id);
+   let chosen,reason;
+   if(p15Same(l,c)){chosen=l;reason='same';}
+   else if(p15Same(l,b)){chosen=c;reason='cloud';}
+   else if(p15Same(c,b)){chosen=l;reason='device';}
+   else{
+    const key=store+'|'+id;
+    conflicts.push({key,store,id,base:b||null,local:l||null,cloud:c||null});
+    continue;
+   }
+   if(chosen!==undefined)rows.push(chosen);
+   if(reason!=='same'){
+    auto.push({store,id,reason,kind:b===undefined?'added':chosen===undefined?'removed':'updated'});
+    if(P15_SENSITIVE.has(store)||store==='records'&&(/^(guardian-request:|p64-guardian-action:|p68-share-approval:|p67-rule-checkin:)/.test(id)))sensitive.push({store,id,reason});
+   }
+  }
+  combined[store]=rows;
+ }
+ if(conflicts.length>250)throw Error('More than 250 records need individual decisions. Use a JSON backup and resolve changes in smaller steps.');
+ return {base,local,cloud,combined,conflicts,auto,sensitive,
+  localChanges:p15Changes(base,local),cloudChanges:p15Changes(base,cloud)};
+}
+function p15Resolve(plan,decisions){
+ const merged={};for(const store of DATA_STORES)merged[store]=[...plan.combined[store]];
+ const unresolved=[];
+ for(const conflict of plan.conflicts){
+  const side=decisions[conflict.key];
+  if(side!=='device'&&side!=='cloud'){unresolved.push(conflict);continue;}
+  const chosen=side==='device'?conflict.local:conflict.cloud;
+  if(chosen!==null&&chosen!==undefined)merged[conflict.store].push(chosen);
+ }
+ if(unresolved.length)return {merged:null,unresolved};
+ for(const store of DATA_STORES)merged[store].sort((a,b)=>p15RowId(store,a).localeCompare(p15RowId(store,b)));
+ return {merged,unresolved:[]};
+}
+function p15SemanticCheck(data){
+ const taskById=new Map(data.tasks.map(t=>[t.id,t]));
+ const vouchers=new Map(data.vouchers.map(v=>[v.id,v]));
+ const txById=new Map(data.transactions.map(t=>[t.id,t]));
+ const comps=new Map(data.completions.map(c=>[c.id,c]));
+ const incidents=new Map(data.incidents.map(c=>[c.id,c]));
+ const signatures=new Map();
+ for(const c of data.completions){
+  if(!c.taskId||!c.date||c.correctedAt||Number(c.starsAwarded||0)<=0)continue;
+  const t=taskById.get(c.taskId),freq=t?.frequency;
+  if(!t)continue;
+  const capped=['daily','weekly','once','checkin'].includes(freq)||t.type==='checklist'&&t.stepMode==='per-step';
+  if(!capped)continue;
+  const period=freq==='once'?'once':freq==='weekly'?p2WeekStart(c.date):c.date;
+  const signature=`${c.taskId}:${period}:${freq==='checkin'?c.slot||'':''}:${t.stepMode==='per-step'?c.stepIndex??'whole':'whole'}`;
+  const other=signatures.get(signature);
+  if(other&&other!==c.id)throw Error(`Possible duplicate star award for “${t.name}” (${c.date}). Review the completion and its related transaction on the original devices; no merge was published.`);
+  signatures.set(signature,c.id);
+ }
+ const credited=new Set(),corrections=new Set(),ruleAwards=new Set(),challengeAwards=new Set(),repeatableCounts=new Map();
+ for(const comp of data.completions){
+  const t=taskById.get(comp.taskId);
+  if(!t||comp.correctedAt||Number(comp.starsAwarded||0)<=0||t.frequency!=='multi')continue;
+  const key=comp.taskId+'|'+comp.date,count=(repeatableCounts.get(key)||0)+1;
+  repeatableCounts.set(key,count);
+  if(count>Math.max(1,Number(t.maxPerDay||1)))throw Error('A repeatable quest exceeds its daily award limit after merging ('+t.name+', '+comp.date+'). Resolve the activity records before publishing.');
+ }
+ for(const t of data.transactions){
+  if(t.type==='challenge'&&t.challengeId&&!t.reversedAt&&String(t.id||'').startsWith('challenge:')){
+   const key=String(t.id).replace(/:redo:.*$/,'');
+   if(challengeAwards.has(key))throw Error('A challenge was credited more than once for the same period. Review the challenge awards before merging.');
+   challengeAwards.add(key);
+  }
+  if(t.type==='rule-earned'&&t.ruleId&&t.ruleDate&&!t.reversedAt){
+   const key=t.ruleId+'|'+t.ruleDate;
+   if(ruleAwards.has(key))throw Error('The same rule earned stars twice for one day ('+t.ruleDate+'). Resolve the rule awards before publishing.');
+   ruleAwards.add(key);
+  }
+  if(t.originalTransactionId&&['correction','earning-correction'].includes(t.type)){
+   if(corrections.has(t.originalTransactionId))throw Error('An original transaction has more than one correction. Review these star adjustments before merging.');
+   corrections.add(t.originalTransactionId);
+  }
+  if(t.type==='task'&&t.completionId){
+   if(!comps.has(t.completionId))throw Error('A task star transaction has no matching completion record ('+t.id+').');
+   if(credited.has(t.completionId))throw Error('The same completion has more than one star transaction ('+t.completionId+').');
+   credited.add(t.completionId);
+  }
+  if(t.voucherId&&!vouchers.has(t.voucherId))throw Error('A reward transaction references a missing voucher. Resolve its purchase and voucher together.');
+  if(t.incidentId&&!incidents.has(t.incidentId))throw Error('A deduction references a missing incident. Resolve its incident and transaction together.');
+  if(t.originalTransactionId&&!txById.has(t.originalTransactionId))throw Error('A correction references a missing original transaction.');
+ }
+ for(const v of data.vouchers){
+  if(v.claimTransactionId&&!txById.has(v.claimTransactionId))throw Error('A voucher is missing its star purchase transaction. Resolve its voucher and purchase together.');
+ }
+ for(const s of data.usageSessions){if(s.voucherId&&!vouchers.has(s.voucherId))throw Error('A reward usage session refers to a missing voucher.');}
+ // Two devices may independently claim a limited reward with different ticket IDs.
+ // Enforce the active frequency policy rather than only de-duplicating IDs.
+ for(const reward of data.rewards){
+  const kind=p64FrequencyKinds.includes(reward.claimFrequency)?reward.claimFrequency:(Number(reward.maxClaims)>0?'lifetime':'unlimited');
+  if(kind==='unlimited')continue;
+  const limit=Math.max(1,Number(reward.claimLimit||reward.maxClaims||1)),groups=new Map();
+  for(const v of data.vouchers){
+   if(v.rewardId!==reward.id||v.status==='cancelled')continue;
+   const date=p64DateOfStamp(v.claimedAt||'');
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(date))continue;
+   const group=kind==='lifetime'?'all':kind==='monthly'?date.slice(0,7):kind==='weekly'?p2WeekStart(date):date;
+   groups.set(group,(groups.get(group)||0)+1);
+   if(groups.get(group)>limit)throw Error('The merged vouchers exceed the claim limit for “'+String(reward.name||'Reward').slice(0,70)+'”. Review reward purchases before publishing.');
+  }
+ }
+ const requests=new Map();
+ for(const r of data.records){
+  if(!String(r.key||'').startsWith('guardian-request:')||r.status!=='pending')continue;
+  const sig=[r.kind,r.targetId,r.date,r.slot||''].join('|');
+  if(requests.has(sig))throw Error('Two pending Guardian requests concern the same activity. Resolve those requests on their devices before publishing.');
+  requests.set(sig,r.key);
+ }
+ return true;
+}
+function p15AccurateSummary(data){const summary=p14Summary(data);if(summary)summary.wallet=data.transactions.reduce((n,t)=>n+Number(t.amount||0),0);return summary;}
+function p15MakeProposal(s){
+ const resolved=p15Resolve(s.plan,s.decisions);
+ if(resolved.unresolved.length)throw Error(`Choose Device or Cloud for all ${resolved.unresolved.length} conflicting records first.`);
+ const candidate=resolved.merged;
+ previewBackup({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:candidate});
+ p15SemanticCheck(candidate);
+ const before=p15AccurateSummary(s.plan.local),remote=p15AccurateSummary(s.plan.cloud),after=p15AccurateSummary(candidate);
+ return {candidate,summary:after,before,remote,mergedHash:null};
+}
+async function p15FindAncestor(baseline,cloudRevision){
+ const revision=Number(baseline?.revision||0);
+ if(!Number.isSafeInteger(revision)||revision<1||revision>=Number(cloudRevision||0)||!String(baseline?.hash||''))throw Error('No usable common sync revision is saved on this device. A safe three-way merge cannot be reconstructed; keep your local and cloud backups and choose a recovery option.');
+ const snap=await p8FamilyRef().collection('snapshots').where('revision','==',revision).limit(15).get({source:'server'});
+ if(snap.empty)throw Error(`Cloud revision ${revision} is not available in snapshot history. We cannot safely merge without the original common version.`);
+ let valid=null;
+ for(const m of snap.docs){
+  if(!/^rev-[\w-]{4,96}$/.test(m.id)||Number(m.data().revision)!==revision)continue;
+  try{
+   const chunks=await m.ref.collection('chunks').get({source:'server'});
+   const backup=p8DownloadCloudChunks(m.data(),chunks);
+   const hash=await p8LocalHash(backup.data);
+   if(hash===baseline.hash){valid=backup.data;break;}
+  }catch(e){/* Incomplete orphan uploads are never trusted as an ancestor. */}
+ }
+ if(!valid)throw Error(`No archived revision ${revision} matches this device's saved baseline fingerprint. For safety, automatic merging is unavailable. Keep both backups and use manual recovery.`);
+ return valid;
+}
+async function p15PrepareMerge(){
+ if(!safeGuardian())throw Error('Unlock Guardian Mode first.');
+ const review=state.p14Review;
+ if(!review||review.mode!=='conflict'||!review.baseline)throw Error('Open Review & Sync and select a two-sided conflict first.');
+ if(state.p8Cloud.role==='viewer')throw Error('Viewer accounts cannot publish a merge.');
+ await p10CloudIdentityCheck();
+ state.p14Review=null;state.p14SyncChoice='';state.p15Merge={loading:true};render();
+ try{
+  const remote=await p8CloudFetchSnapshot();
+  if(remote.revision!==review.remoteRevision||remote.head?.snapshotId!==review.remoteId)throw Error('The shared cloud changed during review. Please review again.');
+  const baseline=review.baseline;
+  const ancestor=await p15FindAncestor(baseline,remote.revision);
+  const local=await getBackupData();
+  const localHash=await p8LocalHash(local);
+  if(localHash!==review.localHash)throw Error('Local progress changed during the review. Please review again.');
+  const plan=p15Plan(ancestor,local,remote.snapshot.data);
+  state.p15Merge={plan,decisions:{},proposal:null,baseRevision:baseline.revision,
+   localHash,remoteRevision:remote.revision,remoteId:remote.head.snapshotId,
+   remoteHash:await p8LocalHash(remote.snapshot.data),error:'',ack:false};
+ }catch(error){state.p15Merge={error:error.message||'Could not prepare a safe merge.'};}
+ render();
+}
+function p15RowTitle(row,store,id){
+ if(!row)return '(deleted)';
+ const text=row.name||row.taskName||row.targetName||row.ruleName||row.reason||row.title||row.key||row.id||id;
+ return String(text).slice(0,92);
+}
+function p15RowDetails(row,store){
+ if(!row)return 'Removed from this version';
+ const detail=[];
+ if(store==='transactions')detail.push(`${Number(row.amount)>0?'+':''}${row.amount||0} stars`,row.type||'transaction');
+ if(store==='vouchers')detail.push('Status: '+String(row.status||'unknown'),row.remainingSeconds!=null?`${Math.round(Number(row.remainingSeconds||0)/60)} min remaining`:null);
+ if(store==='completions')detail.push('Stars: '+String(row.starsAwarded||0),row.date||null);
+ if(store==='records')detail.push(row.status?'Status: '+String(row.status):null);
+ return detail.filter(Boolean).join(' · ').slice(0,175);
+}
+function p15FieldValue(value){
+ if(value===undefined)return '—';
+ if(value===null)return '(none)';
+ if(typeof value==='string'){
+  if(value.length>300||value.startsWith('data:'))return '(large attachment or text; inspect on the source device)';
+  return value.slice(0,105);
+ }
+ if(typeof value==='object')return p15Stable(value).slice(0,105);
+ return String(value);
+}
+function p15FieldDiff(c,side){
+ const item=side==='device'?c.local:c.cloud;
+ const keys=new Set([...Object.keys(c.base||{}),...Object.keys(item||{})]);
+ const diffs=[...keys].filter(k=>!['id','key'].includes(k)&&!p15Same(c.base?.[k],item?.[k]));
+ return diffs.length?`<div class="p15-fields">${diffs.slice(0,7).map(k=>`<span><b>${esc(k)}</b>: ${esc(p15FieldValue(item?.[k]))}</span>`).join('')}${diffs.length>7?`<small>+${diffs.length-7} more changed fields</small>`:''}</div>`:'<div class="p15-fields"><small>Unchanged fields or deleted record</small></div>';
+}
+function p15ConflictHtml(c,choice,i){
+ const hint=`${c.base?'Changed on both sides':'Created with the same ID on both sides'}`;
+ return `<article class="p15-conflict"><div class="p15-conflict-top"><span class="p15-index">${i+1}</span><div class="grow"><strong>${esc(c.store)} · ${esc(p15RowTitle(c.local||c.cloud,c.store,c.id))}</strong><small>${esc(hint)}</small></div></div><div class="p15-conflict-grid"><section><b>📱 This Device</b><span>${esc(p15RowTitle(c.local,c.store,c.id))}</span><small>${esc(p15RowDetails(c.local,c.store))}</small>${p15FieldDiff(c,'device')}</section><section><b>☁️ Family Cloud</b><span>${esc(p15RowTitle(c.cloud,c.store,c.id))}</span><small>${esc(p15RowDetails(c.cloud,c.store))}</small>${p15FieldDiff(c,'cloud')}</section></div><label class="p15-select-label" for="p15-choice-${i}">Choose which version to keep<select id="p15-choice-${i}" data-p15-decision="${esc(c.key)}"><option value="">Choose one…</option><option value="device" ${choice==='device'?'selected':''}>Keep this device's version</option><option value="cloud" ${choice==='cloud'?'selected':''}>Keep the cloud's version</option></select></label></article>`;
+}
+function p15MergeDialog(){const s=state.p15Merge;if(!s)return '';
+ if(s.loading)return p14DialogShell('🧩 Preparing Guided Merge','Verifying the common ancestor and comparing both devices.','<div class="p14-dialog-body"><p role="status">🔎 Validating past cloud revision, records, and current changes…</p></div>');
+ if(s.error&&!s.plan)return p14DialogShell('Merge Is Not Available','No family records were changed.',`<div class="p14-dialog-body"><p class="info error" role="alert">${esc(s.error)}</p><p class="p14-safe-note">Your device and cloud versions are unchanged. Return to Review & Sync for the existing backup and recovery choices.</p><button class="btn btn-soft" type="button" data-p15-action="close">Return to Family Sync</button></div>`);
+ const p=s.plan,chosen=p.conflicts.filter(c=>['device','cloud'].includes(s.decisions[c.key])).length;
+ const nLocal=p.localChanges.reduce((n,c)=>n+c.added+c.edited+c.removed,0);
+ const nCloud=p.cloudChanges.reduce((n,c)=>n+c.added+c.edited+c.removed,0);
+ const changeList=(changes)=>changes.length?changes.map(o=>`<span class="p15-change-pill">${esc(o.store)} <strong>+${o.added} ~${o.edited} −${o.removed}</strong></span>`).join(''):'<span class="p15-change-pill">No differences</span>';
+ const conflictList=p.conflicts.length?p.conflicts.map((c,i)=>p15ConflictHtml(c,s.decisions[c.key],i)).join(''):'<p class="p15-no-conflicts">✨ No individual record conflicts! Independent updates are ready for review.</p>';
+ const risky=p.sensitive.length||p.conflicts.some(c=>P15_SENSITIVE.has(c.store));
+ const preview=s.proposal?`<section class="p15-preview"><h3>🌟 Proposed Combined Garden</h3>${p14SummaryHtml(s.proposal.summary)}<p class="p2-muted tiny">These totals are a simulation. Nothing is saved yet.</p><div class="p14-confirm"><label class="p15-check"><input id="p15-ack" type="checkbox" ${s.ack?'checked':''}> I reviewed both versions, including any star transactions, vouchers, and pending approvals.</label><label class="field">Type <strong>MERGE</strong> to publish<input id="p15-word" placeholder="MERGE" autocomplete="off" spellcheck="false"></label><div class="p14-dialog-actions"><button class="btn btn-primary" data-p15-action="publish" type="button">🔐 Publish Reviewed Merge</button><button class="btn btn-soft" data-p15-action="rebuild" type="button">Change Decisions</button></div></div></section>`:
+ `<div class="p14-dialog-actions"><button type="button" class="btn btn-primary" data-p15-action="preview">✨ Preview Combined Garden</button><button type="button" class="btn btn-plain" data-p15-action="close">Not Now</button></div>`;
+ const body=`<div class="p14-dialog-body p15-body"><div class="p14-review-banner p14-review-conflict"><strong>Verified common version · Revision ${money(s.baseRevision)}</strong> The garden on this device and the family cloud both changed since this revision. Each choice below is reviewed before anything is uploaded.</div><div class="p15-branches"><section><b>📱 This Device</b><strong>${money(nLocal)} changed records</strong><div class="p15-change-list">${changeList(p.localChanges)}</div></section><section><b>☁️ Family Cloud · Rev. ${money(s.remoteRevision)}</b><strong>${money(nCloud)} changed records</strong><div class="p15-change-list">${changeList(p.cloudChanges)}</div></section></div><section class="p15-changes"><h3>Changes that can be combined</h3><p class="p2-muted tiny">${money(p.auto.length)} independent record updates were safely identified from the common version. None is duplicated by record ID.</p>${risky?`<div class="p14-safe-note">⚠️ ${money(p.sensitive.length)} independently changed star, voucher, timer, or approval records require extra care. The proposed total is validated, and you must explicitly acknowledge it before publishing.</div>`:''}</section><section class="p15-conflict-section"><div class="p14-row"><h3>Changes needing your decision</h3><span class="chip">${chosen} of ${p.conflicts.length} selected</span></div>${conflictList}</section>${s.error?`<p class="info error" role="alert">${esc(s.error)}</p>`:''}${preview}<p class="p15-caution">🔒 Publishing downloads a local safety backup, checks the cloud revision again, then creates a new cloud snapshot. It only updates this device after cloud publish succeeds. Conflicts involving duplicate awards or inconsistent vouchers are blocked—not silently discarded.</p></div>`;
+ return p14DialogShell('🧩 Resolve Family Changes',`Three-way comparison · Revision ${money(s.baseRevision)} → ${money(s.remoteRevision)}`,body);
+}
+const p15PriorGuardian=guardian;
+guardian=function(){const html=p15PriorGuardian();if(state.view!=='guardian'||!safeGuardian()||!state.p15Merge)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ root.querySelector('main')?.insertAdjacentHTML('beforeend',p15MergeDialog());return root.innerHTML;
+};
+const p15PriorReviewDialog=p14ReviewDialog;
+p14ReviewDialog=function(){let html=p15PriorReviewDialog();const r=state.p14Review;
+ if(r?.mode==='conflict'&&state.p8Cloud.role!=='viewer'){
+  html=html.replace('<button class="btn btn-primary" data-p14-action="sync-download">','<button class="btn btn-primary" data-p15-action="prepare">🧩 Review & Merge Changes</button><button class="btn btn-soft" data-p14-action="sync-download">');
+  html=html.replace('Phase 6B.5 will provide guided merging; for now, choose a whole version or keep both unchanged.','Use Guided Merge to compare individual records, or select a whole version if merging is unavailable.');
+  html=html.replace('Automatic conflict merging is deferred to Phase 6B.5.','Only reviewed, validated changes can be merged.');
+ }return html;
+};
+const p15PriorCloudPage=p8CloudPage;
+p8CloudPage=function(){return p15PriorCloudPage().replace('Sync is manual and never merges conflicting star records automatically.','Sync is manual. Independent changes can be merged only after a verified three-way comparison and Guardian approval.');};
+async function p15Publish(){
+ const s=state.p15Merge;
+ if(!safeGuardian()||!s?.proposal?.candidate||state.p8Cloud.role==='viewer')throw Error('Preview a complete, authorized merge first.');
+ await p10CloudIdentityCheck();
+ if(document.getElementById('p15-word')?.value.trim().toUpperCase()!=='MERGE')throw Error('Type MERGE in the confirmation field.');
+ if(!document.getElementById('p15-ack')?.checked)throw Error('Confirm that you reviewed both versions and their star / voucher implications.');
+ // Use the original immutable proposal — do not re-read mutable UI fields.
+ const candidate=s.proposal.candidate;
+ previewBackup({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:candidate});
+ p15SemanticCheck(candidate);
+ const localBefore=await getBackupData();
+ if(await p8LocalHash(localBefore)!==s.localHash)throw Error('This device changed since review. Return to Sync and compare again.');
+ const ptrSnap=await p8CloudSyncDoc().get({source:'server'});
+ if(!ptrSnap.exists||ptrSnap.data().revision!==s.remoteRevision||ptrSnap.data().snapshotId!==s.remoteId)throw Error('Cloud progress changed since review. No merge was published. Review the latest revision again.');
+ const uid=state.p8Cloud.user?.uid;
+ const c=await p8CloudSignedIn();
+ if(c.user?.uid!==uid||!c.family||!['owner','guardian'].includes(c.role))throw Error('Cloud access changed. Sign in and review again.');
+ // Download an ordinary restorable local backup BEFORE initiating any writes.
+ const localBackup={app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),timezone:state.settings.timezone,data:localBefore};
+ downloadText(`Star-Garden-Before-Merge-Local-${Date.now()}.json`,JSON.stringify(localBackup,null,2),'application/json');
+ const auditId=uniqueId(),createdAt=iso(),nextRevision=s.remoteRevision+1;
+ const merged=structuredClone(candidate);
+ merged.records.push({key:`p15-merge-audit:${auditId}`,kind:'cloud-merge',createdAt,guardianId:state.p64CurrentGuardian||'owner',firebaseUid:uid,baseRevision:s.baseRevision,cloudRevision:s.remoteRevision,publishedRevision:nextRevision,decisions:s.decisions,independentChanges:s.plan.auto.length});
+ previewBackup({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:merged});
+ p15SemanticCheck(merged);
+ const backup={app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),timezone:state.settings.timezone,data:merged};
+ const raw=JSON.stringify(backup),parts=[];
+ for(let i=0;i<raw.length;i+=P8_CHUNK_SIZE)parts.push(raw.slice(i,i+P8_CHUNK_SIZE));
+ if(!parts.length||parts.length>500)throw Error('Merged snapshot is too large for Firestore. Your local backup has been downloaded; cloud is unchanged.');
+ const snapshotId='rev-'+uniqueId().replace(/[^a-zA-Z0-9-]/g,'');
+ const ref=p8FamilyRef().collection('snapshots').doc(snapshotId);
+ // Chunks and manifest are immutable; only the transaction advances the pointer.
+ for(let i=0;i<parts.length;i++){
+  if(!safeGuardian()||state.p8Cloud.user?.uid!==uid)throw Error('Guardian session changed during upload; nothing was published.');
+  await ref.collection('chunks').doc(String(i).padStart(6,'0')).set({payload:parts[i]});
+ }
+ await ref.set({revision:nextRevision,chunks:parts.length,sourceUid:uid,createdAt:window.firebase.firestore.FieldValue.serverTimestamp(),merge:{baseRevision:s.baseRevision,fromRevision:s.remoteRevision,auditId}});
+ if(await p8LocalHash(await getBackupData())!==s.localHash)throw Error('Local records changed during upload. A new cloud snapshot was staged but not published. Review again.');
+ await c.db.runTransaction(async tx=>{
+  const ptr=p8CloudSyncDoc(),old=await tx.get(ptr);
+  if(!old.exists||Number(old.data().revision)!==s.remoteRevision||old.data().snapshotId!==s.remoteId)throw Error('A family member published a newer cloud version. No merge was published; review again.');
+  tx.set(ptr,{revision:nextRevision,snapshotId,authorUid:uid,updatedAt:window.firebase.firestore.FieldValue.serverTimestamp()});
+ });
+ // The cloud commit has succeeded. Never overwrite newer local activity.
+ c.revision=nextRevision;c.remote={revision:nextRevision,snapshotId};
+ if(await p8LocalHash(await getBackupData())!==s.localHash){
+  state.p15Merge=null;p8CloudStatus(`Merged cloud revision ${nextRevision} was published, but local activity changed during upload. This device was NOT overwritten; review Sync again.`,true);render();return;
+ }
+ try{
+  await replaceBackupData(merged);await refresh();
+  const actualHash=await p8LocalHash(await getBackupData());
+  p8SaveBaseline(nextRevision,actualHash);
+  state.p15Merge=null;state.p14HistoryLoaded=false;state.p14History=[];
+  p8CloudStatus(`✨ Safely merged as cloud revision ${nextRevision}. This browser now matches the shared garden.`);render();
+ }catch(error){state.p15Merge=null;p8CloudStatus(`Merged cloud revision ${nextRevision} is published, but this browser could not apply it: ${error.message}. Keep the downloaded local backup and review Sync.`,true);render();}
+}
+app.addEventListener('change',event=>{
+ const select=event.target.closest('[data-p15-decision]');
+ if(!select||!state.p15Merge?.plan)return;
+ const key=select.dataset.p15Decision;
+ if(!state.p15Merge.plan.conflicts.some(c=>c.key===key))return;
+ if(select.value==='device'||select.value==='cloud')state.p15Merge.decisions[key]=select.value;
+ else delete state.p15Merge.decisions[key];
+ state.p15Merge.proposal=null;state.p15Merge.error='';
+ const dlg=document.querySelector('.p15-body')?.closest('.p14-dialog'),pos=dlg?.scrollTop||0;
+ render();const updated=document.querySelector('.p15-body')?.closest('.p14-dialog');if(updated)updated.scrollTop=pos;
+},true);
+app.addEventListener('change',event=>{
+ if(event.target.id==='p15-ack'&&state.p15Merge)state.p15Merge.ack=Boolean(event.target.checked);
+},true);
+app.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-p15-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(state.p15MergeBusy)return;
+ const action=button.dataset.p15Action;
+ if(action==='close'){
+  state.p15Merge=null;state.p14Review=null;state.p15MergeBusy=false;render();return;
+ }
+ if(!safeGuardian()){notice('Unlock Guardian Mode to review a merge.',true);return;}
+ state.p15MergeBusy=true;button.disabled=true;
+ try{
+  if(action==='prepare')await p15PrepareMerge();
+  else if(action==='preview'){
+   const s=state.p15Merge;if(!s?.plan)throw Error('Prepare the merge first.');
+   s.proposal=p15MakeProposal(s);s.error='';render();
+  }else if(action==='rebuild'){
+   state.p15Merge.proposal=null;state.p15Merge.error='';state.p15Merge.ack=false;render();
+  }else if(action==='publish')await p15Publish();
+ }catch(e){if(state.p15Merge?.plan){state.p15Merge.error=e.message||'Merge could not be completed.';render();}else notice(e.message||'Merge could not be completed.',true);}
+ finally{state.p15MergeBusy=false;if(button.isConnected)button.disabled=false;}
+},true);
+const p15CSS=`
+.p15-body{gap:19px}.p15-branches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.p15-branches>section{display:grid;align-content:start;gap:7px;padding:15px;border-radius:16px;border:1px solid #ebd3e1;background:#fff8fc;min-width:0}.p15-branches>section>b{color:#8a5b76;font-size:.91rem}.p15-branches>section>strong{font-size:1.05rem}.p15-change-list{display:flex;gap:6px;flex-wrap:wrap}.p15-change-pill{background:#f7e6f0;color:#7e4c68;border-radius:9px;padding:4px 7px;font-size:.7rem}.p15-change-pill strong{font-size:.69rem}.p15-changes{display:grid;gap:10px}.p15-conflict-section{display:grid;gap:13px}.p15-conflict-section .p14-row{align-items:center}.p15-conflict{display:grid;gap:13px;padding:16px;border:1px solid #efd2e3;border-radius:18px;background:#fffbfd;min-width:0}.p15-conflict-top{display:flex;align-items:center;gap:10px}.p15-conflict-top strong{overflow-wrap:anywhere;font-size:.94rem}.p15-conflict-top small{display:block;color:#987d8f;font-size:.75rem;margin-top:3px}.p15-index{flex:none;display:grid;place-items:center;border-radius:50%;width:27px;height:27px;background:#eecfe1;color:#7c4767;font-weight:900}.p15-conflict-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.p15-conflict-grid section{display:grid;align-content:start;gap:5px;border-radius:13px;padding:12px;background:#fdf1f8;min-width:0}.p15-conflict-grid section:nth-child(2){background:#f0f7f2}.p15-conflict-grid b{font-size:.77rem;color:#805c74}.p15-conflict-grid span{font-size:.81rem;overflow-wrap:anywhere}.p15-conflict-grid small{color:#967b8b;overflow-wrap:anywhere;font-size:.73rem}.p15-select-label{display:grid;gap:7px;font-size:.85rem;font-weight:800;color:#77516a}.p15-select-label select{width:100%;min-width:0;border:1px solid #e6c9d9;border-radius:12px;padding:10px 12px;background:#fff;font:inherit;color:#66465b;min-height:43px}.p15-no-conflicts{background:#eef8f1;border:1px solid #d2e5d6;border-radius:14px;padding:14px;color:#54735e;font-size:.88rem}.p15-preview{display:grid;gap:12px;border-top:1px solid #efdae6;padding-top:20px}.p15-preview>h3{font-size:1.2rem}.p15-check{display:flex!important;align-items:start;gap:10px;font-size:.86rem!important;font-weight:650!important}.p15-check input{min-height:unset!important;width:20px!important;max-width:20px!important;height:20px;flex:none;margin-top:3px;accent-color:#a75d88}.p15-caution{color:#95798a;font-size:.77rem;line-height:1.55;border-top:1px solid #f1e2eb;padding-top:11px}.p15-fields{display:grid;gap:4px;margin-top:6px;border-top:1px solid #ebdde6;padding-top:7px}.p15-fields span{font-size:.72rem;overflow-wrap:anywhere;line-height:1.45}.p15-fields b{font-size:.72rem}.p15-preview .p14-metrics{border:1px solid #edd9e5;border-radius:15px;padding:8px 14px}
+@media(max-width:620px){.p15-branches,.p15-conflict-grid{grid-template-columns:1fr}.p15-conflict{padding:13px}.p15-change-pill{font-size:.73rem}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P15_BUILD}">${p15CSS}</style>`);
+
+/* ===========================================================
+ My Little Star Garden · Phase 6C.1
+ Guardian profile-first authentication, friendly email-link states,
+ verified account switching, and Safari-aware numeric PIN entry.
+ Existing IndexedDB, PIN hashes, cloud schema and Firestore rules retained.
+ =========================================================== */
+const P16_BUILD='mlsg-phase-6c1-guardian-auth-20261117';
+const p16LinkBoot=location.protocol==='https:'&&/[?&]oobCode=/.test(location.search);
+const p16EmailStore='mlsg-c1-pending-email';
+const p16SelectedStore='mlsg-c1-selected-guardian';
+state.p16Selected='';state.p16Entry='';state.p16Busy=false;state.p16Error='';
+state.p16EmailSent='';state.p16Email='';state.p16SentAt=0;state.p16Success='';state.p16Notice='';
+state.p16LinkPhase=p16LinkBoot?'verifying':'idle';state.p16LinkError='';
+state.p16ConfirmedEmail='';state.p16LinkBusy=false;state.p16AuthVerified=false;
+function p16RememberSelected(id){state.p16Selected=id;try{if(id)sessionStorage.setItem(p16SelectedStore,id);else sessionStorage.removeItem(p16SelectedStore);}catch{}}
+function p16ReadSelected(){try{return sessionStorage.getItem(p16SelectedStore)||'';}catch{return '';}}
+function p16ReadEmail(){try{const p=JSON.parse(localStorage.getItem(P9_EMAIL_KEY)||localStorage.getItem(p16EmailStore)||'null');if(p?.createdAt&&Date.now()-p.createdAt<30*60*1000&&p.projectId===state.p8Cloud?.config?.projectId)return p; }catch{}return null;}
+const p16PreviouslySent=p16ReadEmail();if(p16PreviouslySent){state.p16EmailSent=p16PreviouslySent.email;state.p16Email=p16PreviouslySent.email;state.p16SentAt=p16PreviouslySent.createdAt;}
+function p16ClearEmail(){try{localStorage.removeItem(P9_EMAIL_KEY);localStorage.removeItem(p16EmailStore);}catch{}state.p16EmailSent='';state.p16SentAt=0;}
+function p16IsFamily(){return pcFamilyReady();}
+function p16HasLocalProfile(id){return p10ValidProfileId(id);}
+function p16GuardianIdentity(){const c=state.p8Cloud;return c?.user&&c?.family&&c?.profileId?c.profileId:'';}
+function p16FriendlyError(error,context='sign-in'){
+ const code=String(error?.code||''),m=String(error?.message||'');
+ if(/too-many-requests|quota-exceeded/i.test(code+' '+m))return 'Too many attempts were made. Please try again later, or contact the family owner.';
+ if(/expired-action-code|invalid-action-code|invalid-email-link/i.test(code+' '+m))return 'This sign-in link has expired or has already been used. Please request a new link.';
+ if(/network-request-failed|unavailable|offline|failed to fetch/i.test(code+' '+m))return 'We could not connect to the family garden. Check your internet connection and try again.';
+ if(/unauthorized-domain|invalid-continue-uri/i.test(code+' '+m))return 'The garden website is not authorized for email sign-in. Ask the family owner to check Firebase settings.';
+ if(/user-disabled|permission-denied|not yet been authorized|not authorized|missing or insufficient permissions/i.test(code+' '+m))return 'This email is not yet authorized for your family garden. Please ask the family owner to give you access.';
+ if(/account-exists-with-different-credential|invalid-email/i.test(code+' '+m))return 'Please check the email address and try again.';
+ if(/This browser cannot save|No PIN is set up|No PIN is stored|does not match|another Guardian PIN|does not belong|already has a PIN|not on this device/i.test(m))return m;
+ return context==='link'?'We could not finish signing in. Please request a fresh link and try again.':'We could not complete that step. Please try again.';
+}
+function p16Spinner(){return '<span class="p16-spinner" aria-hidden="true"></span>';}
+function p16SendUI({fresh=false}={}){
+ const sent=state.p16EmailSent;const cooldown=Date.now()-(state.p16SentAt||0)<60000;
+ const subject=state.p16Selected&&p16HasLocalProfile(state.p16Selected)?p10LinkedName(state.p16Selected):'your family account';
+ if(sent)return `<section class="p16-sent" role="status" aria-live="polite"><div class="p16-hero-icon">📩</div><h2>Check your email!</h2><p>We sent a private sign-in link to <strong>${esc(sent)}</strong>.</p><p>Open your email, tap the link, then come back to the garden. <strong>There is no need to submit your email again.</strong></p><div class="p16-inline-actions"><button type="button" class="btn btn-soft" data-p16-action="resend" ${cooldown||state.p16Busy?'disabled':''}>${cooldown?'Link just sent':'Resend link'}</button><button type="button" class="btn btn-plain" data-p16-action="change-email" ${state.p16Busy?'disabled':''}>Use a different email</button></div><small class="p2-muted">If you don't see it, check spam or junk mail. A new link can be requested after one minute.</small></section>`;
+ return `<form id="p16-email-form" class="form-grid p16-email-form"><p class="p2-muted">Sign in as <strong>${esc(subject)}</strong>. We'll email you a secure link. No password is required.</p><div class="field"><label for="p16-email">Guardian email</label><input id="p16-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="name@example.com" value="${esc(state.p16Email||'')}" required></div><button class="btn btn-primary btn-wide" type="submit" ${state.p16Busy?'disabled':''}>${state.p16Busy?p16Spinner()+' Sending link…':'💌 Send Sign-In Link'}</button></form>`;
+}
+function p16ProfileScreen(){
+ const signed=p16GuardianIdentity(),c=state.p8Cloud;const ready=p16IsFamily(),profiles=p10ProfileChoices();
+ const selected=state.p16Selected,entry=state.p16Entry;
+ const intro=ready?'Select your Guardian profile. We’ll check that the right family account is connected before asking for your PIN.':'Select your Guardian profile to enter your PIN.';
+ return `<main class="center-layout p16-layout"><section class="welcome-card p16-card"><header class="p16-header"><div class="p16-hero-icon">👨‍👩‍👧</div><div><p class="eyebrow">My Little Star Garden · Guardian Mode</p><h1>Who’s caring for the garden?</h1><p class="p2-muted">${intro}</p></div></header>
+ ${ready&&c.user?`<div class="p16-connected"><span aria-hidden="true">☁️</span><span>Signed in: <strong>${esc(c.user.email||'Family account')}</strong>${signed?`<br><small>Connected to ${esc(p10LinkedName(signed))}</small>`:'<br><small>Checking Guardian profile authorization</small>'}</span></div>`:ready?'<div class="p16-connected p16-not-signed">☁️ Choose a profile to connect to your family garden.</div>':''}
+ <div class="p16-profiles" aria-label="Choose your Guardian profile">${profiles.map(p=>`<button type="button" class="p16-profile ${selected===p.id?'p16-selected':''}" data-p16-action="choose" data-id="${esc(p.id)}" aria-pressed="${selected===p.id}" ${state.p16Busy?'disabled':''}><span class="p16-avatar">${esc(p.icon||'💗')}</span><strong>${esc(p.name)}</strong><small>${ready?(signed===p.id?'✓ Signed in':signed?'Switch account':'Sign in required'):'Local PIN'}</small></button>`).join('')}</div>
+ ${state.p16Error?`<div class="p16-alert" role="alert">${esc(state.p16Error)}</div>`:''}
+ ${state.p16Notice?`<div class="p16-notice" role="status">${esc(state.p16Notice)}</div>`:''}
+ ${entry==='switch'?`<section class="p16-stage"><h2>Switch Guardian?</h2><p>To use <strong>${esc(p10LinkedName(selected))}</strong>, we'll sign out <strong>${esc(c.user?.email||'the previous guardian')}</strong> first. Local stars and progress will not be erased.</p><div class="p16-inline-actions"><button type="button" class="btn btn-primary" data-p16-action="confirm-switch">${state.p16Busy?p16Spinner()+' Switching…':'Switch & Sign In'}</button><button type="button" class="btn btn-soft" data-p16-action="cancel-switch">Keep Current Guardian</button></div></section>`:''}
+ ${entry==='signin'?`<section class="p16-stage"><h2>💌 Sign in to continue</h2>${p16SendUI()}</section>`:''}
+ ${entry==='pin-setup'?`<section class="p16-stage"><h2>🔐 Create your PIN on this device</h2>${p16PinSetupForm()}</section>`:''}
+ ${entry==='pin'?`<section class="p16-stage"><h2>🔐 ${esc(p10LinkedName(selected))}’s PIN</h2><p class="p2-muted">Enter your own six-digit Guardian PIN.</p>${p16PinForm()}<button class="btn btn-plain btn-small p16-back" type="button" data-p16-action="back-profiles">← Choose another profile</button></section>`:''}
+ ${entry==='mismatch'?`<section class="p16-stage"><h2>Account doesn't match</h2><p>This email is linked to <strong>${esc(p10LinkedName(signed)||'another Guardian')}</strong>, not the profile you selected. Choose your own profile, or switch to the correct email.</p><div class="p16-inline-actions"><button class="btn btn-primary" type="button" data-p16-action="choose-connected">Choose signed-in Guardian</button><button class="btn btn-soft" type="button" data-p16-action="confirm-switch">Switch Email</button></div></section>`:''}
+ ${ready&&selected&&entry==='signin'&&state.profile&&p16HasLocalProfile(selected)?'<button type="button" class="btn btn-plain p16-offline" data-p16-action="offline-pin">🌷 Continue with this profile offline instead</button>':''}
+ <button type="button" class="btn btn-plain p16-exit" data-p16-action="cancel">← Back to Child Mode</button></section></main>`;
+}
+function p16PinForm(){return `<form id="p16-pin-form" class="form-grid"><div class="field"><label for="p16-pin">Six-digit PIN</label><input id="p16-pin" name="pin" class="p16-pin-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" minlength="6" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="••••••" aria-label="Six-digit Guardian PIN" required></div><button class="btn btn-primary btn-wide" type="submit" ${state.p16Busy?'disabled':''}>${state.p16Busy?p16Spinner()+' Checking PIN…':'🔐 Unlock Guardian Mode'}</button></form>`;}
+function p16LinkScreen(){let body='';const phase=state.p16LinkPhase;
+ if(phase==='verifying')body=`<div class="p16-big-spinner">${p16Spinner()}</div><h1>Connecting your family garden…</h1><p>We're checking your private sign-in link. There's no need to enter your email again or press anything.</p>`;
+ else if(phase==='confirm')body=`<div class="p16-hero-icon">✉️</div><h1>Confirm it's you</h1><p>You opened the link in a different browser or device. For security, enter the <strong>same email address that received the link</strong>. We won't send another email.</p><form id="p16-link-confirm" class="form-grid"><div class="field"><label for="p16-confirm-email">Email that received the link</label><input id="p16-confirm-email" name="email" type="email" autocomplete="email" autocapitalize="off" spellcheck="false" required placeholder="name@example.com"></div><button type="submit" class="btn btn-primary btn-wide">Verify & Continue</button></form>`;
+ else if(phase==='success')body=`<div class="p16-hero-icon">🌟</div><h1>You're signed in!</h1><p>Your family account is connected${state.p8Cloud.user?.email?` as <strong>${esc(state.p8Cloud.user.email)}</strong>`:''}. Your stars and saved progress haven't been overwritten.</p><button type="button" class="btn btn-primary btn-wide" data-p16-action="link-continue">Continue to My Little Star Garden</button>`;
+ else body=`<div class="p16-hero-icon">💌</div><h1>That link needs attention</h1><p role="alert">${esc(state.p16LinkError||'We could not verify that sign-in link.')}</p><button type="button" class="btn btn-primary btn-wide" data-p16-action="link-retry">Request a New Link</button>`;
+ return `<main class="center-layout p16-layout"><section class="welcome-card p16-card p16-link-card" aria-live="polite">${body}</section></main>`;
+}
+function p16FreshWelcome(){const c=state.p8Cloud,canSave=getStorageMode()!=='memory',signed=Boolean(c.user);
+ return `<main class="center-layout p16-layout"><section class="welcome-card p16-card p16-fresh"><div class="p16-header"><div class="p16-hero-icon">🌷</div><div><p class="eyebrow">Your family's Star Garden</p><h1>Welcome to Our Family Garden!</h1><p class="p2-muted">Connect with your family email to bring your shared garden to this device.</p></div></div>
+ ${!canSave?'<div class="p16-alert" role="alert">This browser cannot reliably save your garden. Open the website in a normal browser tab with website storage enabled before loading cloud progress.</div>':''}
+ ${location.protocol!=='https:'?'<div class="p16-alert">Open the family garden from its HTTPS website to sign in.</div>':''}
+ ${signed?`<div class="p16-connected">✓ Signed in as <strong>${esc(c.user.email||'Family Guardian')}</strong></div>${c.family?`<p>Your family garden is ready to load. It won't overwrite any cloud data.</p><button type="button" class="btn btn-primary btn-wide" data-pc-action="family-download" ${canSave?'':'disabled'}>🌷 Load Our Family Garden</button>`:`<p>${esc(state.pcFamilyError||'Checking that your account has access to this family garden…')}</p><button class="btn btn-soft btn-wide" type="button" data-pc-action="family-check">Check Family Access</button>`}`:`${p16SendUI({fresh:true})}`}
+ <details class="p16-fresh-offline"><summary>Start a completely separate offline garden instead</summary><p>This is for a brand-new garden, not for downloading your family's progress.</p><button type="button" class="btn btn-plain" data-pc-action="family-offline" ${canSave?'':'disabled'}>Create Offline Garden</button></details></section></main>`;
+}
+// Shared email sender: all entry surfaces record the request, without forcing
+// localStorage to be available on Safari / private-window browsers.
+const p16OldSendEmail=p9SendEmailSignIn;
+p9SendEmailSignIn=async function(rawEmail){
+ const email=String(rawEmail||'').trim().toLowerCase();
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw Error('Please enter a valid email address.');
+ if(state.p16Busy)throw Error('Your sign-in request is already being sent.');
+ if(state.p16SentAt&&Date.now()-state.p16SentAt<60000)throw Error('A link was sent just now. Please check your inbox before requesting another.');
+ state.p16Busy=true;
+ try{
+  const c=await p8CloudInit();await c.auth.sendSignInLinkToEmail(email,{url:p9EmailLinkReturnUrl(),handleCodeInApp:true});
+  const item={email,projectId:c.config.projectId,createdAt:Date.now()};
+  try{localStorage.setItem(P9_EMAIL_KEY,JSON.stringify(item));localStorage.setItem(p16EmailStore,JSON.stringify(item));}catch{}
+  state.p16Email=email;state.p16EmailSent=email;state.p16SentAt=item.createdAt;
+  setTimeout(()=>{if(state.p16EmailSent===email&&state.p16SentAt===item.createdAt&&['p16-profiles','onboarding'].includes(state.view))render();},61000);
+  p8CloudStatus('Your sign-in link was emailed. Open it from your inbox to continue.');
+ }finally{state.p16Busy=false;}
+};
+pcFamilyEmailSignIn=async function(){await p9SendEmailSignIn(String(document.querySelector('#pc-family-email,#p16-email')?.value||''));state.pcFamilyError='';render();};
+
+// Start on a meaningful loading screen even when this browser has no IndexedDB.
+const p16PreviousRender=render;
+render=function(){
+ if(p16LinkBoot&&state.p16LinkPhase!=='done'){app.innerHTML=p16LinkScreen();p16ApplyPinFallback();return;}
+ if(state.view==='p16-profiles'||state.view==='p16-profiles-checking'){
+  app.innerHTML=state.view==='p16-profiles-checking'?`<main class="center-layout p16-layout"><section class="welcome-card p16-card p16-link-card" role="status">${p16Spinner()}<h1>Checking your family account…</h1><p>We're looking for your saved sign-in before showing Guardian profiles.</p></section></main>`:p16ProfileScreen();
+  p16ApplyPinFallback();return;
+ }
+ p16PreviousRender();p16ApplyPinFallback();
+};
+const p16PriorWelcome=welcome;
+welcome=function(){return p16IsFamily()&&!state.pcFamilyOfflineOptIn?p16FreshWelcome():p16PriorWelcome();};
+function p16ApplyPinFallback(){
+ const canMask=Boolean(window.CSS&&CSS.supports('-webkit-text-security','disc'));
+ // Numeric six-digit PINs are not website passwords. On Safari/Chromium,
+ // a masked text control avoids suggesting saved account passwords while
+ // retaining mobile numeric keyboards. Other browsers retain password type.
+ document.querySelectorAll('input[type="password"][inputmode="numeric"]').forEach(input=>{
+  if(!canMask)return;
+  input.type='text';input.style.setProperty('-webkit-text-security','disc');
+  input.setAttribute('autocomplete','off');input.setAttribute('autocorrect','off');
+  input.setAttribute('autocapitalize','off');input.spellcheck=false;
+ });
+ if(!canMask)document.querySelectorAll('.p16-pin-input').forEach(el=>{el.type='password';});
+}
+// Show the profile choice on EVERY visit, regardless of an existing session.
+async function p16EnterGuardian(){
+ state.unlocked=false;state.p64CurrentGuardian='';clearTimeout(lockTimer);
+ state.p16Error='';state.p16Notice='';state.p16Entry='';p16RememberSelected('');state.view='p16-profiles-checking';state.notice='';render();
+ if(p16IsFamily()){
+  try{
+   const signed=await p13AuthIsSignedIn();
+   if(signed){try{await p8FamilyCheck();state.p16AuthVerified=true;}catch(err){state.p16AuthVerified=false;state.p16Error=p16FriendlyError(err,'sign-in');}}
+   else{state.p16AuthVerified=false;const c=state.p8Cloud;c.profileId='';c.family=null;c.role=null;}
+  }catch(err){state.p16AuthVerified=false;state.p16Error=p16FriendlyError(err,'sign-in');}
+ }
+ if(state.view!=='p16-profiles-checking')return;
+ state.view='p16-profiles';render();
+}
+const p16BeforeHandleAction=handleAction;
+handleAction=async function(action){if(action==='open-pin'&&state.view==='child')return p16EnterGuardian();return p16BeforeHandleAction(action);};
+const p16BeforeGuardian=guardian;
+guardian=function(){const html=p16BeforeGuardian();if(state.view!=='guardian'||!safeGuardian())return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const side=root.querySelector('.sidefoot');if(side)side.insertAdjacentHTML('beforeend','<button class="btn btn-plain btn-small" type="button" data-p16-action="switch">👨‍👩‍👧 Switch Guardian</button>');
+ const top=root.querySelector('.topbar .row');if(top)top.insertAdjacentHTML('afterbegin','<button type="button" class="btn btn-plain btn-small p16-switch-top" data-p16-action="switch" title="Switch Guardian" aria-label="Switch Guardian">👥 <span>Switch</span></button>');
+ return root.innerHTML;
+};
+// A direct PIN form must prove it matches the SELECTED profile; the old PIN
+// verifier searches all PINs and must not unlock the wrong person by accident.
+async function p16HasSelectedPIN(id){
+ const current=state.p8Cloud;
+ const local=await get('auth',`p16-auth:${id}`);
+ if(local){
+  if(current?.user&&local.uid&&local.uid!==current.user.uid)throw Error('This Guardian PIN belongs to a different family email. Ask the owner before changing account links.');
+  return true;
+ }
+ const link=await get('auth','p10-cloud-local-identity');
+ if(id==='owner')return Boolean(await hasPin()&&(!link||link.profileId==='owner'));
+ if(await get('auth',`p64-auth:${id}`))return true;
+ return Boolean(link?.profileId===id&&await hasPin());
+}
+async function p16SelectPinStage(id){
+ if(await p16HasSelectedPIN(id))state.p16Entry='pin';
+ else if(p16IsFamily()&&state.p16AuthVerified&&state.p8Cloud?.user?.uid&&p16GuardianIdentity()===id){
+  if(getStorageMode()==='memory')throw Error('This browser cannot save a private Guardian PIN. Please use a normal browser with storage enabled.');
+  state.p16Entry='pin-setup';
+ }else throw Error('No PIN is set up for this Guardian on this device. Sign in with the matching family account first.');
+ render();
+}
+function p16PinSetupForm(){return `<form id="p16-pin-create" class="form-grid"><p class="p2-muted">This is the first time ${esc(p10LinkedName(state.p16Selected))} is using this browser. Choose a private six-digit PIN for this device. It won't change anyone else's PIN.</p><div class="field"><label for="p16-new-pin">Create six-digit PIN</label><input id="p16-new-pin" type="text" name="pin" class="p16-pin-input" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required placeholder="••••••"></div><div class="field"><label for="p16-confirm-pin">Confirm your PIN</label><input id="p16-confirm-pin" type="text" name="confirm" class="p16-pin-input" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required placeholder="••••••"></div><button class="btn btn-primary btn-wide" type="submit">🔐 Save My Guardian PIN</button><p class="p2-muted tiny">Only this browser keeps your PIN verification record. Sign-in still uses your own email when you switch accounts.</p></form>`;}
+async function p16CreatePIN(pin,confirm){
+ if(!isPin(pin)||pin!==confirm)throw Error('Please enter matching six-digit PINs.');
+ const id=state.p16Selected,c=state.p8Cloud;
+ if(!p16IsFamily()||!state.p16AuthVerified||!c?.user||!c.family||c.profileId!==id)throw Error('Sign in with your authorized Guardian email before creating a PIN.');
+ if(getStorageMode()==='memory')throw Error('This browser cannot save a private PIN. Use a regular browser tab.');
+ if(await p16HasSelectedPIN(id))throw Error('This Guardian already has a PIN on this browser. Use that PIN to continue.');
+ if(await p64PinExists(pin))throw Error('Another Guardian already uses that PIN on this device. Please choose a different six-digit PIN.');
+ for(const p of p10ProfileChoices()){
+  const cred=await get('auth',`p16-auth:${p.id}`);
+  if(cred?.pinHash&&constantTimeSame(await digest(pin,unbase64(cred.pinSalt)),cred.pinHash))throw Error('Another Guardian already uses that PIN on this device. Choose a different one.');
+ }
+ const salt=generateSalt();
+ await put('auth',{key:`p16-auth:${id}`,profileId:id,uid:c.user.uid,projectId:c.config?.projectId||'',familyId:c.familyId,pinSalt:base64(salt),pinHash:await digest(pin,salt),failedAttempts:0,lockedUntil:0,createdAt:iso()});
+ state.p16Entry='pin';state.p16Error='';state.p16Notice='Your PIN was saved on this browser. Enter it to open Guardian Mode.';render();
+}
+async function p16VerifyStoredPIN(record,pin,selected){
+ const now=Date.now();if((record.lockedUntil||0)>now)throw Error(`Too many attempts. Try again in ${Math.ceil((record.lockedUntil-now)/1000)} seconds.`);
+ const ok=constantTimeSame(await digest(pin,unbase64(record.pinSalt)),record.pinHash);
+ if(ok){await put('auth',{...record,failedAttempts:0,lockedUntil:0});state.p64CurrentGuardian=selected;return {ok:true};}
+ const failed=(record.failedAttempts||0)+1;
+ await put('auth',{...record,failedAttempts:failed>=5?0:failed,lockedUntil:failed>=5?now+60000:0});
+ throw Error(failed>=5?'Too many attempts. Try again in 60 seconds.':'Incorrect PIN. Please try again.');
+}
+
+async function p16UnlockGuardian(pin){
+ if(!state.p16Selected||state.p16Entry!=='pin')throw Error('Choose your Guardian profile first.');
+ if(!isPin(pin))throw Error('Enter all six digits of your Guardian PIN.');
+ const selected=state.p16Selected;
+ const c=state.p8Cloud;
+ if(p16IsFamily()&&state.p16AuthVerified&&(!c.user||c.profileId!==selected))throw Error('This family account does not match the selected Guardian. Please switch accounts.');
+ let result;
+ const linked=await get('auth',`p16-auth:${selected}`);
+ if(linked){
+  if(linked.uid&&c.user&&linked.uid!==c.user.uid)throw Error('This PIN is associated with another signed-in Guardian email.');
+  result=await p16VerifyStoredPIN(linked,pin,selected);
+ }else if(selected==='owner'){
+  const link=await get('auth','p10-cloud-local-identity');
+  if(link?.profileId&&link.profileId!=='owner')throw Error('This device’s original PIN belongs to another Guardian. Sign in as the owner and create a separate PIN.');
+  result=await p64OldVerifyPin(pin);
+  if(result.ok)state.p64CurrentGuardian='owner';
+ }else{
+  const record=await get('auth',`p64-auth:${selected}`);
+  if(record)result=await p16VerifyStoredPIN(record,pin,selected);
+  else{
+   const link=await get('auth','p10-cloud-local-identity');
+   if(link?.profileId!==selected)throw Error('This Guardian has no PIN on this browser. Sign in with the correct family account to create one.');
+   result=await verifyPin(pin);
+  }
+ }
+ if(!result.ok)throw Error(result.error);
+ if(state.p64CurrentGuardian!==selected){state.p64CurrentGuardian='';throw Error('That PIN is not associated with this Guardian. Please use the selected person’s PIN.');}
+ if(p16IsFamily()&&state.p16AuthVerified&&c.user){
+  if(!c.family||!['owner','guardian','viewer'].includes(c.role))throw Error('Your account needs access from the family owner.');
+  if(c.profileId!==selected)throw Error('Your cloud account does not match this Guardian profile.');
+ }
+ state.unlocked=true;state.guardianTab=state.p4PendingRewardId?'claim-reward':state.p4PendingVoucherId?'voucher-detail':state.p2PendingTaskId?'complete-task':'dashboard';
+ state.p2CompleteId=state.p2PendingTaskId||null;state.p2PendingTaskId=null;
+ state.p4SelectedRewardId=state.p4PendingRewardId||state.p4SelectedRewardId;
+ state.p4SelectedVoucherId=state.p4PendingVoucherId||state.p4SelectedVoucherId;
+ state.p4PendingRewardId=null;state.p4PendingVoucherId=null;
+ state.p2ReviewDate=dateStamp();state.view='guardian';state.notice='';touchSession();render();
+}
+// Profile choice with explicit cloud switching. No automatic sign-out merely
+// from tapping a person's card.
+async function p16Select(id){
+ if(!p16HasLocalProfile(id))throw Error('This Guardian profile is not on this device. Ask the family owner to sync the latest profiles.');
+ p16RememberSelected(id);state.p16Error='';state.p16Notice='';
+ if(!p16IsFamily()){await p16SelectPinStage(id);return;}
+ const c=state.p8Cloud,signed=p16GuardianIdentity();
+ if(c.user&&signed===id&&state.p16AuthVerified){await p16SelectPinStage(id);return;}
+ if(c.user&&!signed){state.p16Entry='mismatch';state.p16Error='This signed-in account is not yet linked to an authorized Guardian profile. Ask your family owner to link it, or switch to another email.';render();return;}
+ if(c.user&&signed!==id){state.p16Entry='switch';render();return;}
+ state.p16Entry='signin';render();
+}
+async function p16SignOutForSwitch(){
+ const c=state.p8Cloud;
+ if(c.auth){await p8CloudLogout();c.profileId='';c.family=null;c.role=null;}
+ state.p16AuthVerified=false;state.p16Error='';p16ClearEmail();state.p16Entry='signin';render();
+}
+// Use the same sending, sent and resend states inside Family Sync settings,
+// avoiding a second technical email form for offline-mode guardians.
+const p16CloudPageBefore=p8CloudPage;
+p8CloudPage=function(){
+ const html=p16CloudPageBefore();if(state.p8Cloud?.user)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const email=root.querySelector('.p14-account #p9-email-input');
+ const button=root.querySelector('.p14-account [data-p9-action="email-send"]');
+ if(email&&button){email.closest('.field')?.remove();button.outerHTML=`<div class="p16-settings-email">${p16SendUI()}</div>`;}
+ return root.innerHTML;
+};
+
+// A verified cloud identity can use its own separate in-app PIN on the same
+// device. The original (legacy) PIN remains bound to its original UID.
+const p16OldIdentityCheck=p10CloudIdentityCheck;
+p10CloudIdentityCheck=async function(){
+ const c=state.p8Cloud;
+ if(!c?.user||!c.family)return p16OldIdentityCheck();
+ if(c.role==='guardian'&&!c.profileId)throw Error('Ask the owner to link your account to a Guardian profile.');
+ if(!safeGuardian()||state.p64CurrentGuardian!==c.profileId)throw Error('Unlock the matching Guardian profile before syncing.');
+ if(c.profileId==='owner')return p16OldIdentityCheck();
+ const ownProfileAuth=await get('auth',`p64-auth:${c.profileId}`);
+ if(!ownProfileAuth)return p16OldIdentityCheck();
+ const originalLink=await get('auth','p10-cloud-local-identity');
+ if(originalLink?.profileId===c.profileId&&originalLink.uid!==c.user.uid)throw Error('This local PIN is linked to a different Firebase account.');
+};
+// Replace the old prompt-based callback. The link is resolved before the
+// ordinary onboarding / Guardian login screen may appear.
+p9HandleEmailLink=async function(){
+ if(!p16LinkBoot||state.p16LinkBusy)return;
+ state.p16LinkBusy=true;state.p16LinkPhase='verifying';render();
+ try{
+  const c=await p8CloudInit();
+  if(!c.auth.isSignInWithEmailLink(location.href))throw Error('invalid-action-code');
+  let email=state.p16ConfirmedEmail;
+  const saved=p16ReadEmail();if(!email&&saved)email=saved.email;
+  if(!email){state.p16LinkPhase='confirm';render();return;}
+  const signed=await c.auth.signInWithEmailLink(email,location.href);
+  c.user=signed.user;p16ClearEmail();
+  history.replaceState(null,'',location.pathname+location.hash);
+  if(c.familyId){try{await p8FamilyCheck();state.p16AuthVerified=true;}catch(err){state.p16AuthVerified=false;state.p16LinkError=p16FriendlyError(err,'sign-in');}}
+  p8CloudStatus(`Signed in as ${c.user?.email||'family guardian'}. Open Sync when you're ready to review your devices. No data was replaced.`);
+  state.p16LinkPhase='success';state.p16Success=c.user?.email||'';
+  const selected=p16ReadSelected();if(selected&&p16HasLocalProfile(selected))p16RememberSelected(selected);
+  render();
+ }catch(err){state.p16LinkPhase='error';state.p16LinkError=p16FriendlyError(err,'link');render();}
+ finally{state.p16LinkBusy=false;}
+};
+app.addEventListener('click',async e=>{
+ const b=e.target.closest('[data-p16-action]');if(!b)return;
+ e.preventDefault();e.stopImmediatePropagation();
+ if(state.p16Busy)return;
+ const action=b.dataset.p16Action;
+ try{
+  if(action==='choose'){await p16Select(b.dataset.id);return;}
+  if(action==='cancel'){state.p16Entry='';p16RememberSelected('');state.view=state.profile?'child':'onboarding';render();return;}
+  if(action==='switch'){await p16EnterGuardian();return;}
+  if(action==='back-profiles'||action==='cancel-switch'){state.p16Entry='';state.p16Error='';render();return;}
+  if(action==='confirm-switch'){state.p16Busy=true;b.disabled=true;await p16SignOutForSwitch();return;}
+  if(action==='choose-connected'){const id=p16GuardianIdentity();if(!id||!p16HasLocalProfile(id))throw Error('The signed-in profile is not on this device yet.');await p16Select(id);return;}
+  if(action==='offline-pin'){if(!state.profile||!state.p16Selected)throw Error('Only local Guardian profiles can be used offline.');if(!await p16HasSelectedPIN(state.p16Selected))throw Error('No PIN is stored for this Guardian here. Sign in with their family email first.');state.p16AuthVerified=false;state.p16Entry='pin';render();return;}
+  if(action==='change-email'){p16ClearEmail();state.p16Email='';render();return;}
+  if(action==='resend'){
+   if(Date.now()-state.p16SentAt<60000)return;
+   const email=state.p16EmailSent;state.p16SentAt=0;state.p16EmailSent='';
+   await p9SendEmailSignIn(email);render();return;
+  }
+  if(action==='link-continue'){
+   state.p16LinkPhase='done';
+   if(!state.profile){state.view='onboarding';render();return;}
+   await p16EnterGuardian();return;
+  }
+  if(action==='link-retry'){
+   history.replaceState(null,'',location.pathname+location.hash);state.p16LinkPhase='done';p16ClearEmail();
+   state.p16Entry='signin';state.view=state.profile?'p16-profiles':'onboarding';render();return;
+  }
+ }catch(err){state.p16Error=p16FriendlyError(err);render();}
+ finally{const wasBusy=state.p16Busy;state.p16Busy=false;if(b.isConnected)b.disabled=false;if(wasBusy&&state.view==='p16-profiles')render();}
+},true);
+app.addEventListener('submit',async e=>{
+ const form=e.target;
+ if(!['p16-pin-form','p16-pin-create','p16-email-form','p16-link-confirm'].includes(form.id))return;
+ e.preventDefault();e.stopImmediatePropagation();
+ if(state.p16Busy||state.p16LinkBusy)return;
+ const values=new FormData(form),button=form.querySelector('button[type="submit"]');
+ if(button){button.disabled=true;button.innerHTML=p16Spinner()+(form.id==='p16-pin-form'?' Checking PIN…':form.id==='p16-pin-create'?' Saving PIN…':form.id==='p16-link-confirm'?' Verifying…':' Sending link…');}
+ try{
+  if(form.id==='p16-pin-create'){
+   state.p16Busy=true;await p16CreatePIN(String(values.get('pin')||''),String(values.get('confirm')||''));return;
+  }
+  if(form.id==='p16-pin-form'){
+   state.p16Busy=true;await p16UnlockGuardian(String(values.get('pin')||''));return;
+  }
+  if(form.id==='p16-email-form'){
+   state.p16Email=String(values.get('email')||'').trim().toLowerCase();
+   await p9SendEmailSignIn(state.p16Email);state.p16Error='';render();return;
+  }
+  if(form.id==='p16-link-confirm'){
+   state.p16ConfirmedEmail=String(values.get('email')||'').trim().toLowerCase();
+   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.p16ConfirmedEmail))throw Error('Check the email address and try again.');
+   state.p16LinkPhase='verifying';state.p16LinkBusy=false;render();
+   await p9HandleEmailLink();return;
+  }
+ }catch(err){
+  if(form.id==='p16-link-confirm'){state.p16LinkPhase='error';state.p16LinkError=p16FriendlyError(err,'link');}
+  else state.p16Error=['p16-pin-form','p16-pin-create'].includes(form.id)?(err.message||'Could not save or verify PIN.'):p16FriendlyError(err);
+  render();
+ }finally{if(['p16-pin-form','p16-pin-create'].includes(form.id)){state.p16Busy=false;if(state.view==='p16-profiles')render();}if(button?.isConnected)button.disabled=false;}
+},true);
+// Clean up PIN text on paste or autofill without interfering with typing.
+app.addEventListener('input',e=>{if(!e.target.matches('.p16-pin-input'))return;const el=e.target;const clean=el.value.replace(/\D/g,'').slice(0,6);if(el.value!==clean)el.value=clean;},true);
+// Old onboarding email event listens for data-pc-action and will still power
+// the explicit cloud download action. Only the send action is handled here.
+const p16Css=`
+.p16-switch-top{white-space:nowrap;font-size:.77rem!important}.p16-layout{padding:20px 14px;align-items:center}.p16-card{width:min(100%,680px);max-width:680px;padding:28px;display:grid;gap:18px;text-align:left}.p16-header{display:flex;align-items:center;gap:16px}.p16-hero-icon{flex:none;background:#fde6f2;border:1px solid #f4d0e2;width:64px;height:64px;display:grid;place-items:center;font-size:2rem;border-radius:20px}.p16-header h1{font-size:clamp(1.45rem,3.5vw,2rem);line-height:1.2;margin:4px 0 8px}.p16-header p{margin:0;line-height:1.5}.p16-connected{display:flex;align-items:center;gap:12px;padding:12px 15px;background:#eff8f1;border:1px solid #cde5d4;border-radius:14px;color:#42654c;font-size:.85rem;overflow-wrap:anywhere}.p16-connected small{font-size:.75rem;opacity:.8}.p16-not-signed{background:#fff4fa;border-color:#f0d9e5;color:#866b7c}.p16-profiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.p16-profile{min-width:0;display:grid;place-items:center;align-content:start;gap:6px;padding:18px 7px;background:#fffafb;border:2px solid #efdbe6;border-radius:17px;color:#654b60;font:inherit;cursor:pointer;min-height:133px;transition:background .15s,border-color .15s}.p16-profile:hover{background:#fff3fa;border-color:#d5a7c1}.p16-profile.p16-selected{background:#fdf0f8;border-color:#ae7295;box-shadow:0 0 0 2px #e7cadc66}.p16-avatar{font-size:2rem}.p16-profile strong{text-align:center;font-size:.9rem;line-height:1.3;overflow-wrap:anywhere}.p16-profile small{font-size:.69rem;color:#8f7a8a}.p16-stage{display:grid;gap:12px;background:#fff8fc;border:1px solid #edd5e3;border-radius:18px;padding:18px;min-width:0}.p16-stage h2{margin:0;font-size:1.13rem;color:#68485f}.p16-stage p{font-size:.87rem;line-height:1.6;margin:0;color:#846a7d}.p16-stage input,.p16-fresh input{width:100%;min-height:46px;border:1.5px solid #e2bfd2;border-radius:11px;background:#fff;padding:10px 12px;font:inherit;min-width:0}.p16-stage label{color:#75536b;font-weight:750}.p16-pin-input{font-size:1.5rem!important;letter-spacing:.44em;text-align:center;-webkit-text-security:disc;max-width:310px}.p16-stage .form-grid,.p16-fresh .form-grid{gap:11px}.p16-inline-actions{display:flex;flex-wrap:wrap;gap:10px}.p16-notice{border:1px solid #c5dfcc;background:#f0f9f1;border-radius:12px;color:#457254;padding:11px 13px;line-height:1.55;font-size:.83rem}.p16-alert{border:1px solid #e6b1be;background:#fff0f3;border-radius:12px;color:#8d3b59;padding:11px 13px;line-height:1.55;overflow-wrap:anywhere;font-size:.83rem}.p16-exit,.p16-offline,.p16-back{justify-self:start}.p16-offline{font-size:.82rem}.p16-sent{display:grid;gap:10px;background:#f0f8f2;border:1px solid #c8e3d1;border-radius:16px;padding:18px;color:#4c6e56}.p16-sent h2{color:#45684d}.p16-sent p{font-size:.88rem!important;color:#526e5a!important}.p16-sent small{display:block;line-height:1.5}.p16-sent .p16-hero-icon{background:#e7f3e9;border-color:#cae1ce}.p16-link-card{max-width:560px;text-align:center;justify-items:center;min-height:270px;align-content:center}.p16-link-card h1{font-size:clamp(1.5rem,4vw,1.95rem);margin:0}.p16-link-card p{color:#886f80;line-height:1.6}.p16-link-card form{text-align:left;justify-self:stretch;width:100%}.p16-link-card button{justify-self:stretch}.p16-spinner{display:inline-block;width:19px;height:19px;border:3px solid #e8cadb;border-top-color:#a7658b;border-radius:50%;animation:p16-spin .8s linear infinite;vertical-align:middle;margin-right:6px}.p16-big-spinner .p16-spinner{width:43px;height:43px;border-width:5px}@keyframes p16-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.p16-spinner{animation:none;border-top-color:#a7658b}}.p16-fresh-offline{border-top:1px solid #eddbe6;padding-top:17px;font-size:.84rem;color:#8a7180}.p16-fresh-offline summary{cursor:pointer;font-weight:750}.p16-fresh-offline p{margin:10px 0}.p16-fresh h1{font-size:clamp(1.4rem,4vw,2rem)}@media(max-width:540px){.p16-switch-top span{display:none}.p16-switch-top{min-width:37px;padding:8px!important}.p16-card{padding:20px 16px;gap:15px}.p16-header{align-items:flex-start;gap:12px}.p16-hero-icon{height:54px;width:54px;font-size:1.6rem}.p16-profiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.p16-profile{min-height:122px;padding:14px 6px}.p16-stage{padding:15px}.p16-inline-actions .btn{flex:1 1 auto}.p16-link-card{min-height:290px}.p16-exit{font-size:.78rem}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P16_BUILD}">${p16Css}</style>`);
 
 initialize();
 
