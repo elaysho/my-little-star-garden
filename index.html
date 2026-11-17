@@ -10369,7 +10369,7 @@ document.addEventListener('click',event=>{const b=event.target.closest('[data-p2
  else if(action==='tour-next'){if(state.p17.tourStep>=p28Lessons.length-1)p28FinishTour(true);else{state.p17.tourStep++;p28Help.practice=false;p28SaveTourProgress(state.p17.tourStep);render();}}
  else if(action==='tour-later'){p28FinishTour(false);}
  else if(action==='practice'){p28Help.practice=true;render();}
- else if(action==='tour-locate'){const t=p28Lessons[state.p17.tourStep];p28Help.locate=true;state.p17.tour=false;state.guardianTab=t.tab;render();}
+ else if(action==='tour-locate'){const t=p28Lessons[state.p17.tourStep];if(t.subtab)state.p2ManageTab=t.subtab;p28Help.locate=true;state.p17.tour=false;state.guardianTab=t.tab;render();}
  else if(action==='tour-return'){p28Help.locate=false;state.p17.tour=true;state.guardianTab=p28Help.tourReturn;render();}
 },true);
 document.addEventListener('input',event=>{if(event.target.id==='p28-help-search'){p28Help.search=event.target.value;
@@ -10420,6 +10420,348 @@ document.head.insertAdjacentHTML('beforeend',`<style>:root{--p28-ink:#574157;--p
 .p28-tour-actions{position:sticky;bottom:-14px;background:#fffafd;padding:10px 2px;border-top:1px solid #f1dfea;z-index:4}
 @media(max-width:720px){.p14-dialog:has(.p28-tour)>.p14-dialog-head{padding:14px 18px 12px}.p14-dialog:has(.p28-tour)>.p28-tour{padding:14px 18px 24px;gap:10px}.p28-tour h3{margin:2px 0}.p28-tour>p{margin:3px 0}.p28-tour-tip{margin:4px 0}.p28-tour-actions .btn{flex:1 1 95px;font-size:.83rem;padding:8px 7px}.p28-tour-skip{margin:2px auto}}
 </style>`);
+
+/* =====================================================================
+   Phase 6C.2B.2E.1 — Routine clarity, challenge consistency,
+   temporarily password-only Guardian authentication.
+   Records, UIDs, existing Firestore rules and sync format unchanged.
+   ===================================================================== */
+function p29RoutineHistoryCard(r){
+ const total=Math.max(0,Number(r.total)||0),completed=Math.max(0,Number(r.completed)||0);
+ const excused=Math.max(0,Number(r.excused)||0),stars=Math.max(0,Number(r.stars)||0);
+ const summary=excused?`${completed} completed · ${excused} excused · ${total} total`:`${completed} of ${total} steps completed`;
+ const line=stars>0?`⭐ ${money(stars)} star${stars===1?'':'s'} earned from the tasks`:'No stars awarded for these steps';
+ const stepNames=Array.isArray(r.steps)?r.steps:[];
+ const details=stepNames.length?`<details class="p29-routine-details"><summary>View ${stepNames.length} routine step${stepNames.length===1?'':'s'}</summary><ol>${stepNames.map(name=>`<li>${esc(name)}</li>`).join('')}</ol></details>`:'';
+ return `<article class="p29-routine-card"><div class="p29-routine-symbol" aria-hidden="true">${esc(r.icon||'📋')}</div><div class="p29-routine-main"><div class="p29-routine-title"><strong>${esc(r.name||'Routine')}</strong><span class="p29-routine-done">✓ Finished</span></div><p class="p29-routine-count">${summary}</p><p class="p29-routine-stars">${line}</p>${details}</div></article>`;
+}
+p27RoutineSection=function(routines,guardian=false){
+ const count=routines.length;
+ return `<section class="panel p27-routines-history p29-routines-history"><div class="panel-head p29-routine-head"><h3>📋 Completed Routines</h3><span class="chip">${count} completed</span></div>${count?`<div class="p29-routine-list">${routines.map(p29RoutineHistoryCard).join('')}</div>`:'<p class="p2-muted">No completed routines for this date.</p>'}<p class="p29-routine-note">⭐ Stars shown here were earned through the individual tasks and are already included in the day's star total. No extra stars are added for completing the routine.</p>${guardian?'<p class="p29-routine-history-caution">Historical routines use the task membership currently saved in this garden. If a routine was edited afterward, some older completions may not be reconstructable.</p>':''}</section>`;
+};
+
+// Both the Journal and Challenges must evaluate completed routines using
+// the same surviving, guardian-confirmed completion records. This removes
+// the inconsistency where a multi/check-in task had a valid completion but
+// the legacy "finished" predicate still returned false.
+function p29ConfirmedRoutineOn(routine,day){
+ return !!routine && routine.type==='checklist' && p27RoutineHistory(day).some(row=>row.id===routine.id);
+}
+const p29PriorChallengeInfo=p64EntryInfo;
+p64EntryInfo=function(item,day){
+ if(item?.kind==='routine'){
+   const task=p2Task(item.id);
+   if(!task)return {name:'Unavailable routine',icon:'❔',ok:false,kind:'Routine'};
+   return {name:task.name||'Routine',icon:task.icon||'📋',ok:p29ConfirmedRoutineOn(task,day),kind:'Routine'};
+ }
+ return p29PriorChallengeInfo(item,day);
+};
+const p29PriorChallengeProgress=p2ChallengeProgress;
+p2ChallengeProgress=function(ch,day=p2Date()){
+ const items=p64ChallengeItems(ch);
+ if(!items.some(x=>x.kind==='routine'))return p29PriorChallengeProgress(ch,day);
+ const start=ch.period==='weekly'?p2WeekStart(day):'0001-01-01';
+ const dates=new Set();
+ for(const completion of state.p2Completions||[]){
+  if(p2ValidDate(completion.date)&&completion.date>=start&&completion.date<=day&&!completion.correctedAt)dates.add(completion.date);
+ }
+ // Include dates with rule confirmations and awards for mixed challenges.
+ for(const c of state.p41RuleConfirmations||[])if(p2ValidDate(c.date)&&c.date>=start&&c.date<=day)dates.add(c.date);
+ for(const t of state.summary?.transactions||[])if(t.type==='rule-earned'&&p2ValidDate(t.ruleDate)&&t.ruleDate>=start&&t.ruleDate<=day&&!t.reversedAt)dates.add(t.ruleDate);
+ let result=0;
+ for(const date of [...dates].sort()){
+  const matched=items.filter(item=>p64EntryInfo(item,date).ok);
+  if(ch.matchMode!=='any'){
+   if(matched.length===items.length&&items.length)result++;
+  }else if(ch.distinctDays){
+   if(matched.length)result++;
+  }else{
+   const includedRoutineStepIds=new Set(matched.filter(x=>x.kind==='routine').flatMap(x=>{
+     const routine=p2Task(x.id);
+     return routine&&Array.isArray(routine.routineItems)?p3Members(routine,date).map(({task})=>task.id):[];
+   }));
+   result+=matched.filter(x=>!(x.kind==='task'&&includedRoutineStepIds.has(x.id))).length;
+  }
+ }
+ return result;
+};
+const p29OldChallengeDetail=p63ChallengeDetail;
+p63ChallengeDetail=function(ch){
+ const root=document.createElement('div');root.innerHTML=p29OldChallengeDetail(ch);
+ const items=p64ChallengeItems(ch),routineItems=items.filter(i=>i.kind==='routine');
+ if(routineItems.length){
+  const box=root.querySelector('.p63-challenge-detail');
+  const heading=box?.querySelector('h3');
+  if(heading){
+   const onlyRoutines=routineItems.length===items.length;
+   const hint=document.createElement('p');hint.className='p29-challenge-explanation';
+   hint.textContent=onlyRoutines?'Each completed routine counts as one activity, no matter how many steps it contains. Weekly goals track qualifying days this week.':'Each completed routine counts once. Steps inside the routine do not separately increase the challenge progress.';
+   heading.after(hint);
+  }
+  const from=ch.period==='weekly'?p2WeekStart(p2Date()):'0001-01-01';
+  const historical=[...new Set((state.p2Completions||[]).map(c=>c.date).filter(d=>p2ValidDate(d)&&d>=from&&d<=p2Date()))].sort().filter(d=>routineItems.some(i=>p64EntryInfo(i,d).ok));
+  if(historical.length){
+   const history=document.createElement('p');history.className='p29-challenge-history';
+   history.textContent=`Completed routine dates counted: ${historical.slice(-6).join(', ')}${historical.length>6?' (most recent shown)':''}.`;
+   box?.querySelector('.p63-task-list')?.after(history);
+  }
+ }
+ return root.innerHTML;
+};
+
+// Password-only login is a temporary interface policy. Keep Firebase's
+// existing link-verification code so an in-flight link can complete, but
+// provide no new email-link sender in Guardian Mode.
+p16SendUI=function(){
+ const email=esc(state.p16Email||'');
+ return `<div class="p29-password-only"><p class="p29-signin-notice">🔑 Sign in with your family email and password. Email-link sign-in is temporarily unavailable.</p>${state.p23.authError?`<p class="p26-login-error" role="alert">${esc(state.p23.authError)}</p>`:''}${state.p23.authInfo?`<p class="p26-login-info" role="status">${esc(state.p23.authInfo)}</p>`:''}<form id="p23-password-login-form" class="form-grid"><div class="field"><label for="p23-login-email">Guardian email</label><input id="p23-login-email" name="email" type="email" autocomplete="username" inputmode="email" value="${email}" required></div><div class="field"><label for="p23-login-password">Account password</label><input id="p23-login-password" name="password" type="password" autocomplete="current-password" required></div><button class="btn btn-primary btn-wide" type="submit" ${state.p23.authBusy?'disabled':''}>${state.p23.authBusy?p16Spinner()+' Signing in…':'🔑 Sign In with Password'}</button></form><button type="button" class="btn btn-soft btn-wide p29-reset-password" data-p23-action="reset-password" ${state.p23.authBusy?'disabled':''}>Forgot your password?</button><small class="p2-muted">Your Firebase password is different from the six-digit Guardian PIN. If you do not have a password yet, ask the owner for help before signing out of a working session.</small></div>`;
+};
+const p29OldProfileScreen=p16ProfileScreen;
+p16ProfileScreen=function(){
+ const root=document.createElement('div');root.innerHTML=p29OldProfileScreen();
+ const heading=root.querySelector('.p16-stage > h2');
+ if(heading&&/Sign in to continue/.test(heading.textContent||''))heading.textContent='🔑 Sign in to continue';
+ return root.innerHTML;
+};
+// Other old setup entry points must not initiate email-link requests.
+document.addEventListener('submit',event=>{
+ if(!['p16-email-form','p13-guardian-email-form'].includes(event.target?.id))return;
+ event.preventDefault();event.stopImmediatePropagation();
+ state.p23.authError='Email-link sign-in is temporarily disabled. Please use Sign In with Password or Forgot your password.';render();
+},true);
+document.addEventListener('click',event=>{
+ const btn=event.target.closest('[data-p9-action="email-send"], [data-pc-action="family-send-email"], [data-p16-action="resend"], [data-p16-action="link-retry"], [data-p26-action="method-link"]');
+ if(!btn)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ state.p23.authError='Email-link sign-in is temporarily disabled. Please use Sign In with Password or Forgot your password.';
+ render();
+},true);
+// Hide legacy link controls in auxiliary cloud screens; the primary login
+// above remains available, including password recovery.
+const p29OldCloudPage=p8CloudPage;
+p8CloudPage=function(){
+ const root=document.createElement('div');root.innerHTML=p29OldCloudPage();
+ root.querySelectorAll('[data-p9-action="email-send"], [data-pc-action="family-send-email"], [data-p26-action="method-link"], #p16-email-form').forEach(x=>{x.disabled=true;x.hidden=true;});
+ root.querySelectorAll('.p9-email-row').forEach(x=>x.remove());
+ const oldLogin=root.querySelector('.p9-cloud-login');
+ if(oldLogin){
+  const title=oldLogin.querySelector('h3');if(title)title.textContent='🔑 Family password sign-in';
+  const intro=oldLogin.querySelector('p.p2-muted');if(intro)intro.textContent='Email-link sign-in is temporarily unavailable. Use your authorized Firebase email and password below.';
+ }
+ const legacy=root.querySelector('.p9-cloud-login, .p14-account');
+ if(!state.p8Cloud?.user&&legacy){
+  const existing=legacy.querySelector('#p23-password-login-form');
+  if(!existing){const block=document.createElement('div');block.className='p29-cloud-signin';block.innerHTML=p16SendUI();legacy.append(block);}
+ }
+ return root.innerHTML;
+};
+// Keep the interactive Learning Center's FAQ aligned with the updated sign-in
+// policy, without altering the already-exported user data.
+const p29PasswordFAQ=p28Faqs.find(row=>row[0]==='I forgot my Firebase password.');
+if(p29PasswordFAQ)p29PasswordFAQ[1]='Choose Forgot your password? on the Guardian sign-in screen. Use the reset email to create a new password. Email-link sign-in is temporarily disabled. A Firebase password is separate from the device Guardian PIN.';
+
+const P29_CSS=String.raw`
+.p29-routines-history{border:1px solid #eedce6;background:#fffdfd}
+.p29-routine-head{align-items:center;gap:10px}
+.p29-routine-head h3{margin:0}
+.p29-routine-list{display:grid;gap:12px;margin-top:14px}
+.p29-routine-card{display:flex;gap:14px;align-items:start;background:#fff;border:1px solid #e9d9e4;border-radius:17px;padding:16px;box-shadow:0 2px 7px rgba(102,65,89,.04)}
+.p29-routine-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;height:44px;border-radius:13px;background:#f9e8f2;font-size:1.55rem}
+.p29-routine-main{min-width:0;flex:1}
+.p29-routine-title{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;color:#60455c}
+.p29-routine-title strong{font-size:1.04rem;overflow-wrap:anywhere}
+.p29-routine-done{font-size:.74rem;font-weight:800;color:#477859;background:#eff7ef;padding:5px 9px;border-radius:30px;white-space:nowrap}
+.p29-routine-count{font-size:.9rem;color:#775c6e;margin:7px 0 3px}
+.p29-routine-stars{font-weight:650;color:#916177;font-size:.86rem;margin:0}
+.p29-routine-details{border-top:1px solid #f1e6ee;margin-top:12px;padding-top:10px;color:#755b6f;font-size:.85rem}
+.p29-routine-details summary{cursor:pointer;font-weight:700}
+.p29-routine-details ol{margin:9px 0 0;padding-left:22px;display:grid;gap:5px}
+.p29-routine-note{font-size:.8rem;line-height:1.55;color:#7b6875;margin:15px 0 0}
+.p29-routine-history-caution{font-size:.76rem;line-height:1.5;color:#897c87;border-top:1px solid #eedee8;margin:14px 0 0;padding-top:12px}
+.p29-challenge-explanation,.p29-challenge-history{font-size:.84rem;line-height:1.55;color:#755c6f;background:#fcf3f8;padding:10px 12px;border-radius:12px;margin:10px 0 13px}
+.p29-challenge-history{background:#f5faf7;color:#596d60}
+.p29-password-only{display:grid;gap:12px;max-width:100%;min-width:0}
+.p29-signin-notice{background:#fdf4f9;border:1px solid #edd7e5;border-radius:13px;padding:12px 14px;color:#79576e;font-size:.9rem;line-height:1.5;margin:0}
+.p29-password-only form{margin:0}
+.p29-password-only .p29-reset-password{min-height:46px!important;width:100%!important;margin:0!important}
+.p29-password-only input{width:100%;max-width:100%;box-sizing:border-box}
+.p29-password-only small{display:block;line-height:1.55}
+.p29-cloud-signin{margin-top:12px}
+@media(max-width:540px){.p29-routine-card{padding:12px;gap:10px}.p29-routine-symbol{width:38px;height:38px;flex-basis:38px}.p29-routine-title strong{font-size:.98rem}.p29-routine-count,.p29-routine-stars{font-size:.82rem}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style>${P29_CSS}</style>`);
+
+
+/* ===== Phase 6C.2B.2E.2: precise walkthrough, activity guides, friendly dashboard sync ===== */
+const P30_VERSION='mlsg-6c2b2e2-guided-help-20261117';
+const p30IsOwner=()=>Boolean(p14OwnerVerified());
+const p30ActivityGuides=[
+ {title:'Create a Task',subtitle:'Choose a task, stars, and how often it can earn them',emoji:'📖',cards:[
+ ['📝','1. Open Manage Activities','From Guardian Mode, open Manage Activities and select Tasks.'],
+ ['➕','2. Select Add Task','Enter a clear task name and choose an icon your child recognizes.'],
+ ['🌱','3. Choose the task type','Pick the type that matches the activity. For a routine, choose the separate Routines tab.'],
+ ['⭐','4. Set stars and frequency','Choose the star award, then when the task can earn stars. Only the relevant settings appear.'],
+ ['👀','5. Set visibility','Choose whether your child can see and request the task.'],
+ ['💾','6. Save and review','Save the task, then find it under Your Tasks. Use Daily Review to record an observed completion.']]},
+ {title:'Create a Routine',subtitle:'A checklist of small steps completed together',emoji:'📋',cards:[
+ ['📋','1. Open Routines','In Manage Activities, select Routines and tap New Routine.'],
+ ['📋','2. Name the new routine','Give it a familiar name, like Morning Routine or Bedtime Routine.'],
+ ['✅','3. Add the steps','List the actions your child should complete. Keep each step short and easy to understand.'],
+ ['⭐','4. Choose star awards','The routine container does not award stars itself; linked individual tasks earn their configured stars.'],
+ ['🕒','5. Choose frequency','Set when the routine should be done, such as daily.'],
+ ['💾','6. Save and follow progress','Check completed steps in the Daily Journal. A routine summary does not add the same earned stars again.']]},
+ {title:'Create a Rule',subtitle:'Set clear expectations and optional consequences',emoji:'🛡️',cards:[
+ ['📝','1. Open Manage Activities','Choose the Rules tab.'],
+ ['➕','2. Select Add Rule','Name the rule and describe what following it looks like.'],
+ ['💗','3. Choose an encouraging expectation','Use simple, specific language your child understands.'],
+ ['⭐','4. Set an optional deduction','Only set a deduction if your family uses them. Check the amount and the owner-configured limit.'],
+ ['👀','5. Review visibility','Decide how the expectation appears in Child Mode.'],
+ ['✅','6. Save and check in','Use Daily Rules Check-in to record what actually happened; deductions are not automatic.']]},
+ {title:'Create a Reward',subtitle:'Decide what stars can buy and when it can be used',emoji:'🎁',cards:[
+ ['🎁','1. Open Rewards','In Manage Activities, choose Rewards, then Create Reward.'],
+ ['📝','2. Fill Reward Details','Choose an icon, name, type, and description. Add a sponsor only when relevant.'],
+ ['⭐','3. Set Price & Contents','Choose the star price; add time, money, or food quantity only for relevant reward types.'],
+ ['📅','4. Set claim and use limits','Choose allowed days and how often the reward can be used.'],
+ ['✅','5. Add optional requirements','If needed, require certain tasks or rules before the reward can be used.'],
+ ['💾','6. Publish or save a draft','Review the settings, save, then check how it appears in the Star Shop.']]} ];
+p28GuideData.splice(0,p28GuideData.length,
+ {title:'Everyday Guardian Guide',subtitle:'The everyday actions in Guardian Mode',emoji:'🌷',cards:[
+ ['🔐','1. Enter Guardian Mode','Choose your profile. Use your account password if asked, then enter your six-digit Guardian PIN.'],
+ ['🏡','2. Check Dashboard','See spendable stars and any requests waiting for review.'],
+ ['📬','3. Review incoming requests','Open Review Center when your child has submitted a quest, note, or reward request.'],
+ ['📋','4. Record Daily Review','Even without a request, you can record a task or rule that you personally observed.'],
+ ['⭐','5. Check stars and rewards','Confirm star changes, review vouchers, and mark a reward used only when given.'],
+ ['☁️','6. Check sharing and lock','Use Check Family Sync on Dashboard, select Sync Now if needed, then lock Guardian Mode.']]},
+ {title:'Stars & Special Situations',subtitle:'What to do when something needs attention',emoji:'⭐',cards:[
+ ['✅','Task completed','Confirm an activity once; stars are recorded according to its task settings.'],
+ ['📖','Routine completed','The routine groups completed tasks and their already-earned stars. Do not award those stars twice.'],
+ ['🛡️','Rule observation','Use Daily Rules Check-in and provide a clear child-visible explanation for deductions.'],
+ ['🌤️','No Task Today / Excused','Use only when the activity was not expected; this does not count as a completed task or award stars.'],
+ ['↩️','Correct an error','Use the correction action instead of awarding unrelated bonus stars.'],
+ ['📝','Review a note','Read the child’s note carefully and respond clearly.']]},
+ {title:'Check Family Sync',subtitle:'A simple guide to sharing progress',emoji:'☁️',cards:[
+ ['💾','Saved on this device','New activity is saved immediately on the current device.'],
+ ['⏳','Sharing automatically','The garden waits about two quiet minutes, up to ten minutes if changes continue.'],
+ ['☁️','Sync Now from Dashboard','Open Check Family Sync and tap Sync Now to share sooner. Keep the page open for the result.'],
+ ['✅','Shared with family','The latest changes have been shared successfully.'],
+ ['📴','Offline','Changes remain on this device. Reopen it when internet access returns.'],
+ ['💌','Waiting for Owner','If another device made overlapping changes, ask the family owner to review them.']]},
+ ...p30ActivityGuides
+);
+// The tour now highlights a real control and describes exactly that control's purpose.
+p28Lessons.splice(0,p28Lessons.length,
+ {icon:'🔐',title:'Enter Guardian Mode',short:'Choose your Guardian profile, sign in if needed, then enter your Guardian PIN.',tab:'settings',focus:'.page-title',details:'Your account password signs you into the family garden. Your six-digit Guardian PIN unlocks Guardian Mode on this device. They are different.',where:'This Settings & Backup page lets you manage your personal Guardian PIN. Account sign-in happens before you enter Guardian Mode.'},
+ {icon:'🏡',title:'Understand the Dashboard',short:'Find the star wallet and everyday shortcuts.',tab:'dashboard',focus:'.stat-tile',details:'The star wallet is the number your child can spend in the Star Shop. Lifetime Stars counts stars earned over time, even after some are spent.',where:'This star tile shows your child’s star balance. Use the nearby Quick Actions to open Review Center, Daily Review, or Check Family Sync.'},
+ {icon:'📬',title:'Review Requests',short:'Open Review Center to respond to submissions.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="requests"]',details:'Review Center is for things your child submits: quest completions, Quest Notes, and reward requests. Verify an activity before approving it.',where:'This Review Requests control opens requests submitted by your child. You can also open Quest Notes and Daily Review from this page.'},
+ {icon:'📋',title:'Record Today’s Activities',short:'Use Daily Review even when there is no child request.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="daily-review"]',details:'If you personally saw a task completed, open Daily Review and record it even when your child forgot to submit a request. Use Daily Rules Check-in to record rule observations.',where:'Open Daily Review here when you need to record an activity yourself. You do not have to wait for a request.'},
+ {icon:'⭐',title:'Understand Star Changes',short:'Check how stars were earned, spent, or corrected.',tab:'history',focus:'.page-title',details:'Daily Journey and History show task awards, rule deductions, reward spending, and corrections. Completed routines group task activity without awarding extra stars.',where:'History & Reports shows recorded star changes. You can filter records to find the reason for an award, deduction, or correction.'},
+ {icon:'🎁',title:'Manage Rewards and Vouchers',short:'Know the difference between a reward request and using a voucher.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="requests"]',details:'Approving a reward request and marking a voucher Used are two different actions. Check its star cost, any requirements, and whether the reward was actually delivered.',where:'Start with Review Requests to check a reward request. Manage Activities → Rewards is where the rewards themselves are created.'},
+ {icon:'☁️',title:'Check Family Sync',short:'See whether this device’s changes were shared.',tab:'dashboard',focus:'.pc-sync-card',details:'Changes are saved on this device immediately. Automatic sharing waits about two minutes after the last change. Use Check Family Sync on Dashboard to see progress or tap Sync Now.',where:'This Check Family Sync button expands a simple sharing panel with status, a countdown when relevant, and a Sync Now button. You do not need technical settings.'},
+ {icon:'🔒',title:'Finish Safely',short:'Check sharing status and lock Guardian Mode.',tab:'dashboard',focus:'.guardian-heading',details:'After reviewing or recording activities, check whether changes are waiting to share. Use Sync Now if you need to close the browser immediately, then lock Guardian Mode.',where:'The Guardian Dashboard is your starting and finishing point. Use the lock control when your session is complete.'},
+ {icon:'📖',title:'Create a Task',short:'Choose the name, star value, frequency, and visibility.',tab:'manage',subtab:'tasks',focus:'[data-p5a-action="new-task"][data-type="habit"]',details:'Open Manage Activities → Tasks → Add Task. Choose a simple name and task type, set the stars and award frequency, review visibility, then save.',where:'This Add Task button opens the task editor. It will show extra fields only for the award frequency you choose.'},
+ {icon:'📋',title:'Create a Checklist Routine',short:'A routine groups existing tasks into steps.',tab:'manage',subtab:'routines',focus:'[data-p5a-action="new-task"][data-type="checklist"]',details:'To create a routine, open Manage Activities → Routines → New Routine. Give it a name, link the tasks that make up its steps, then save. Stars are earned through the individual tasks.',where:'This New Routine button opens the routine editor. Link the individual tasks that should be part of the checklist.'},
+ {icon:'🛡️',title:'Create a Rule',short:'Describe expectations and optional consequences.',tab:'manage',subtab:'rules',focus:'[data-p2-action="rule-new"]',details:'Open Manage Activities → Rules → Add Rule. Write a clear expectation, select any optional consequence, check visibility, then save.',where:'This Add Rule button opens the rule editor. Later use Daily Rules Check-in to record what happened.'},
+ {icon:'🎁',title:'Create a Reward',short:'Choose the price, contents, use limits, and requirements.',tab:'manage',subtab:'upcoming',focus:'[data-p4-action="reward-new"]',details:'Open Manage Activities → Rewards → Create Reward. Enter Reward Details, choose the star price, set relevant contents and schedules, then optional prerequisites before publishing.',where:'This Create Reward button opens the reward editor. The type you choose determines which content fields appear.'}
+);
+// Friendly language and practical instructions, no quizzes or mock approvals.
+p28Faqs.splice(0,p28Faqs.length,
+ ['Where do I approve a quest?','Open Review Center when your child has submitted an activity. Check what happened before approving.'],
+ ['How can I record an activity without a request?','Open Review Center → Daily Review. You can record a task you personally saw completed, even if your child never submitted it.'],
+ ['Where do I record today’s rules?','Open Daily Rules Check-in from Review Center or Daily Review. Record observed behavior and explain any deduction clearly.'],
+ ['How do I create a task?','Open Manage Activities → Tasks → Add Task. Set the task type, star award, frequency, visibility, and save.'],
+ ['How do I create a checklist routine?','Open Manage Activities → Routines → New Routine. Link individual tasks as its steps; each task keeps its own star settings.'],
+ ['How do I create a rule?','Open Manage Activities → Rules → Add Rule. Add a clear expectation, optional deduction, and save.'],
+ ['How do I create a reward?','Open Manage Activities → Rewards → Create Reward. Choose its name, type, price, schedule, limits, and any requirements.'],
+ ['Why has progress not been shared yet?','Progress saves on this device immediately. Automatic sharing starts about two minutes after the last edit (ten-minute maximum while editing continues). On the Guardian Dashboard, expand Check Family Sync and tap Sync Now to share sooner.'],
+ ['What does Waiting for Owner mean?','Changes from two devices need the family owner to review them. Your progress stays saved here. Ask the owner to review; you do not need to change technical settings.'],
+ ['What is No Task Today / Excused?','It means an activity was not expected that day. It is not a completion and does not award stars.'],
+ ['Why do routines show earned stars?','Routine summaries show stars already awarded for completed steps. The garden does not award those stars a second time.'],
+ ['I forgot my account password.','Select Forgot your password? on the family sign-in page and follow the reset email. Your account password and six-digit Guardian PIN are different.'],
+ ['How do I finish safely?','Check Family Sync on your Dashboard. If changes are waiting and you need to leave soon, use Sync Now and check the result, then lock Guardian Mode.']
+);
+p28GuideHtml=function(index){const g=p28GuideData[index];if(!g)return '';
+ return `<section class="p28-guide"><div class="p28-guide-head"><span class="p28-guide-symbol">${g.emoji}</span><div><small>MY LITTLE STAR GARDEN · GUIDE ${index+1} OF ${p28GuideData.length}</small><h2>${esc(g.title)}</h2><p>${esc(g.subtitle)}</p></div></div><div class="p28-guide-grid">${g.cards.map(([emoji,title,description])=>`<article class="p28-guide-step"><b class="p28-guide-emoji">${emoji}</b><div><h3>${esc(title)}</h3><p>${esc(description)}</p></div></article>`).join('')}</div></section>`;
+};
+p28HelpPage=function(){const isOwner=p30IsOwner();return `<section class="p28-help-top"><div><p class="eyebrow">Your guide to the family garden</p><h1 class="page-title">🌷 Guardian Learning Center</h1><p class="lead">See where things are, learn what each button does, and revisit any guide whenever you need help.</p></div><button type="button" class="btn btn-plain" data-p28-action="back">← Back to Settings</button></section>
+<section class="panel p28-help-intro"><h3>👀 A guided look around</h3><p>Follow ${p28Lessons.length} short lessons. Tap <strong>Show Me Where</strong> to see the real app screen highlighted. You will not need to complete a practice task or make changes to family records.</p><div class="actions"><button type="button" class="btn btn-primary" data-p28-action="start-tour">▶ ${p28ReadTourProgress()&&!p28ReadTourProgress()?.done?'Resume Walkthrough':'Start Walkthrough'}</button><button type="button" class="btn btn-soft" data-p28-action="start-tour-new">Start from Beginning</button></div></section>
+<section class="panel"><h3>🖼️ Picture Guides</h3><p class="p2-muted">Choose a topic below. These illustrated steps are available even without internet.</p><div class="p28-guide-choices">${p28GuideData.map((g,i)=>`<button type="button" class="p28-guide-choice" data-p28-action="guide" data-index="${i}"><span>${g.emoji}</span><strong>${esc(g.title)}</strong><small>${esc(g.subtitle)}</small></button>`).join('')}</div>${p28Help.guide>=0?`<div class="p28-guide-preview"><div class="p28-guide-tools"><button class="btn btn-soft btn-small" data-p28-action="guide-back">← All Guides</button></div>${p28GuideHtml(p28Help.guide)}</div>`:''}</section>
+<section class="panel"><h3>❓ Common Questions</h3><p class="p2-muted">Search for an everyday task, then open the answer.</p><label class="p28-search"><span class="sr-only">Search Guardian help</span><input id="p28-help-search" placeholder="Search tasks, routines, rewards, password…" value="${esc(p28Help.search)}" autocomplete="off"></label><div class="p28-faq-list">${p28Faqs.map(([q,a],i)=>({q,a,i})).filter(x=>(x.q+' '+x.a).toLowerCase().includes(p28Help.search.toLowerCase())).map(x=>`<details><summary>${esc(x.q)}</summary><p>${esc(x.a)}</p></details>`).join('')||'<p class="p2-muted">No matching questions. Try another word.</p>'}</div></section>
+${isOwner?`<section class="panel"><h3>🛡️ Extra Help for the Family Owner</h3><p>The family owner handles account links, conflicting changes, and recovery snapshots. Other Guardians can focus on everyday activities and the simple dashboard sharing status.</p></section>`:''}`;};
+p28TourHtml=function(){const i=Math.min(p28Lessons.length-1,Math.max(0,state.p17.tourStep)),t=p28Lessons[i];const chips=p28Lessons.map((_,j)=>`<span class="p28-dot${j===i?' active':''}${j<i?' done':''}" aria-label="Lesson ${j+1}"></span>`).join('');return p17ModalShell('🌷 Guardian Guided Walkthrough',`Lesson ${i+1} of ${p28Lessons.length}`,`<div class="p14-dialog-body p28-tour"><div class="p28-dots">${chips}</div><div class="p28-lesson-icon">${t.icon}</div><h3>${esc(t.title)}</h3><p>${esc(t.details)}</p><div class="p28-tour-actions"><button class="btn btn-plain" type="button" data-p28-action="tour-prev" ${i===0?'disabled':''}>← Back</button><button class="btn btn-soft" type="button" data-p28-action="tour-locate">👀 Show Me Where</button><button class="btn btn-primary" type="button" data-p28-action="tour-next">${i===p28Lessons.length-1?'Finish':'Next →'}</button></div><button class="p28-tour-skip" type="button" data-p28-action="tour-later">Save and Finish Later</button></div>`,'tour-later').replace('data-p17-action="tour-later"','data-p28-action="tour-later"');};
+p17TourHtml=p28TourHtml;
+// When locating an activity button, switch the displayed management tab only (no writes).
+const p30OldApplyLocate=p28ApplyLocateTip;
+p28ApplyLocateTip=function(){document.querySelectorAll('.p28-locate-tip').forEach(el=>el.remove());document.querySelectorAll('.p28-spotlight').forEach(el=>el.classList.remove('p28-spotlight'));
+ if(!p28Help.locate||state.view!=='guardian'||!safeGuardian())return;
+ const t=p28Lessons[state.p17.tourStep],target=document.querySelector(t.focus);
+ if(target){target.classList.add('p28-spotlight');target.scrollIntoView?.({block:'nearest',behavior:'instant'});}
+ const tip=document.createElement('div');tip.className='p28-locate-tip';tip.innerHTML=`<strong>${t.icon} ${esc(t.title)}</strong><p>${esc(target?t.where:'Open the indicated Guardian section to find this control. No changes are being made.')}</p><button type="button" class="btn btn-primary btn-small" data-p28-action="tour-return">Continue Lesson →</button>`;document.body.append(tip);
+};
+// Update the existing locate click handler by intercepting the action before it runs.
+document.addEventListener('click',e=>{const b=e.target.closest('[data-p28-action="tour-locate"]');if(!b)return;
+ const t=p28Lessons[state.p17.tourStep];if(t?.subtab)state.p2ManageTab=t.subtab;
+},true);
+// Keep the first-time invitation factual rather than promising a practice game.
+const p30EarlierGuardian=guardian;
+let p30SyncOpen=false,p30SyncBusy=false,p30SyncResult='';
+function p30SyncState(){const c=state.p8Cloud||{},p=state.p17||{},m=p28ReadPending(),ready=p17IsReady();
+ const status=p.status||'offline';
+ if(!c.config||!c.familyId)return {icon:'💾',title:'Saved on this device',message:'Family sharing is not configured here. Ask the family owner for help if this device should be connected.',type:'offline',ready:false,wait:0};
+ if(!ready)return {icon:'📴',title:'Saved on this device',message:'This device is offline or not signed into the family garden. Your local changes remain saved.',type:'offline',ready:false,wait:0};
+ if(p30SyncBusy||p.busy||status==='checking')return {icon:'🔄',title:'Checking family changes…',message:'Comparing this device with the family garden. Keep this page open.',type:'checking',ready:true,wait:0};
+ if(status==='pending')return {icon:'💌',title:'Waiting for Owner',message:'Your changes are saved. The family owner needs to review overlapping edits.',type:'pending',ready:true,wait:0};
+ if(status==='attention')return {icon:'⚠️',title:'Sharing needs attention',message:'Your changes remain saved here. Try Sync Now or ask the owner if it continues.',type:'attention',ready:true,wait:0};
+ if(m){const left=Math.max(0,p28SyncDue(m)-Date.now());return {icon:'⏳',title:'Saved on this device',message:left>0?`Automatic sharing in about ${p28WaitDescription(left)}. You can share sooner with Sync Now.`:'Changes are ready for automatic sharing.',type:'waiting',ready:true,wait:left};}
+ if(status==='shared')return {icon:'☁️',title:'Shared with family',message:p.lastSuccess?`Last successful sharing: ${new Date(p.lastSuccess).toLocaleString()}.`:'The latest changes are shared.',type:'shared',ready:true,wait:0};
+ return {icon:'☁️',title:'Checking sharing status',message:'Select Sync Now to check this device against the family garden.',type:'unknown',ready:true,wait:0};
+}
+function p30SyncPanelHtml(){const v=p30SyncState(),isOwner=p30IsOwner();return `<div class="p30-sync-panel" id="p30-dashboard-sync-panel" role="region" aria-label="Family sharing status"><div class="p30-sync-status"><span class="p30-sync-emoji" aria-hidden="true">${v.icon}</span><div><strong data-p30-state-title>${esc(v.title)}</strong><p data-p30-state-message>${esc(v.message)}</p></div></div><p class="p30-sync-explainer">Progress saves on this device immediately. Automatic sharing waits two minutes after the last change, or up to ten minutes during continuous editing.</p><div class="p30-sync-actions"><button class="btn btn-primary" type="button" data-p30-action="sync-now" ${!v.ready||p30SyncBusy?'disabled':''}>${p30SyncBusy?'Sharing…':'☁️ Sync Now'}</button>${isOwner?'<button class="btn btn-soft" type="button" data-p30-action="owner-sync">Advanced Family Sync</button>':''}</div>${p30SyncResult?`<p class="p30-sync-result" role="status">${esc(p30SyncResult)}</p>`:''}${!isOwner?'<p class="p30-sync-soft-note">If your changes need owner review, ask the family owner. You don’t need to manage any technical settings.</p>':''}</div>`;}
+guardian=function(){
+ if(state.view==='guardian'&&safeGuardian()&&state.guardianTab==='p8-cloud'&&!p30IsOwner())return shell(`<section class="p28-help-top"><div><p class="eyebrow">Guardian · Sharing status</p><h1 class="page-title">☁️ Check Family Sync</h1><p class="lead">See whether your changes have reached the family garden.</p></div><button class="btn btn-plain" type="button" data-p30-action="back-dashboard">← Back to Dashboard</button></section><section class="panel">${p30SyncPanelHtml()}</section>`,true);
+ const html=p30EarlierGuardian();if(state.view!=='guardian'||!safeGuardian())return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ if(state.guardianTab==='dashboard'){
+  const action=root.querySelector('.pc-sync-card');if(action){action.dataset.p30Action='toggle-sync';delete action.dataset.pcAction;action.setAttribute('aria-expanded',String(p30SyncOpen));action.setAttribute('aria-controls','p30-dashboard-sync-panel');const name=action.querySelector('.action-name'),note=action.querySelector('.action-note');if(name)name.textContent='Check Family Sync';if(note)note.textContent=p30SyncState().title;
+   const actions=action.closest('.quick-actions');if(actions&&p30SyncOpen)actions.insertAdjacentHTML('afterend',p30SyncPanelHtml());
+  }
+  root.querySelectorAll('.pc-dashboard-sync-notice').forEach(el=>el.remove());
+ }
+ if(state.guardianTab==='settings'&&!p30IsOwner())root.querySelectorAll('[data-p8cloud-action="open"]').forEach(button=>button.closest('section.panel')?.remove());
+ root.querySelectorAll('[data-p17-action="tour-start"]').forEach(button=>{const box=button.closest('.panel');if(box)box.innerHTML='<h3>🌷 Guardian Learning Center</h3><p class="p2-muted">See where buttons are and what they do. Browse everyday and activity-creation guides whenever you need them.</p><button class="btn btn-soft" type="button" data-p28-action="open-help">Open Guardian Learning Center</button>';});
+ if(p28Help.welcome&&!p28ReadTourProgress()){const welcome=root.querySelector('.p28-welcome');if(welcome){welcome.innerHTML='<p>Would you like a short tour showing where Guardian tools are and what they do?</p><div class="actions"><button type="button" class="btn btn-primary" data-p28-action="welcome-start">🌷 Start Walkthrough</button><button type="button" class="btn btn-soft" data-p28-action="welcome-later">Maybe Later</button></div>';}}
+ return root.innerHTML;
+};
+// Status refresh without reopening or navigating to technical settings.
+function p30RefreshVisibleStatus(){const panel=document.querySelector('#p30-dashboard-sync-panel');if(!panel)return;const v=p30SyncState();const title=panel.querySelector('[data-p30-state-title]'),message=panel.querySelector('[data-p30-state-message]');if(title)title.textContent=v.title;if(message)message.textContent=v.message;const sync=panel.querySelector('[data-p30-action="sync-now"]');if(sync){sync.disabled=!v.ready||p30SyncBusy;sync.textContent=p30SyncBusy?'Sharing…':'☁️ Sync Now';}}
+setInterval(()=>{if(document.visibilityState==='visible')p30RefreshVisibleStatus();},10000);
+document.addEventListener('click',async event=>{const b=event.target.closest('[data-p30-action],.pc-sync-card');if(!b)return;
+ const action=b.dataset.p30Action;if(!action)return;event.preventDefault();event.stopImmediatePropagation();
+ if(action==='toggle-sync'){p30SyncOpen=!p30SyncOpen;render();}
+ else if(action==='back-dashboard'){state.guardianTab='dashboard';p30SyncOpen=true;render();}
+ else if(action==='owner-sync'){if(!p30IsOwner())return;state.guardianTab='p8-cloud';render();}
+ else if(action==='sync-now'){
+  if(p30SyncBusy||state.p17?.busy)return;
+  if(!p17IsReady()){p30SyncResult='Not connected. Your changes are still saved on this device.';render();return;}
+  p30SyncBusy=true;p30SyncResult='';render();
+  try{await p17Attempt(true);const v=p30SyncState();p30SyncResult=v.type==='shared'?'✓ Shared with family.':v.type==='pending'?'Your changes are waiting for Owner review.':v.type==='attention'?'Sharing needs attention. Your changes remain saved here.':state.p17?.message||'Family sharing was checked.';}
+  catch(e){p30SyncResult='Could not share yet: '+(e.message||'Please try again.');}
+  finally{p30SyncBusy=false;render();}
+ }
+},true);
+// Technical Family Sync is owned by the family owner. Block direct page-open actions for regular Guardians.
+document.addEventListener('click',event=>{const b=event.target.closest('[data-p8cloud-action="open"]');if(!b||p30IsOwner())return;event.preventDefault();event.stopImmediatePropagation();state.guardianTab='dashboard';p30SyncOpen=true;render();},true);
+const P30_CSS=String.raw`
+.p30-sync-panel{background:#fff;border:1px solid #ebdae6;border-radius:17px;padding:16px;margin-top:14px;display:grid;gap:13px;max-width:100%;min-width:0;overflow-wrap:anywhere}
+.p30-sync-status{display:flex;align-items:flex-start;gap:12px}.p30-sync-emoji{font-size:1.8rem;line-height:1.15}.p30-sync-status strong{font-size:1.06rem;color:#5d465d}.p30-sync-status p{color:#80697a;line-height:1.5;margin:5px 0 0;font-size:.9rem}
+.p30-sync-explainer{background:#fcf7fa;border-radius:12px;padding:12px 13px;font-size:.84rem;line-height:1.55;color:#796278;margin:0}
+.p30-sync-actions{display:flex;gap:9px;flex-wrap:wrap}.p30-sync-actions .btn{min-height:42px}.p30-sync-result{margin:0;color:#5e775d;font-weight:650;line-height:1.5}.p30-sync-soft-note{font-size:.82rem;color:#847482;margin:0;line-height:1.5}
+.p28-tour .p28-tour-actions{position:sticky;bottom:0;background:#fff;padding:12px 0 6px;z-index:2}.p28-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.p28-guide-choice{min-height:116px}
+@media(max-width:640px){.p28-guide-choices{grid-template-columns:repeat(2,minmax(0,1fr))}.p28-guide-grid{grid-template-columns:1fr}.p28-guide{padding:14px}.p28-guide-head{padding:14px}.p28-tour-actions{gap:5px}.p28-tour-actions .btn{padding:10px 9px;font-size:.81rem}.p30-sync-actions .btn{flex:1;min-width:130px}}
+@media(max-width:350px){.p28-guide-choices{grid-template-columns:1fr}.p28-tour-actions{flex-wrap:wrap}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style>${P30_CSS}</style>`);
+/* ===== End Phase 6C.2B.2E.2 ===== */
+
 </script>
 </body>
 </html>
