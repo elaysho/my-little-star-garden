@@ -4853,7 +4853,7 @@ document.addEventListener('click',async ev=>{
  const b=ev.target.closest('[data-p8-action]');if(!b)return;
  ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();
  try{
-  if(b.dataset.p8Action==='daily-start'){state.p8DailyShareOpen=true;render();return;}
+  if(b.dataset.p8Action==='daily-start'){state.p11ShareSelectedDay=p2Date();state.p8DailyShareOpen=true;render();return;}
   if(b.dataset.p8Action==='daily-close'){state.p8DailyShareOpen=false;render();return;}
   if(b.dataset.p8Action==='share-mark-read'){
    if(!safeGuardian())throw Error('Guardian Mode is required.');
@@ -4867,7 +4867,7 @@ document.addEventListener('submit',async ev=>{
  ev.preventDefault();ev.stopPropagation();ev.stopImmediatePropagation();
  try{
   const pin=String(new FormData(ev.target).get('pin')||''),auth=await verifyPin(pin);if(!auth.ok)throw Error(auth.error||'Incorrect Guardian PIN.');
-  const day=p8Today(),snapshot=p8DailySnapshot(day);const canvas=p8DailyCard(snapshot,auth.guardianName||'Guardian');const blob=await p68CanvasBlob(canvas);
+  const day=p11ShareDay(),snapshot=p8DailySnapshot(day);const canvas=p8DailyCard(snapshot,auth.guardianName||'Guardian');const blob=await p68CanvasBlob(canvas);
   p68CloseShare();state.p68ShareFile=new File([blob],`My-Little-Star-Garden-${day}-Progress.png`,{type:'image/png'});state.p68ShareUrl=URL.createObjectURL(state.p68ShareFile);state.p68ShareReady=true;state.p8DailyShareOpen=false;
   await put('records',{key:`p68-share-approval:${uniqueId()}`,kind:'daily-summary',targetId:day,targetName:'Daily Progress',completedOn:day,approvedBy:auth.guardianId||'owner',guardianName:auth.guardianName||'Guardian',approvedAt:iso()});
   await refresh();render();return;
@@ -5283,7 +5283,7 @@ async function p9CreateGuardianDailyShare(){
  if(!safeGuardian()||state.view!=='guardian')throw Error('Guardian Mode must be unlocked.');
  const id=state.p64CurrentGuardian||'owner';const guardian=state.p64Profiles.find(p=>p.id===id);
  const guardianName=guardian?.name||state.settings?.ownerGuardianName||'Primary Guardian';
- const day=p8Today(),snapshot=p8DailySnapshot(day),canvas=p8DailyCard(snapshot,guardianName),blob=await p68CanvasBlob(canvas);
+ const day=p11ShareDay(),snapshot=p8DailySnapshot(day),canvas=p8DailyCard(snapshot,guardianName),blob=await p68CanvasBlob(canvas);
  p68CloseShare();state.p68ShareFile=new File([blob],`My-Little-Star-Garden-${day}-Progress.png`,{type:'image/png'});state.p68ShareUrl=URL.createObjectURL(state.p68ShareFile);state.p68ShareReady=true;state.p8DailyShareOpen=false;
  await put('records',{key:`p68-share-approval:${uniqueId()}`,kind:'daily-summary',targetId:day,targetName:'Daily Progress',completedOn:day,approvedBy:id,guardianName,approvedAt:iso()});
  await refresh();render();
@@ -6213,9 +6213,9 @@ p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
  // Featured stars earned today.
  p10RoundRect(ctx,95,207,420,468,30,'#f8e1ee');ctx.textAlign='center';ctx.font='104px serif';ctx.fillText('⭐',305,326);
  ctx.fillStyle='#823f66';ctx.font='800 113px system-ui';ctx.fillText(String(snapshot.stars),305,457);
- ctx.font='700 29px system-ui';ctx.fillText('STARS EARNED TODAY',305,508);
+ ctx.font='700 29px system-ui';ctx.fillText('STARS FOR THIS DAY',305,508);
  ctx.font='24px system-ui';ctx.fillStyle='#986f88';ctx.fillText(`${snapshot.completedTasks} quests · ${snapshot.followedRules} rules`,305,570);
- ctx.font='68px serif';ctx.fillText('🌷 ✨ 🎀',305,636);
+ /* The lifetime-star metric below replaces the old decorative emoji row. */
  // Two independently arranged lists; status matters more than exact ranking.
  const rightX=549,rightW=943,sectionH=210;
  function listSection(title,rows,y,empty){
@@ -6401,6 +6401,210 @@ const p10Styles=`
 @media(max-width:640px){.p10-account-link{display:grid}.p10-account-link select,.p10-account-link .btn{width:100%;max-width:none}.p10-local-binding-form .btn{width:100%}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="p10-refinement">${p10Styles}</style>`);
+
+/* Family Sync & Historical Progress Refinement · builds on Linked Guardians.
+   All records use existing stores; no schema version or bootstrap changes. */
+state.p11JournalMonth = p2Date().slice(0,7);
+state.p11JournalDay = p2Date();
+state.p11ShareSelectedDay = '';
+const p11Date = date => p2ValidDate(date)&&date<=p2Date();
+function p11ShareDay(){return p11Date(state.p11ShareSelectedDay)?state.p11ShareSelectedDay:p2Date();}
+function p11SavedTaskCompletions(day){
+ const txByCompletion=new Map((state.summary?.transactions||[]).filter(t=>t.completionId).map(t=>[t.completionId,t]));
+ return (state.p2Completions||[]).filter(c=>c.date===day&&!c.correctedAt&&!(txByCompletion.get(c.id)?.reversedAt));
+}
+function p11DayProgress(day){
+ const comps=p11SavedTaskCompletions(day);
+ const questMap=new Map();
+ for(const c of comps){const id=c.taskId||c.taskName;if(!id)continue;
+  let row=questMap.get(id);if(!row){const task=p2Task(c.taskId);row={id,name:c.taskName||task?.name||'Quest',icon:task?.icon||'📖',count:0,stars:0};questMap.set(id,row);}
+  row.count++;row.stars+=Math.max(0,Number(c.starsAwarded)||0);
+ }
+ const tasks=[...questMap.values()];
+ const followed=(state.p2Rules||[]).filter(r=>p41RuleFollowed(r.id,day)).map(r=>({id:r.id,name:r.childFriendly||r.name,icon:r.icon||'🌼',stars:0}));
+ const validTx=(state.summary?.transactions||[]).filter(t=>!t.reversedAt&&Number(t.amount)>0);
+ const ruleTx=validTx.filter(t=>t.type==='rule-earned'&&t.ruleDate===day);
+ for(const rule of followed){rule.stars=ruleTx.filter(t=>t.ruleId===rule.id).reduce((sum,t)=>sum+t.amount,0);}
+ const otherTx=validTx.filter(t=>['bonus','welcome','challenge'].includes(t.type)&&p64DateOfStamp(t.createdAt||'')===day);
+ const taskStars=comps.reduce((sum,c)=>sum+Math.max(0,Number(c.starsAwarded)||0),0);
+ const ruleStars=ruleTx.reduce((sum,t)=>sum+t.amount,0),otherStars=otherTx.reduce((sum,t)=>sum+t.amount,0);
+ const quests=tasks.sort((a,b)=>b.stars-a.stars||b.count-a.count||a.name.localeCompare(b.name));
+ const rules=followed.sort((a,b)=>b.stars-a.stars||a.name.localeCompare(b.name));
+ return {day,nickname:state.profile?.nickname||'Little Star',stars:taskStars+ruleStars+otherStars,
+  taskStars,ruleStars,otherStars,completedTasks:tasks.length,followedRules:followed.length,
+  topQuests:quests.slice(0,3),topRules:rules.slice(0,3),quests,rules,
+  lifetime:Math.max(0,Number(state.summary?.lifetime)||0),wallet:Math.max(0,Number(state.summary?.wallet)||0)};
+}
+p8DailySnapshot=function(day=p2Date()){return p11DayProgress(day);};
+const p11PreviousDailyCard=p8DailyCard;
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const canvas=p11PreviousDailyCard(snapshot,guardianName,message);const ctx=canvas.getContext('2d');
+ // Put the additional independently named lifetime metric on the main panel.
+ p10RoundRect(ctx,126,585,363,72,15,'#fff9fd');
+ ctx.textAlign='center';ctx.fillStyle='#874b6b';ctx.font='800 31px system-ui';
+ ctx.fillText(`✨ ${snapshot.lifetime}`,307,617);
+ ctx.font='700 16px system-ui';ctx.fillText('CURRENT LIFETIME STARS',307,645);
+ // Clarify the first counter's attribution (approved later is assigned to activity day).
+ ctx.fillStyle='#986f88';ctx.font='18px system-ui';ctx.fillText('TASK + RULE + DAY-OF AWARDS',305,536);
+ return canvas;
+};
+const p11PreviousDailyModal=p8DailyModal;
+p8DailyModal=function(){const html=p11PreviousDailyModal();if(!html||!state.p8DailyShareOpen)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const dialog=root.querySelector('.p68-share-dialog');if(!dialog)return root.innerHTML;
+ const form=dialog.querySelector('#p8-daily-share-form');const actions=dialog.querySelector('.p2-actions');
+ const day=p11ShareDay(),snapshot=p11DayProgress(day);
+ const field=document.createElement('div');field.className='p11-date-field';
+ field.innerHTML=`<label for="p11-share-date">📅 Choose the day to share</label><input type="date" id="p11-share-date" max="${p2Date()}" value="${day}" required><div class="p11-share-preview" aria-live="polite">⭐ ${snapshot.stars} stars earned that day · ✨ ${snapshot.lifetime} current lifetime stars · ${snapshot.completedTasks} quests · ${snapshot.followedRules} rules</div>`;
+ if(form)form.prepend(field);else actions?.before(field);
+ const intro=dialog.querySelector('p');if(intro)intro.textContent='Choose a day to celebrate. Task and rule stars belong to the date Elle completed them, even when approval came later.';
+ const old=dialog.querySelector('.p8-daily-summary');if(old)old.remove();
+ return root.innerHTML;
+};
+// Keep the child and Guardian PNG approval paths on the selected day. The
+// existing approval handlers call p11ShareDay() and do not grant stars.
+
+// Remain in Guardian Mode after a Guardian directly claims a reward.
+const p11OldP4Handle=p4HandleAction;
+p4HandleAction=async function(action,node){
+ if(action==='claim-confirm'){
+  if(!safeGuardian()||state.guardianTab!=='claim-reward')throw Error('Open the Guardian claim approval screen first.');
+  const id=node.dataset.id,r=p4Reward(id);
+  if(!r||!p4ClaimEnabled(r))throw Error('This reward is no longer available to claim.');
+  if(!confirm(`Spend ${r.price} stars and issue a voucher for “${r.name}”?`))return;
+  const voucher=await p4ClaimReward(id);await refresh();
+  state.p4SelectedRewardId=null;state.p4SelectedVoucherId=voucher.id;state.guardianTab='voucher-detail';
+  notice('🎟️ Voucher issued! You are still in Guardian Mode.');render();return;
+ }
+ return p11OldP4Handle(action,node);
+};
+
+// Responsive Guardian voucher actions, without altering voucher permissions.
+const p11PreviousVoucher=p4VoucherPage;
+p4VoucherPage=function(){const root=document.createElement('div');root.innerHTML=p11PreviousVoucher();
+ const panel=root.querySelector('.p4-ticket-preview');if(!panel)return root.innerHTML;
+ const lists=[...panel.querySelectorAll('.p2-actions')];
+ for(const list of lists){list.classList.add('p11-voucher-actions');
+  [...list.children].filter(x=>/button/i.test(x.tagName)).forEach(button=>{if(/Cancel|Refund|Undo Manual Use/.test(button.textContent||''))button.classList.add('p11-voucher-secondary');});
+ }
+ panel.classList.add('p11-voucher-panel');return root.innerHTML;
+};
+
+// Claim and use limits are conceptually separate. Hide irrelevant controls.
+const p11PriorRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){const root=document.createElement('div');root.innerHTML=p11PriorRewardEditor();
+ const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+ const claim=form.querySelector('[name="claimFrequency"]'),use=form.querySelector('[name="useFrequency"]');
+ const cLimit=form.querySelector('[name="claimLimit"]')?.closest('.field');
+ const uLimit=form.querySelector('[name="useLimit"]')?.closest('.field');
+ const cooldown=form.querySelector('[name="cooldownDays"]')?.closest('.field');
+ if(claim){claim.dataset.p11Frequency='claim';claim.closest('.field')?.classList.add('p11-claim-selector');}
+ if(use){use.dataset.p11Frequency='use';use.closest('.field')?.classList.add('p11-use-selector');}
+ if(cLimit)cLimit.classList.add('p11-claim-amount');if(uLimit)uLimit.classList.add('p11-use-amount');if(cooldown)cooldown.classList.add('p11-cooldown');
+ const panel=form.querySelector('.p64-claim-panel');if(panel)panel.insertAdjacentHTML('beforeend','<p class="p11-claim-help" role="status"></p>');
+ const usage=form.querySelector('.p5b-usage-editor');if(usage)usage.insertAdjacentHTML('beforeend','<p class="p11-use-help" role="status"></p>');
+ p11ApplyFrequency(form);return root.innerHTML;
+};
+function p11ApplyFrequency(form){if(!form)return;
+ const c=form.querySelector('[name="claimFrequency"]')?.value||'unlimited';
+ const u=form.querySelector('[name="useFrequency"]')?.value||'unlimited';
+ const toggle=(cl,show)=>{const field=form.querySelector(cl);if(!field)return;field.hidden=!show;
+  field.querySelectorAll('input,select').forEach(input=>input.disabled=!show);};
+ toggle('.p11-claim-amount',c!=='unlimited');toggle('.p11-use-amount',u!=='unlimited'&&u!=='cooldown');toggle('.p11-cooldown',u==='cooldown');
+ const cHelp=form.querySelector('.p11-claim-help'),uHelp=form.querySelector('.p11-use-help');
+ if(cHelp)cHelp.textContent=c==='unlimited'?'Elle may claim this reward without a claim-count limit.':c==='lifetime'?'Claim count is limited across all time.':`Claim allowance resets ${c}.`;
+ if(uHelp)uHelp.textContent=u==='unlimited'?'Once a voucher is claimed, no additional use-frequency cap applies. Allowed days and other requirements still apply.':u==='cooldown'?'Voucher uses must be separated by the configured waiting period.':`Uses are limited per ${u.replace('ly','')} period, separately from claims.`;
+}
+app.addEventListener('change',event=>{if(event.target.matches('[data-p11-frequency]'))p11ApplyFrequency(event.target.closest('#p4-reward-form'));});
+
+// Adventure Journal: neutral days, authentic stored completions and check-ins.
+p68ChildExtras.push(['journal','📔','Adventure Journal']);
+function p11MonthCalendar(month){const [year,mo]=month.split('-').map(Number),first=new Date(year,mo-1,1),days=new Date(year,mo,0).getDate();const pad=n=>String(n).padStart(2,'0');
+ const start=(first.getDay()+6)%7;let out='';
+ for(let i=0;i<start;i++)out+='<span class="p11-calendar-blank" aria-hidden="true"></span>';
+ for(let d=1;d<=days;d++){const date=`${month}-${pad(d)}`,history=p11DayProgress(date),hasProgress=history.completedTasks||history.followedRules||history.stars;
+  const disabled=date>p2Date();out+=`<button class="p11-calendar-day ${date===state.p11JournalDay?'selected':''} ${hasProgress?'has-progress':''}" type="button" data-p11-action="journal-date" data-date="${date}" ${disabled?'disabled':''} aria-label="${date}${hasProgress?', progress recorded':''}"><span>${d}</span>${hasProgress?'<i aria-hidden="true">✦</i>':''}</button>`;}
+ return out;
+}
+function p11JournalPage(){const day=p11Date(state.p11JournalDay)?state.p11JournalDay:p2Date(),month=state.p11JournalMonth||day.slice(0,7),summary=p11DayProgress(day);
+ const [y,m]=month.split('-').map(Number),monthText=new Date(y,m-1,1).toLocaleDateString('en-PH',{month:'long',year:'numeric'});
+ const mon=new Date(day+'T12:00:00'),weekday=(mon.getDay()+6)%7;mon.setDate(mon.getDate()-weekday);
+ const week=Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}).filter(x=>x<=p2Date());
+ const sumWeek=week.reduce((acc,d)=>{const r=p11DayProgress(d);acc.stars+=r.stars;acc.quests+=r.completedTasks;acc.rules+=r.followedRules;return acc;},{stars:0,quests:0,rules:0});
+ const list=(rows,emptyMsg)=>rows.length?rows.map(r=>`<div class="p11-journal-row"><span aria-hidden="true">${esc(r.icon||'⭐')}</span><div><strong>${esc(r.name)}</strong><small>${r.count?`${r.count} completion${r.count!==1?'s':''} · `:''}+${r.stars} ⭐</small></div></div>`).join(''):`<p class="p2-muted p11-no-progress">${emptyMsg}</p>`;
+ return `<section class="p11-journal-intro"><p class="eyebrow">Little memories · Big achievements</p><h1 class="page-title">My Adventure Journal 📔</h1><p class="lead">Look back at the wonderful things you've done. Every day is a new beginning!</p><button class="btn btn-plain" type="button" data-p11-action="journal-home">← Back to Home</button></section>
+ <section class="panel p11-journal-calendar"><div class="p11-journal-month"><h2>${esc(monthText)}</h2><div class="p11-journal-nav"><button class="btn btn-soft" type="button" data-p11-action="journal-month" data-step="-1" aria-label="Previous month">‹</button><button class="btn btn-soft" type="button" data-p11-action="journal-month" data-step="1" aria-label="Next month" ${month>=p2Date().slice(0,7)?'disabled':''}>›</button></div></div><div class="p11-calendar-grid">${['M','T','W','T','F','S','S'].map(c=>`<span class="p11-week-name">${c}</span>`).join('')}${p11MonthCalendar(month)}</div><p class="p2-muted p11-legend">✦ A little adventure or star was recorded that day.</p></section>
+ <section class="panel"><div class="p11-journal-heading"><div><p class="eyebrow">My little victories</p><h2>${esc(new Date(day+'T12:00:00').toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}))}</h2></div><button class="btn btn-soft" type="button" data-p11-action="share-day" data-date="${day}">🌸 Share This Day</button></div><div class="p11-stat-grid"><div class="p11-stat"><b>⭐ ${summary.stars}</b><small>Stars for this day</small></div><div class="p11-stat"><b>📖 ${summary.completedTasks}</b><small>Quests completed</small></div><div class="p11-stat"><b>🌷 ${summary.followedRules}</b><small>Rules followed</small></div></div><div class="p11-journal-detail"><div><h3>📖 My Quests</h3>${list(summary.quests,'No quests recorded for this day. That’s okay!')}</div><div><h3>🌼 My Rules</h3>${list(summary.rules,'No rule check-ins recorded for this day yet.')}</div></div><p class="p2-muted p11-activity-note">Stars earned from a quest or rule appear on the day it was completed or followed, even when a Guardian approved it later.</p></section>
+ <section class="panel p11-week-review"><h3>✨ This Week's Adventures</h3><div class="p11-stat-grid"><div class="p11-stat"><b>${sumWeek.stars} ⭐</b><small>Stars earned</small></div><div class="p11-stat"><b>${sumWeek.quests}</b><small>Quest-day completions</small></div><div class="p11-stat"><b>${sumWeek.rules}</b><small>Rule check-ins</small></div></div></section>`;
+}
+const p11OldChildHome=childHome;
+childHome=function(){const root=document.createElement('div');root.innerHTML=p11OldChildHome();
+ const actions=root.querySelector('.p8-daily-actions');if(actions)actions.insertAdjacentHTML('beforeend','<button class="btn btn-soft" type="button" data-p11-action="journal-open">📔 My Adventure Journal</button>');
+ else root.querySelector('.page-title')?.closest('section')?.insertAdjacentHTML('beforeend','<div class="p8-daily-actions"><button class="btn btn-soft" type="button" data-p11-action="journal-open">📔 My Adventure Journal</button></div>');
+ return root.innerHTML;
+};
+const p11PriorChild=child;
+child=function(){if(state.view==='child'&&state.childTab==='journal'){
+  const content=p11JournalPage()+(state.p8DailyShareOpen?p8DailyModal():'');return shell(content,false);
+ }
+ return p11PriorChild();
+};
+app.addEventListener('click',event=>{const button=event.target.closest('[data-p11-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();const action=button.dataset.p11Action;
+ if(action==='journal-open'){state.childTab='journal';state.p11JournalDay=p2Date();state.p11JournalMonth=p2Date().slice(0,7);state.p68MoreOpen=false;render();return;}
+ if(action==='journal-home'){state.childTab='home';render();return;}
+ if(action==='journal-date'){const date=button.dataset.date;if(!p11Date(date))return;state.p11JournalDay=date;render();return;}
+ if(action==='journal-month'){const [y,m]=state.p11JournalMonth.split('-').map(Number),newMonth=new Date(y,m-1+Number(button.dataset.step),1);const next=`${newMonth.getFullYear()}-${String(newMonth.getMonth()+1).padStart(2,'0')}`;
+  if(next>'2000-01'&&next<=p2Date().slice(0,7)){state.p11JournalMonth=next;state.p11JournalDay=next===p2Date().slice(0,7)?p2Date():`${next}-01`;render();}return;}
+ if(action==='share-day'){state.p11ShareSelectedDay=button.dataset.date;state.p8DailyShareOpen=true;render();return;}
+},true);
+document.addEventListener('change',event=>{if(event.target.id!=='p11-share-date')return;
+ const date=event.target.value;if(!p11Date(date)){event.target.value=p11ShareDay();return;}state.p11ShareSelectedDay=date;
+ const x=p11DayProgress(date),preview=document.querySelector('.p11-share-preview');if(preview)preview.textContent=`⭐ ${x.stars} stars earned that day · ✨ ${x.lifetime} current lifetime stars · ${x.completedTasks} quests · ${x.followedRules} rules`;
+},true);
+
+const p11Styles=`
+/* Pass: responsive forms and voucher manager */
+.p11-voucher-panel,.p11-voucher-panel>*,.p11-voucher-panel .p4-ticket,.p11-voucher-panel .p4-ticket-meta{min-width:0;max-width:100%}
+.p11-voucher-panel .p2-actions.p11-voucher-actions{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(min(100%,215px),1fr));align-items:stretch;gap:10px;margin-top:16px}
+.p11-voucher-panel .p11-voucher-actions>.btn{width:100%;min-width:0;max-width:100%;min-height:48px;white-space:normal!important;overflow-wrap:anywhere;word-break:normal;line-height:1.4;padding:12px 13px}
+.p11-voucher-panel .p4-ticket-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.p11-voucher-panel .p4-ticket-meta>div{min-width:0;overflow-wrap:anywhere}
+.p11-voucher-panel .p4-ticket-meta strong{overflow-wrap:anywhere}
+.p11-voucher-panel .p4-ticket-head{min-width:0}
+.p11-voucher-panel .p4-ticket-head>.grow{min-width:0}
+.p11-voucher-panel .p4-ticket-head h3{overflow-wrap:anywhere}
+.p11-voucher-panel .pc-manual-used-form{max-width:100%;min-width:0}
+#p4-reward-form .p11-claim-amount[hidden],#p4-reward-form .p11-use-amount[hidden],#p4-reward-form .p11-cooldown[hidden]{display:none!important}
+.p11-claim-help,.p11-use-help{margin-top:11px;color:var(--muted);line-height:1.55;font-size:.84rem}
+#p4-reward-form .p64-claim-panel .grid2,#p4-reward-form .p5b-usage-editor .grid2{align-items:start}
+#p4-reward-form .field input,#p4-reward-form .field select,#p4-reward-form .field textarea{min-width:0;max-width:100%;box-sizing:border-box}
+/* Date-selectable PNG modal */
+.p11-date-field{display:grid;gap:8px;min-width:0;margin:10px 0 16px}
+.p11-date-field label{font-weight:800}.p11-date-field input{width:100%;max-width:100%;min-width:0;box-sizing:border-box}
+.p11-share-preview{font-size:.82rem;line-height:1.45;background:#fff0f7;padding:10px 12px;border-radius:12px;color:#774b65}
+/* Adventure Journal */
+.p11-journal-calendar,.p11-journal-calendar *,.p11-journal-intro,.p11-journal-detail{min-width:0}
+.p11-journal-month,.p11-journal-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+.p11-journal-month h2,.p11-journal-heading h2{margin:0}
+.p11-journal-nav{display:flex;gap:8px}.p11-journal-nav .btn{min-width:42px}
+.p11-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:16px}
+.p11-week-name{text-align:center;font-weight:800;color:var(--muted);font-size:.75rem}
+.p11-calendar-blank{min-height:42px}.p11-calendar-day{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0;min-height:48px;min-width:0;background:#fff7fb;border:1px solid #ecd5e2;border-radius:12px;color:var(--ink);font:inherit;cursor:pointer}
+.p11-calendar-day.selected{background:#f1c7df;border:2px solid #bc7ca3;font-weight:900}.p11-calendar-day:disabled{opacity:.35;cursor:default}.p11-calendar-day i{font-style:normal;font-size:.68rem;color:#b65a93;line-height:1}
+.p11-legend{font-size:.79rem;margin-top:10px}
+.p11-stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.p11-stat{background:#fff1f8;padding:17px 12px;border-radius:18px;min-width:0;display:grid;gap:5px}
+.p11-stat b{font-size:1.45rem;color:#874b70}.p11-stat small{color:#947388;line-height:1.45}
+.p11-journal-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.p11-journal-detail>div{background:#fff9fc;border:1px solid #eed7e5;padding:15px;border-radius:18px}
+.p11-journal-detail h3{margin-bottom:12px}.p11-journal-row{display:flex;align-items:start;gap:11px;border-top:1px solid #f3e2ec;padding:11px 0;min-width:0}
+.p11-journal-row>span{font-size:1.4rem}.p11-journal-row>div{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}.p11-journal-row strong{font-size:.92rem}.p11-journal-row small{color:var(--muted)}
+.p11-activity-note{font-size:.8rem;margin-top:12px;line-height:1.55}.p11-no-progress{line-height:1.55}
+@media(max-width:720px){.p11-journal-detail{grid-template-columns:minmax(0,1fr)}.p11-stat-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.p11-stat{padding:13px 8px}.p11-stat b{font-size:1.13rem}.p11-calendar-grid{gap:4px}.p11-calendar-day{min-height:40px;border-radius:9px}}
+@media(max-width:420px){.p11-stat-grid{grid-template-columns:minmax(0,1fr)}.p11-stat{grid-template-columns:auto 1fr;align-items:center}.p11-voucher-panel .p2-actions.p11-voucher-actions{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p11-history-refinement">${p11Styles}</style>`);
 
 initialize();
 
