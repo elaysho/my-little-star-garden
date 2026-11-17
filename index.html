@@ -7,7 +7,7 @@
   <meta name="description" content="A little world for growing routines, collecting stars, and celebrating progress.">
   <meta name="color-scheme" content="light">
   
-  <title>My Little Star Garden — Child Polish & Sharing</title>
+  <title>My Little Star Garden — Phase 6B.4 Family Experience</title>
 <style>
 :root{
  --ink:#594459;--muted:#8a7186;--rose:#d88cad;--rose-dark:#914b73;--rose-light:#f9dfeb;
@@ -5106,10 +5106,11 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-p8
  c.busy=true;b.disabled=true;
  try{
   if(action==='signout')await p8CloudLogout();
-  else if(action==='create-family')await p8CreateFamily();
+  else if(action==='create-family'){p14RequireOwner();await p8CreateFamily();}
   else if(action==='sync')await p8CloudSyncNow();
   else if(action==='download')await p8CloudDownload();
   else if(action==='upload'){
+   p14RequireOwner();
    const remote=await p8CloudSyncDoc().get({source:'server'});
    const revision=remote.exists?Number(remote.data().revision||0):0;
    if(confirm(`This will REPLACE the shared cloud state at revision ${revision} with this browser's progress. It does not merge changes. Are you absolutely sure you have exported a local JSON backup?`))await p8CloudUpload({force:true});
@@ -5123,6 +5124,7 @@ document.addEventListener('submit',async ev=>{const f=ev.target;if(!['p8-cloud-c
  try{
   const fd=new FormData(f);
   if(f.id==='p8-cloud-config-form'){
+   p14RequireOwner();
    const config=p8ValidatedFirebaseConfig(String(fd.get('config')||''));
    if(cloud.app&&cloud.app.options?.projectId!==config.projectId)throw Error('Sign out and reload the page before switching Firebase projects.');
    cloud.config=config;localStorage.setItem(P8_FIREBASE_CONFIG_KEY,JSON.stringify(config));p8CloudStatus('Firebase config saved. Sign in to connect.');
@@ -5130,9 +5132,10 @@ document.addEventListener('submit',async ev=>{const f=ev.target;if(!['p8-cloud-c
    const mode=ev.submitter?.value==='signup'?'signup':'signin';
    await p8CloudLogin(String(fd.get('email')||'').trim(),String(fd.get('password')||''),mode==='signup');
   }else if(f.id==='p8-cloud-family-form'){
+   p14RequireOwner();
    const id=String(fd.get('family')||'').trim();if(!/^[a-zA-Z0-9_-]{10,128}$/.test(id))throw Error('Paste the Firebase UID of the family owner.');
    cloud.familyId=id;localStorage.setItem(P8_FIREBASE_FAMILY_KEY,id);await p8FamilyCheck();
-  }else if(f.id==='p8-cloud-invite-form')await p8CloudInviteMember(String(fd.get('uid')||'').trim(),String(fd.get('role')||''));
+  }else if(f.id==='p8-cloud-invite-form'){p14RequireOwner();await p8CloudInviteMember(String(fd.get('uid')||'').trim(),String(fd.get('role')||''));}
  }catch(err){p8CloudStatus(err.message||'Firebase configuration failed.',true);}finally{cloud.busy=false;render();}
 },true);
 const p8CloudCss=`
@@ -5320,7 +5323,7 @@ document.addEventListener('click',async event=>{const button=event.target.closes
  if(action==='undo-completion'){await p9UndoCompletion(button.dataset.id);return;}
  if(action==='test-click-sound'){p9PlayClickSound();return;}
  if(action==='email-send'){await p9SendEmailSignIn(String(document.querySelector('#p9-email-input')?.value||''));render();return;}
- if(action==='export-family-html'){await p9ExportConfiguredFamilyHTML();return;}
+ if(action==='export-family-html'){p14RequireOwner();await p9ExportConfiguredFamilyHTML();return;}
  }catch(err){notice(err.message||'Action failed.',true);}
 },true);
 
@@ -6377,8 +6380,9 @@ app.addEventListener('click',async event=>{const b=event.target.closest('[data-p
  event.preventDefault();event.stopImmediatePropagation();
  try{
   if(!safeGuardian())throw Error('Unlock Guardian Mode first.');
-  if(b.dataset.p10Action==='refresh-links'){await p10LoadMappings();render();return;}
+  if(b.dataset.p10Action==='refresh-links'){p14RequireOwner();await p10LoadMappings();render();return;}
   if(b.dataset.p10Action==='save-link'){
+   p14RequireOwner();
    const item=b.closest('.p10-account-link'),profileId=item?.querySelector('select[name="p10ProfileId"]')?.value||'';
    await p10SaveProfileLink(b.dataset.uid,profileId);return;
   }
@@ -7019,6 +7023,295 @@ const p13EntryCSS=`
 @media(prefers-reduced-motion:reduce){.p13-loading-dot{animation:none}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P13_GUARDIAN_ENTRY_BUILD}">${p13EntryCSS}</style>`);
+
+/* My Little Star Garden — Phase 6B.4 | Family Experience & Sync UX
+   Uses the existing indexed records, Firebase and PIN APIs. Never merges star ledgers. */
+const P14_BUILD='mlsg-6b4-family-experience-20261117';
+state.p14ThanksOpen=false;state.p14ThanksId='';state.p14Review=null;state.p14ReviewBusy=false;
+state.p14History=[];state.p14HistoryLoading=false;state.p14HistoryLoaded=false;
+state.p14Snapshot=null;state.p14SnapshotBusy=false;state.p14SyncChoice='';state.p14AdminOpen=false;
+function p14OwnerVerified(){
+ const c=state.p8Cloud;
+ return Boolean(safeGuardian()&&c?.user?.uid&&c?.family?.ownerUid===c.user.uid&&c.role==='owner'&&state.p64CurrentGuardian==='owner');
+}
+function p14OwnerBootstrap(){
+ const c=state.p8Cloud;
+ return Boolean(safeGuardian()&&state.p64CurrentGuardian==='owner'&&!c?.family&&!pcFamilyReady());
+}
+function p14RequireOwner(){if(!p14OwnerVerified()&&!p14OwnerBootstrap())throw Error('Only the family owner may change Advanced Owner Setup. Sign in with the owner account and unlock the original owner PIN.');}
+function p14Summary(data){
+ if(!data)return null;
+ const active=(name)=>Array.isArray(data[name])?data[name]:[];
+ const transactions=active('transactions'),valid=transactions.filter(t=>!t.reversedAt);
+ const positive=valid.filter(t=>Number(t.amount)>0).reduce((a,t)=>a+Number(t.amount),0);
+ const wallet=valid.reduce((a,t)=>a+Number(t.amount||0),0);
+ return {tasks:active('tasks').filter(t=>!t.archived).length,rules:active('rules').filter(r=>!r.archived).length,
+  completions:active('completions').filter(c=>!c.correctedAt).length,vouchers:active('vouchers').length,
+  redeemed:active('vouchers').filter(v=>v.status==='redeemed').length,
+  transactions:transactions.length,lifetime:Math.max(0,positive),wallet:Math.max(0,wallet)};
+}
+function p14SummaryHtml(s){
+ if(!s)return '<p class="p2-muted">No cloud garden has been uploaded yet.</p>';
+ const rows=[['📖','Quests',s.tasks],['🌼','Rules',s.rules],['⭐','Lifetime earned',s.lifetime],['💫','Spendable stars',s.wallet],['✅','Completion records',s.completions],['🎟️','Vouchers',s.vouchers],['🎁','Used rewards',s.redeemed]];
+ return `<div class="p14-metrics">${rows.map(([icon,label,n])=>`<div><span>${icon} ${label}</span><strong>${money(n)}</strong></div>`).join('')}</div>`;
+}
+function p14SnapshotDate(stamp){try{if(!stamp)return 'Date unavailable';const d=stamp.toDate?stamp.toDate():new Date(stamp);return Number.isNaN(d.getTime())?'Date unavailable':d.toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});}catch{return 'Date unavailable';}}
+function p14SignedStatus(){const c=state.p8Cloud;
+ return c?.user&&c?.family?`${c.role==='owner'?'Owner':c.role==='viewer'?'Viewer':'Guardian'} · Revision ${money(c.revision||0)}`:c?.user?'Signed in · Workspace access pending':'Offline on this device';
+}
+function p14AdminSection(){const c=state.p8Cloud,owner=p14OwnerVerified(),bootstrap=p14OwnerBootstrap();
+ if(!owner&&!bootstrap)return `<section class="panel p14-admin-closed"><div class="p14-row"><h3>🔐 Advanced Owner Setup</h3><span class="chip">Owner only</span></div><p class="p2-muted">Firebase project settings, workspace administration, authorized accounts and Guardian identity links can only be changed by the signed-in family owner. Ask your family owner for changes.</p></section>`;
+ const ownerFields=`${owner||bootstrap?`<section class="p14-admin-block"><h3>1 · Firebase Web Configuration</h3><p>Only the owner can change the public Web App configuration. Do not enter service-account keys. Switching to another project requires signing out and reloading before reconnecting.</p><form id="p8-cloud-config-form" class="form-grid"><div class="field"><label for="p14-config">Firebase Web Config JSON</label><textarea id="p14-config" name="config" rows="6" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'>${esc(c.config?JSON.stringify(c.config,null,2):'')}</textarea></div><button class="btn btn-soft" type="submit">Save Firebase Configuration</button></form></section>`:''}
+ <section class="p14-admin-block"><h3>2 · Family Workspace</h3><p>The workspace is permanently owned by the creating Firebase UID. Changes here affect which family cloud the browser connects to.</p><form id="p8-cloud-family-form" class="form-grid"><div class="field"><label for="p14-family-id">Family workspace ID</label><input id="p14-family-id" name="family" value="${esc(c.familyId||'')}" placeholder="Owner Firebase UID" autocomplete="off"></div><div class="actions"><button class="btn btn-soft" type="submit">Connect to Workspace</button><button class="btn btn-plain" type="button" data-p8cloud-action="create-family">Create My Family Workspace</button></div></form></section>
+ ${owner?`<section class="p14-admin-block"><h3>3 · Authorize Guardian Accounts</h3><p>Only the owner can grant access. Link each Firebase account to an existing in-app Guardian profile.</p><form id="p8-cloud-invite-form" class="form-grid"><div class="field"><label for="p14-invite-uid">Guardian Firebase UID</label><input id="p14-invite-uid" name="uid" autocomplete="off" required placeholder="Paste the guardian's Firebase UID"></div><div class="grid2"><div class="field"><label for="p14-role">Permission</label><select id="p14-role" name="role"><option value="guardian">Guardian · May sync</option><option value="viewer">Viewer · Read only</option></select></div><div class="field"><label>Guardian profile ${p10ProfileSelect('')}</label></div></div><button class="btn btn-soft" type="submit">Authorize Guardian</button></form></section>
+ <section class="p14-admin-block"><div class="p14-row"><h3>4 · Linked Guardian Accounts</h3><button class="btn btn-soft btn-small" data-p10-action="refresh-links" type="button">Refresh</button></div><div class="p10-account-links">${(state.p10MemberMappings||[]).length?state.p10MemberMappings.map(m=>`<div class="p10-account-link"><div class="grow"><strong>${esc(m.uid)}</strong><p class="p2-muted">${esc(m.role)} · ${esc(p10LinkedName(m.profileId||''))}</p></div>${p10ProfileSelect(m.profileId||'')}<button type="button" class="btn btn-soft" data-p10-action="save-link" data-uid="${esc(m.uid)}">Save Link</button></div>`).join(''):'<p class="p2-muted">No other authorized Guardian accounts yet.</p>'}</div></section>
+ <section class="p14-admin-block"><h3>5 · Share a Family-Ready Copy</h3><p>Download an HTML copy containing the public project configuration and workspace ID; only the authorized accounts can read the cloud.</p><button class="btn btn-soft" type="button" data-p9-action="export-family-html">⬇ Download Family-Ready HTML</button></section>`:''}`;
+ return `<section class="panel p14-admin"><details ${state.p14AdminOpen?'open':''} id="p14-admin-details"><summary><span>🔐 Advanced Owner Setup <small>Verified owner only</small></span><span aria-hidden="true">⌄</span></summary><div class="p14-admin-inner">${ownerFields}</div></details></section>`;
+}
+const p14PreviousCloudPage=p8CloudPage;
+p8CloudPage=function(){
+ const c=state.p8Cloud,ready=Boolean(c?.user&&c.family),baseline=p8GetBaseline(),owner=p14OwnerVerified();
+ const error=c.error;const noticeText=error||((c.status||'').match(/error|attention|unavailable|changed|conflict|failed|link|upload|download/i)?c.status:'');
+ return `<section class="p14-cloud-head"><div><p class="eyebrow">Guardian · Family</p><h1 class="page-title">☁️ Family Sync</h1><p class="lead">Keep your garden's progress safe across family devices, with review before replacing anything.</p></div><button type="button" class="btn btn-plain" data-p8cloud-action="go-settings">← Back to Settings</button></section>
+ <section class="panel p14-overview"><div class="p14-row"><div><h2>🌷 Your Family Garden</h2><p class="p2-muted">${ready?'Signed in and connected to your family workspace':'Your browser can still keep progress offline.'}</p></div><span class="chip ${ready?'good':''}">${ready?'✓ Connected':c.user?'Checking access':'Offline'}</span></div><div class="p14-overview-stats"><div><span>Cloud revision</span><strong>${ready?money(c.revision||0):'—'}</strong></div><div><span>This device last synced</span><strong>${baseline?money(baseline.revision):'Never'}</strong></div><div><span>Connection</span><strong>${ready?'Connected':c.user?'Signed in':'Offline'}</strong></div></div>${noticeText?`<p class="p14-context-status ${error?'p14-status-error':''}" role="status">${esc(noticeText)}</p>`:''}<p class="p2-muted tiny">Progress is still saved locally. Sync is manual and never merges conflicting star records automatically.</p></section>
+ <section class="panel p14-account"><div class="p14-row"><div><h3>👨‍👩‍👧 Signed-in Account</h3><p class="p2-muted">${c.user?esc(c.user.email||'Firebase account'):'You are currently using your garden offline.'}</p>${c.user?`<small class="p2-muted">Role: ${esc(c.role||'Not yet authorized')} ${c.profileId?`· Guardian profile: ${esc(p10LinkedName(c.profileId))}`:''}</small>`:''}</div><span class="chip">${c.user?'🔐 Account':'🌸 Offline'}</span></div>
+ ${c.user?`<div class="p14-account-actions"><button type="button" class="btn btn-soft" data-p8cloud-action="signout">Sign Out</button><small>Signing out does not remove this browser's local garden.</small></div>`:`<div class="field"><label for="p9-email-input">Guardian email</label><input id="p9-email-input" type="email" autocomplete="email" placeholder="guardian@example.com"></div><button type="button" class="btn btn-primary" data-p9-action="email-send">💌 Send a Sign-in Link</button><details class="p14-password-fallback"><summary>Other sign-in methods (advanced)</summary><form id="p8-cloud-login-form" class="form-grid"><div class="field"><label>Firebase email<input name="email" type="email" autocomplete="username" placeholder="guardian@example.com" required></label></div><div class="field"><label>Firebase password<input name="password" type="password" autocomplete="current-password" minlength="8" required></label></div><div class="actions"><button class="btn btn-soft" type="submit" name="mode" value="signin">Sign In with Password</button><button class="btn btn-plain" type="submit" name="mode" value="signup">Create Firebase Account</button></div></form></details>`}</section>
+ <section class="panel p14-workspace-actions"><div class="p14-row"><div><h3>🔄 Sync Your Progress</h3><p class="p2-muted">Compare this device to the shared cloud, then decide what to load or upload.</p></div></div><button class="btn btn-primary" type="button" data-p14-action="review-sync" ${ready?'':'disabled'}>☁️ Review & Sync Progress</button>${!ready?'<p class="p2-muted tiny">Sign in and connect to a family workspace to review cloud progress.</p>':''}</section>
+ <section class="panel p14-history"><div class="p14-row"><div><h3>🕰️ Snapshot History</h3><p class="p2-muted">Browse previous cloud versions and preview their contents before choosing to load one.</p></div><button type="button" class="btn btn-soft" data-p14-action="refresh-history" ${ready&&!state.p14HistoryLoading?'':'disabled'}>${state.p14HistoryLoading?'Checking…':'Refresh History'}</button></div>
+ ${state.p14HistoryLoading?'<p class="p2-muted" role="status">Loading your family snapshots…</p>':!state.p14HistoryLoaded?'<p class="p2-muted">Choose Refresh History to see the latest snapshots.</p>':state.p14History.length?`<div class="p14-snapshot-list">${state.p14History.map(m=>`<article class="p14-snapshot"><div class="grow"><strong>${Number(m.revision)===Number(c.revision)?'🌟 Current Cloud · ':''}Revision ${money(m.revision)}</strong><p class="p2-muted">${esc(p14SnapshotDate(m.createdAt))} · ${m.sourceUid===c.user?.uid?'Your account':`Guardian ${esc(String(m.sourceUid||'').slice(0,8))}…`}</p></div><button type="button" class="btn btn-soft" data-p14-action="snapshot-preview" data-id="${esc(m.id)}">Preview</button></article>`).join('')}</div>`:'<p class="p2-muted">No snapshots found yet. The original device must publish the first cloud version.</p>'}</section>
+ ${ready&&c.profileId&&safeGuardian()?`<section class="panel p14-local-link"><h3>🔑 This Device's Guardian PIN</h3><p class="p2-muted">Only needed when this browser already had a PIN before your Firebase Guardian profile was linked.</p><details><summary>Link this device's original PIN</summary><form id="p10-link-local-form" class="form-grid"><div class="field"><label>Original six-digit Guardian PIN<input type="password" name="pin" minlength="6" maxlength="6" inputmode="numeric" autocomplete="off" required></label></div><button class="btn btn-soft" type="submit">Link My Local PIN</button></form></details></section>`:''}
+ ${p14AdminSection()}
+ <section class="p14-footnote"><p>Cloud permissions are enforced by Firebase. Offline-only progress is available even without internet. Keep JSON backups before restoring historical data.</p></section>`;
+};
+// Keep the original identity checks. Ordinary dashboard Sync buttons now open
+// the same review dialog instead of a native confirm for manual sync.
+const p14PreviousSyncNow=p8CloudSyncNow;
+p8CloudSyncNow=async function(){
+ if(state.view==='guardian'&&safeGuardian())return p14OpenReview();
+ return p14PreviousSyncNow();
+};
+async function p14PrepareReview(){
+ const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();await p10CloudIdentityCheck();
+ const local=await getBackupData(),hash=await p8LocalHash(local),baseline=p8GetBaseline();
+ const remote=await p8CloudFetchSnapshot(),remoteHash=remote.snapshot?await p8LocalHash(remote.snapshot.data):null;
+ const localChanged=Boolean(baseline&&hash!==baseline.hash),cloudChanged=Boolean(baseline&&remote.revision!==baseline.revision);
+ const mode=!remote.snapshot?'empty':!baseline?'unlinked':localChanged&&cloudChanged?'conflict':cloudChanged?'cloud':localChanged?'device':'same';
+ return {mode,baseline,localHash:hash,local:p14Summary(local),remote:p14Summary(remote.snapshot?.data),
+  remoteRevision:remote.revision,remoteId:remote.head?.snapshotId||'',remoteData:remote.snapshot?.data||null,remoteHash};
+}
+async function p14OpenReview(){
+ if(state.p14ReviewBusy)return;state.p14ReviewBusy=true;state.p14Review={loading:true};render();
+ try{state.p14Review=await p14PrepareReview();state.p14SyncChoice='';}
+ catch(e){state.p14Review={error:e.message||'Unable to compare versions.'};}
+ finally{state.p14ReviewBusy=false;render();}
+}
+function p14DialogShell(title,sub,body){return `<div class="p14-overlay" role="presentation"><div class="p14-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="p14-dialog-head"><div><p class="eyebrow">My Little Star Garden · Family</p><h2>${esc(title)}</h2><p class="p2-muted">${esc(sub)}</p></div><button type="button" class="p14-icon-close" data-p14-action="close-dialog" aria-label="Close dialog">✕</button></div>${body}</div></div>`;}
+function p14ReviewDialog(){const r=state.p14Review;if(!r)return '';
+ if(r.loading)return p14DialogShell('Review Family Progress','Connecting securely to your family workspace…','<div class="p14-dialog-body"><p role="status">☁️ Comparing this device and cloud progress…</p></div>');
+ if(r.error)return p14DialogShell('Sync Needs Attention','No records were replaced.',`<div class="p14-dialog-body"><p class="info error" role="alert">${esc(r.error)}</p><button class="btn btn-soft" data-p14-action="review-sync">Try Again</button></div>`);
+ const type={empty:['Cloud is Empty','The first family snapshot can be published from this device.'],unlinked:['Choose Your Starting Version','This browser has no verified baseline with the cloud. Review both versions before replacing anything.'],conflict:['Both Versions Have Changes','Both the browser and cloud changed. Phase 6B.5 will provide guided merging; for now, choose a whole version or keep both unchanged.'],cloud:['Cloud Has New Progress','This device has no new local changes since its last sync.'],device:['This Device Has New Progress','The cloud has not changed since this device last synced.'],same:['Already Up to Date','No changes need to be transferred.']}[r.mode];
+ const canPublish=state.p8Cloud.role!=='viewer';
+ const buttons=r.mode==='same'?'<button class="btn btn-primary" data-p14-action="close-dialog">Done</button>':
+ r.mode==='device'||r.mode==='empty'?`${canPublish?'<button class="btn btn-primary" data-p14-action="sync-publish">⬆ Publish This Device</button>':''}<button class="btn btn-plain" data-p14-action="close-dialog">Not Now</button>`:
+ `<button class="btn btn-primary" data-p14-action="sync-download">⬇ Load Cloud to This Browser</button>${r.mode==='conflict'||r.mode==='unlinked'?p14OwnerVerified()?'<button class="btn btn-soft" data-p14-action="sync-replace-cloud">⬆ Replace Cloud (Owner)</button>':'':' '}${r.mode==='cloud'&&canPublish?'':''}<button class="btn btn-plain" data-p14-action="close-dialog">Keep Both Unchanged</button>`;
+ const confirmation=state.p14SyncChoice?`<div class="p14-confirm"><h3>${state.p14SyncChoice==='download'?'Replace this browser with the cloud?':'Publish this browser over the current cloud?'}</h3><p>Every existing version remains in cloud snapshot history when you publish, and this device's JSON safety backup will download before a local restore. This does not merge individual changes.</p><label class="field">Type <strong>${state.p14SyncChoice==='download'?'RESTORE':'PUBLISH'}</strong> to confirm<input id="p14-confirm-word" autocomplete="off" spellcheck="false" placeholder="${state.p14SyncChoice==='download'?'RESTORE':'PUBLISH'}"></label><div class="actions"><button class="btn btn-primary" data-p14-action="sync-confirm" ${state.p14ReviewBusy?'disabled':''}>Confirm ${state.p14SyncChoice==='download'?'Local Restore':'Cloud Publish'}</button><button class="btn btn-plain" data-p14-action="sync-cancel">Cancel</button></div></div>`:'';
+ return p14DialogShell('☁️ Review Family Progress',type[1],`<div class="p14-dialog-body"><p class="p14-review-banner ${['conflict','unlinked'].includes(r.mode)?'p14-review-conflict':''}"><strong>${esc(type[0])}</strong> ${esc(type[1])}</p><div class="p14-compare-grid"><section><h3>📱 This Device</h3><small>Browser records</small>${p14SummaryHtml(r.local)}</section><section><h3>☁️ Family Cloud</h3><small>${r.remoteRevision?'Revision '+r.remoteRevision:'Not published'}</small>${p14SummaryHtml(r.remote)}</section></div><div class="p14-safe-note">🔐 No progress will be replaced without an explicit action. Automatic conflict merging is deferred to Phase 6B.5.</div>${confirmation||`<div class="p14-dialog-actions">${buttons}</div>`}</div>`);
+}
+async function p14HistoryLoad(){
+ if(state.p14HistoryLoading)return;
+ state.p14HistoryLoading=true;render();
+ try{const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();
+  const snap=await p8FamilyRef().collection('snapshots').orderBy('revision','desc').limit(15).get({source:'server'});
+  state.p14History=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>Number.isSafeInteger(m.revision)&&m.revision>0&&m.revision<=c.revision&&(m.revision<c.revision||!c.remote?.snapshotId||m.id===c.remote.snapshotId));
+  state.p14HistoryLoaded=true;p8CloudStatus('Snapshot history refreshed. Select Preview to inspect a version.');
+ }catch(e){state.p14HistoryLoaded=false;state.p14History=[];p8CloudStatus('Cannot list snapshots: '+(e.message||'Check the updated Firestore rules.'),true);}
+ finally{state.p14HistoryLoading=false;render();}
+}
+async function p14SnapshotFetch(id){
+ if(!/^[\w-]{8,100}$/.test(id))throw Error('Invalid snapshot ID.');
+ const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();
+ const ref=p8FamilyRef().collection('snapshots').doc(id),doc=await ref.get({source:'server'});
+ if(!doc.exists)throw Error('This snapshot is not available.');
+ const manifest=doc.data();const chunks=await ref.collection('chunks').get({source:'server'});
+ const backup=p8DownloadCloudChunks(manifest,chunks);
+ return {id,manifest,backup,summary:p14Summary(backup.data)};
+}
+async function p14SnapshotPreview(id){
+ state.p14SnapshotBusy=true;state.p14Snapshot={loading:true,id};render();
+ try{state.p14Snapshot=await p14SnapshotFetch(id);}
+ catch(e){state.p14Snapshot={error:e.message||'Could not load snapshot.'};}
+ finally{state.p14SnapshotBusy=false;render();}
+}
+function p14SnapshotDialog(){const s=state.p14Snapshot;if(!s)return '';
+ if(s.loading)return p14DialogShell('Snapshot Preview','Loading this historical version…','<div class="p14-dialog-body"><p role="status">☁️ Reading the cloud snapshot…</p></div>');
+ if(s.error)return p14DialogShell('Snapshot Unavailable','Your browser data has not changed.',`<div class="p14-dialog-body"><p class="info error">${esc(s.error)}</p></div>`);
+ const current=Number(s.manifest.revision)===Number(state.p8Cloud.revision);
+ return p14DialogShell('🕰️ Snapshot Revision '+s.manifest.revision,'Preview the saved garden before loading anything.',`<div class="p14-dialog-body"><div class="p14-history-meta"><span>📅 ${esc(p14SnapshotDate(s.manifest.createdAt))}</span><span>${current?'🌟 Current cloud revision':'Archived cloud revision'}</span></div>${p14SummaryHtml(s.summary)}<p class="p14-safe-note">Restoring this snapshot only changes <strong>this browser</strong>. It never changes the family cloud, and it clears the device's sync baseline to require a fresh review before publishing.</p><div class="p14-confirm"><label for="p14-history-confirm">To load it here, type <strong>RESTORE</strong>.</label><input id="p14-history-confirm" spellcheck="false" autocomplete="off" placeholder="RESTORE"><div class="actions"><button type="button" class="btn btn-primary" data-p14-action="snapshot-restore">⬇ Restore to This Browser</button><button type="button" class="btn btn-plain" data-p14-action="close-dialog">Cancel</button></div></div></div>`);
+}
+function p14RequireWord(id,word){const typed=(document.getElementById(id)?.value||'').trim().toUpperCase();if(typed!==word)throw Error('Type '+word+' in the confirmation field to proceed.');}
+async function p14RestoreLocal(data,revision,markBaseline){
+ const before=await exportBackup();
+ downloadText(`Star-Garden-Safety-Backup-${p2Date()}-${Date.now()}.json`,JSON.stringify(before,null,2),'application/json');
+ await replaceBackupData(data);await refresh();
+ if(markBaseline){const hash=await p8LocalHash(await getBackupData());p8SaveBaseline(revision,hash);}
+ else{const key=p8BaselineKey();try{localStorage.removeItem(key);}catch{}pcBaselines.delete(key);try{const db=await openDb();if(db){await new Promise((resolve,reject)=>{const tx=db.transaction('auth','readwrite');tx.objectStore('auth').delete(pcBaselinePrefix+key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}else{cachedStore.auth=cachedStore.auth.filter(r=>r.key!==pcBaselinePrefix+key);persistFallback(cachedStore);}}catch{}}
+}
+function p14ThankYouCard(v,guardianName,message){
+ const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=900;const ctx=canvas.getContext('2d');
+ const gradient=ctx.createLinearGradient(0,0,1600,900);gradient.addColorStop(0,'#fff7fb');gradient.addColorStop(1,'#f6e9f5');ctx.fillStyle=gradient;ctx.fillRect(0,0,1600,900);
+ p10RoundRect(ctx,55,52,1490,796,45,'#fffefc','#efd3e1');
+ ctx.textAlign='center';ctx.fillStyle='#a26385';ctx.font='800 25px system-ui';ctx.fillText('MY LITTLE STAR GARDEN  ✦  LITTLE THANK-YOUS',800,123);
+ ctx.font='800 76px system-ui';ctx.fillStyle='#704862';ctx.fillText('💌 Thank You!',800,227);
+ ctx.font='29px system-ui';ctx.fillStyle='#96758a';ctx.fillText('A special reward turned into a lovely memory',800,278);
+ p10RoundRect(ctx,210,318,1180,263,34,'#fff1f8','#eed2e2');
+ ctx.font='93px serif';ctx.fillText(String(v.icon||'🎁'),800,428);
+ ctx.font='bold 46px system-ui';ctx.fillStyle='#77506d';p10TextLine(ctx,String(v.name||'My reward'),800,504,1050,51,1);
+ const redeemed=String(v.pcManualUsedDate||v.redeemedAt||'').slice(0,10);
+ ctx.font='23px system-ui';ctx.fillStyle='#917387';const prettyRedeemed=redeemed?new Date(redeemed+'T12:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}):'';ctx.fillText(prettyRedeemed?`Enjoyed on ${prettyRedeemed}`:'A reward I enjoyed',800,551);
+ p10RoundRect(ctx,212,610,1176,134,26,'#fff9ed','#eee2c5');
+ ctx.font='italic 700 31px system-ui';ctx.fillStyle='#7e586e';
+ const note=String(message||'').trim().slice(0,150)||'Thank you for making my day special! 💗';
+ p10TextLine(ctx,note,800,663,1080,39,2);
+ ctx.font='21px system-ui';ctx.fillStyle='#a08396';ctx.fillText(`Shared with love · Approved by ${String(guardianName||'Guardian').slice(0,28)}`,800,814);
+ return canvas;
+}
+function p14ThankModal(){const v=p4Voucher(state.p14ThanksId);if(!v||v.status!=='redeemed')return '';
+ return p14DialogShell('💌 Say Thank You','Make a little gratitude card for your family.',`<div class="p14-dialog-body"><div class="p14-thank-gift"><span>${esc(v.icon||'🎁')}</span><div><strong>${esc(v.name)}</strong><small>Already enjoyed · No stars will be spent again</small></div></div><form id="p14-thanks-form" class="form-grid"><div class="field"><label for="p14-thank-message">Your thank-you message (optional)</label><textarea id="p14-thank-message" name="message" rows="3" maxlength="150" placeholder="Thank you for making my day special!"></textarea></div><div class="field"><label for="p14-thank-pin">Guardian PIN to approve sharing</label><input id="p14-thank-pin" name="pin" required type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" placeholder="6-digit PIN"></div><div class="actions"><button class="btn btn-primary" type="submit">🔐 Approve Thank-You PNG</button><button class="btn btn-plain" type="button" data-p14-action="close-dialog">Cancel</button></div><p class="p2-muted tiny">Only a PNG is created. Nothing is sent automatically.</p></form></div>`);
+}
+// Add Thank You to redeemed reward details and their History cards.
+const p14PreviousChildVoucherDetail=p4ChildVoucherDetail;
+p4ChildVoucherDetail=function(v){const root=document.createElement('div');root.innerHTML=p14PreviousChildVoucherDetail(v);
+ if(v.status==='redeemed'){
+  const target=root.querySelector('.p4-ticket-preview .p2-actions')||root.querySelector('.p4-ticket-preview .p4-voucher-actions')||root.querySelector('.p4-ticket-preview');
+  target?.insertAdjacentHTML('afterbegin',`<button class="btn btn-rose" type="button" data-p14-action="thank-open" data-id="${esc(v.id)}">💌 Say Thank You</button>`);
+ }return root.innerHTML;};
+const p14PreviousVoucherHtml=p4VoucherHtml;
+p4VoucherHtml=function(v,details=false,guardianInline=false){let out=p14PreviousVoucherHtml(v,details,guardianInline);
+ if(!details&&!guardianInline&&v.status==='redeemed')out=out.replace(/<\/article>\s*$/,`<div class="p14-history-thanks"><button class="btn btn-soft" type="button" data-p14-action="thank-open" data-id="${esc(v.id)}">💌 Say Thank You</button></div></article>`);
+ return out;};
+// Fix Adventure Journal's custom renderer: the original sharing approval works,
+// but it bypassed the shared p68 approved-image overlay when staying on Journal.
+const p14PreviousChild=child;
+child=function(){const html=p14PreviousChild();if(state.view!=='child')return html;
+ const root=document.createElement('div');root.innerHTML=html;const main=root.querySelector('main');
+ if(state.childTab==='journal'&&state.p68ShareReady&&state.p68ShareUrl&&!root.querySelector('[data-p68-action="png-share"]')){
+  main?.insertAdjacentHTML('beforeend',`<div class="p68-share-overlay" role="presentation"><div class="p68-share-dialog" role="dialog" aria-modal="true" aria-label="Guardian-approved PNG preview"><h2>🌷 Your Family Share Card</h2><p>A Guardian approved your picture. Choose whether to share or save it.</p><img src="${esc(state.p68ShareUrl)}" alt="Approved family share PNG"><div class="p2-actions"><button class="btn btn-primary" type="button" data-p68-action="png-share">📤 Share PNG</button><button class="btn btn-soft" type="button" data-p68-action="png-save">⬇ Save PNG</button><button class="btn btn-plain" type="button" data-p68-action="png-close">Close</button></div></div></div>`);
+ }
+ if(state.p14ThanksOpen)main?.insertAdjacentHTML('beforeend',p14ThankModal());
+ if(state.p68ShareReady&&state.p68ShareFile?.name?.includes('Thank-You')){
+  const approved=[...root.querySelectorAll('.p68-share-dialog')].find(d=>d.querySelector('[data-p68-action="png-share"]'));
+  if(approved){const heading=approved.querySelector('h2');if(heading)heading.textContent='💌 Your Thank-You Card!';
+   const intro=approved.querySelector('p');if(intro)intro.textContent='A Guardian approved your gratitude card. You can save it or share it with family.';
+   const picture=approved.querySelector('img');if(picture)picture.alt='Guardian-approved thank-you card PNG preview';}
+ }
+ return root.innerHTML;
+};
+// Small inset lifetime badge, in the same full-height stars column.
+const p14PreviousDailyCard=p8DailyCard;
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const canvas=p14PreviousDailyCard(snapshot,guardianName,message),ctx=canvas.getContext('2d');
+ p10RoundRect(ctx,119,578,371,199,22,'#f8deeb');
+ p10RoundRect(ctx,133,615,344,144,22,'#fffafc','#e9c9da');
+ ctx.textAlign='center';ctx.fillStyle='#9a5e80';ctx.font='700 22px system-ui';ctx.fillText('✨  LIFETIME STARS',305,658);
+ ctx.font='900 63px system-ui';ctx.fillStyle='#7d4065';ctx.fillText(String(snapshot.lifetime||0),305,730);
+ return canvas;
+};
+// Overlay the UI for manual sync/history without losing existing legacy dialog.
+const p14PreviousGuardian=guardian;
+guardian=function(){const html=p14PreviousGuardian();if(state.view!=='guardian'||!safeGuardian())return html;
+ const root=document.createElement('div');root.innerHTML=html;const main=root.querySelector('main');
+ if(state.p14Review)main?.insertAdjacentHTML('beforeend',p14ReviewDialog());
+ else if(state.p14Snapshot)main?.insertAdjacentHTML('beforeend',p14SnapshotDialog());
+ return root.innerHTML;
+};
+const p14PreviousRender=render;
+render=function(){p14PreviousRender();};
+async function p14SyncAction(action){const c=state.p8Cloud,r=state.p14Review;
+ if(!r||r.loading||r.error)throw Error('Review progress again before transferring data.');
+ if(action==='sync-publish'){
+  if(!['device','empty'].includes(r.mode))throw Error('This device cannot publish without resolving the newer cloud version.');
+  await p10CloudIdentityCheck();
+  const currentHash=await p8LocalHash(await getBackupData());if(currentHash!==r.localHash)throw Error('This device changed since review. Review again.');
+  const sync=await p8CloudSyncDoc().get({source:'server'});const rev=sync.exists?Number(sync.data().revision||0):0;
+  if(rev!==r.remoteRevision)throw Error('The cloud changed since review. Review again.');
+  await p8CloudUpload({force:r.mode==='empty'});
+ }else if(action==='sync-confirm'){
+  if(state.p14SyncChoice==='download'){
+   p14RequireWord('p14-confirm-word','RESTORE');
+   const currentHash=await p8LocalHash(await getBackupData());if(currentHash!==r.localHash)throw Error('Local data changed since review. Review again.');
+   const ptr=await p8CloudSyncDoc().get({source:'server'});
+   if(Number(ptr.data()?.revision||0)!==r.remoteRevision||ptr.data()?.snapshotId!==r.remoteId)throw Error('Cloud updated since review. Please review again.');
+   if(!r.remoteData)throw Error('There is no cloud progress to restore.');
+   await p14RestoreLocal(r.remoteData,r.remoteRevision,true);
+   p8CloudStatus(`Loaded cloud revision ${r.remoteRevision} into this device. Your local PIN was preserved.`);
+  }else if(state.p14SyncChoice==='replace-cloud'){
+   p14RequireOwner();p14RequireWord('p14-confirm-word','PUBLISH');
+   await p10CloudIdentityCheck();
+   const currentHash=await p8LocalHash(await getBackupData());if(currentHash!==r.localHash)throw Error('Local data changed since review. Review again.');
+   const ptr=await p8CloudSyncDoc().get({source:'server'});
+   if(Number(ptr.data()?.revision||0)!==r.remoteRevision||ptr.data()?.snapshotId!==r.remoteId)throw Error('Cloud updated since review. Please review again.');
+   if(r.remoteData)downloadText(`Star-Garden-Cloud-Backup-Revision-${r.remoteRevision}.json`,JSON.stringify({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:r.remoteData},null,2),'application/json');
+   await p8CloudUpload({force:true});
+  }else throw Error('Select which version to use.');
+ }else throw Error('Invalid sync action.');
+ state.p14Review=null;state.p14SyncChoice='';state.p14HistoryLoaded=false;state.p14History=[];render();
+}
+app.addEventListener('click',async event=>{
+ const b=event.target.closest('[data-p14-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const action=b.dataset.p14Action;
+ if(!safeGuardian()&&action!=='thank-open'&&action!=='close-dialog'){notice('Guardian Mode is required.',true);return;}
+ if(action==='close-dialog'){state.p14Review=null;state.p14Snapshot=null;state.p14ThanksOpen=false;state.p14SyncChoice='';render();return;}
+ if(action==='thank-open'){
+  if(state.view!=='child')return;
+  const v=p4Voucher(b.dataset.id);if(!v||v.status!=='redeemed')return;
+  state.p14ThanksId=v.id;state.p14ThanksOpen=true;render();return;
+ }
+ if(state.p14ReviewBusy||state.p14SnapshotBusy)return;
+ b.disabled=true;
+ try{
+  if(action==='review-sync')await p14OpenReview();
+  else if(action==='refresh-history')await p14HistoryLoad();
+  else if(action==='snapshot-preview')await p14SnapshotPreview(b.dataset.id);
+  else if(action==='sync-publish'||action==='sync-confirm'){
+   state.p14ReviewBusy=true;await p14SyncAction(action);
+  }else if(action==='sync-download'){state.p14SyncChoice='download';render();}
+  else if(action==='sync-replace-cloud'){p14RequireOwner();state.p14SyncChoice='replace-cloud';render();}
+  else if(action==='sync-cancel'){state.p14SyncChoice='';render();}
+  else if(action==='snapshot-restore'){
+   p14RequireWord('p14-history-confirm','RESTORE');
+   if(!state.p14Snapshot?.backup?.data)throw Error('Preview a snapshot first.');
+   const snap=state.p14Snapshot;
+   await p14RestoreLocal(snap.backup.data,snap.manifest.revision,false);
+   state.p14Snapshot=null;state.p14HistoryLoaded=false;state.p14History=[];
+   p8CloudStatus(`Restored historical revision ${snap.manifest.revision} on this browser only. Cloud is unchanged. Review sync before publishing.`,false);render();
+  }
+ }catch(e){notice(e.message||'Could not finish this action.',true);}
+ finally{state.p14ReviewBusy=false;if(b.isConnected)b.disabled=false;}
+},true);
+app.addEventListener('submit',async event=>{
+ if(event.target.id!=='p14-thanks-form')return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const f=event.target,button=f.querySelector('button[type=submit]');if(button)button.disabled=true;
+ try{
+  const v=p4Voucher(state.p14ThanksId);if(!v||v.status!=='redeemed')throw Error('This reward has not been redeemed.');
+  const fd=new FormData(f),auth=await verifyPin(String(fd.get('pin')||''));if(!auth.ok)throw Error(auth.error||'Incorrect Guardian PIN.');
+  const msg=String(fd.get('message')||'').trim().slice(0,150);
+  const canvas=p14ThankYouCard(v,auth.guardianName||'Guardian',msg),blob=await p68CanvasBlob(canvas);
+  p68CloseShare();state.p68ShareFile=new File([blob],`Star-Garden-Thank-You-${v.ticketNumber||v.id}.png`,{type:'image/png'});
+  state.p68ShareUrl=URL.createObjectURL(state.p68ShareFile);state.p68ShareReady=true;state.p14ThanksOpen=false;
+  await put('records',{key:`p68-share-approval:${uniqueId()}`,kind:'reward-thanks',targetId:v.id,targetName:v.name,completedOn:v.pcManualUsedDate||String(v.redeemedAt||'').slice(0,10)||p2Date(),approvedBy:auth.guardianId||'owner',guardianName:auth.guardianName||'Guardian',approvedAt:iso()});
+  await refresh();render();
+ }catch(e){notice(e.message||'Could not approve the thank-you card.',true);}
+ finally{if(button?.isConnected)button.disabled=false;}
+},true);
+// Preserve owner-only expansion state across rerenders.
+app.addEventListener('toggle',ev=>{if(ev.target.id==='p14-admin-details')state.p14AdminOpen=ev.target.open;},true);
+const p14CSS=`
+.p14-cloud-head,.p14-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.p14-cloud-head{margin-bottom:3px}.p14-cloud-head .lead{margin:6px 0}.p14-row h2{font-size:1.32rem}.p14-overview,.p14-account,.p14-workspace-actions,.p14-history,.p14-admin,.p14-local-link{display:grid;gap:15px}.p14-overview-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.p14-overview-stats>div{display:grid;gap:3px;background:#fff4fa;border:1px solid #f3dce8;border-radius:14px;padding:13px;min-width:0}.p14-overview-stats span{font-size:.77rem;color:#92768a}.p14-overview-stats strong{font-size:1.12rem;color:#7e4569;overflow-wrap:anywhere}.p14-context-status{background:#f1f6f0;color:#51745f;border:1px solid #cfe3d4;border-radius:13px;padding:11px 13px;font-size:.84rem}.p14-status-error{background:#fff4f0;color:#8f5b48;border-color:#eec9bc}.p14-account-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.p14-account-actions small{color:#987c8b}.p14-password-fallback{padding-top:10px;border-top:1px solid #f1dfea}.p14-password-fallback summary{cursor:pointer;color:#895a77;font-size:.84rem;font-weight:800}.p14-password-fallback form{padding-top:13px}.p14-account .field input,.p14-admin input,.p14-admin textarea,.p14-admin select,.p14-local-link input{min-width:0;width:100%;max-width:100%;box-sizing:border-box;border:1.5px solid #e2c7d7;border-radius:13px;background:white;padding:11px 13px;color:var(--ink);font:inherit;min-height:46px}.p14-admin textarea{line-height:1.55;resize:vertical;min-height:135px;overflow-wrap:anywhere}.p14-admin .field,.p14-local-link .field{display:grid;gap:7px}.p14-admin .field label,.p14-local-link label{font-size:.85rem;color:#71556b;font-weight:800}.p14-admin details>summary{cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px;font-weight:850;font-size:1.08rem;list-style:none}.p14-admin details>summary::-webkit-details-marker{display:none}.p14-admin details>summary span:first-child{display:grid;gap:2px}.p14-admin details>summary small{font-size:.73rem;color:#9c7e92;font-weight:500}.p14-admin-inner{display:grid;gap:20px;padding-top:21px}.p14-admin-block{border-top:1px solid #f0dfe8;padding-top:19px;display:grid;gap:12px;min-width:0}.p14-admin-block h3{font-size:1.02rem}.p14-admin-block p,.p14-footnote p{font-size:.84rem;color:#927688;line-height:1.55}.p14-admin-block .p10-account-link{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 0;border-top:1px solid #f0e0e9}.p14-admin-block .p10-account-link strong{word-break:break-all;font-size:.8rem}.p14-admin-block .p10-account-link select{flex:1;max-width:235px}.p14-admin-block .p10-account-link button{flex:none}.p14-history .p14-snapshot-list{display:grid;gap:9px}.p14-snapshot{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid #efd8e5;border-radius:15px;background:#fff9fc;padding:12px 15px}.p14-snapshot strong{font-size:.91rem}.p14-snapshot .p2-muted{font-size:.75rem}.p14-snapshot .btn{flex:none}.p14-local-link details>summary{cursor:pointer;font-weight:800;color:#935977}.p14-local-link form{margin-top:12px}.p14-footnote{padding:0 4px 18px}.p14-overlay{position:fixed;z-index:260;inset:0;background:rgba(61,44,61,.58);padding:16px;display:flex;align-items:center;justify-content:center}.p14-dialog{width:min(100%,760px);max-height:92dvh;overflow-y:auto;background:#fffafd;border:1px solid #eccbdc;border-radius:27px;box-shadow:0 27px 95px #3d253a6b;min-width:0}.p14-dialog-head{padding:24px 28px 20px;border-bottom:1px solid #f1dfea;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.p14-dialog-head h2{font-size:1.65rem}.p14-dialog-head .p2-muted{font-size:.86rem;margin-top:6px}.p14-icon-close{border:1px solid #eccddf;border-radius:12px;background:#fff4f9;color:#84526e;width:38px;height:38px;font-size:1.1rem;cursor:pointer;flex:none}.p14-dialog-body{display:grid;gap:16px;padding:23px 28px 27px;min-width:0}.p14-review-banner{background:#e9f6ef;border:1px solid #cbe5d5;color:#557463;padding:13px 15px;border-radius:14px;font-size:.88rem}.p14-review-banner strong{display:block;color:#3f6854;margin-bottom:2px}.p14-review-conflict{background:#fff4e7;border-color:#f1d6af;color:#825e42}.p14-review-conflict strong{color:#84583b}.p14-compare-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.p14-compare-grid section{background:#fff9fc;border:1px solid #ecd5e3;border-radius:17px;padding:17px;min-width:0}.p14-compare-grid section h3{font-size:1.07rem}.p14-compare-grid section>small{display:block;color:#977b8e;margin:4px 0 12px}.p14-metrics{display:grid;gap:2px;min-width:0}.p14-metrics>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #f0e2eb}.p14-metrics>div:last-child{border-bottom:0}.p14-metrics span{font-size:.79rem;color:#785c72}.p14-metrics strong{font-size:.93rem;white-space:nowrap;color:#754965}.p14-safe-note{background:#f9f3fc;border:1px solid #e9dbf1;border-radius:14px;padding:13px 14px;font-size:.84rem;color:#775e80;line-height:1.55}.p14-dialog-actions,.p14-confirm .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.p14-dialog-actions>.btn{flex:0 1 auto;white-space:normal}.p14-confirm{background:#fff5fa;border:1px solid #efd5e2;border-radius:16px;padding:16px;display:grid;gap:11px}.p14-confirm h3{font-size:1.04rem}.p14-confirm p{font-size:.82rem;color:#816c7b}.p14-confirm label{display:grid;gap:6px;color:#754c67;font-weight:750;font-size:.84rem}.p14-confirm input,.p14-dialog-body input,.p14-dialog-body textarea{width:100%;max-width:100%;min-height:46px;border:1px solid #e4c9da;border-radius:13px;background:#fff;padding:11px 13px;font:inherit;color:#5c4056}.p14-dialog-body textarea{min-height:95px}.p14-history-meta{display:flex;flex-wrap:wrap;gap:10px}.p14-history-meta span{background:#fff0f7;border-radius:999px;padding:6px 12px;font-size:.81rem;color:#855b72}.p14-thank-gift{display:flex;align-items:center;gap:15px;background:#fff3f9;border:1px solid #f0d6e5;border-radius:17px;padding:14px}.p14-thank-gift>span{font-size:2.3rem}.p14-thank-gift div{display:grid;gap:3px}.p14-thank-gift small{color:#9e8195}.p14-history-thanks{padding:0 15px 13px}.p14-history-thanks .btn{width:100%}
+@media(max-width:690px){.p14-cloud-head>.btn{width:100%}.p14-overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.p14-dialog{border-radius:20px;max-height:95dvh}.p14-dialog-head{padding:20px 18px 15px}.p14-dialog-head h2{font-size:1.3rem}.p14-dialog-body{padding:18px 16px 20px}.p14-compare-grid{grid-template-columns:1fr}.p14-dialog-actions>.btn,.p14-confirm .btn{width:100%}.p14-history .p14-row button{width:100%}.p14-snapshot{padding:10px 12px}.p14-admin-block .grid2{grid-template-columns:1fr}.p14-admin-block .actions>.btn{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P14_BUILD}">${p14CSS}</style>`);
 
 initialize();
 
