@@ -10762,6 +10762,72 @@ const P30_CSS=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style>${P30_CSS}</style>`);
 /* ===== End Phase 6C.2B.2E.2 ===== */
 
+/* ===== Phase 6C.2B.2E.3 — Guardian walkthrough: clear teaching + reliable locator ===== */
+const P31_VERSION='mlsg-6c2b2e3-walkthrough-clarity-20261117';
+const p31LessonsNew=[
+ {icon:'🏡',title:'Understand the Dashboard',tab:'dashboard',focus:'.stat-tile',fallbackFocus:'.guardian-heading',details:'When a Guardian confirms completed tasks and eligible rules, your child earns the stars set for those activities. She can spend her available stars on rewards in the Star Shop—a fun motivation to keep practicing. Lifetime Stars shows all the stars she has earned, even after spending some.',where:'The Spendable Stars tile shows the stars she can use to claim rewards. Lifetime Earnings counts everything she has earned. The Quick Actions below take you to daily review and other everyday tools.'},
+ {icon:'📬',title:'Review Requests',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="requests"]',fallbackFocus:'.p61-review-grid',details:'Use Review Center when your child sends a quest completion, note, or reward request. Open the corresponding section, check what she is asking for, then approve or decline as appropriate.',where:'Select Review Requests to open submissions waiting for a decision. Quest Notes and Daily Review are separate choices on this same screen.'},
+ {icon:'📋',title:'Record Today’s Activities',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="daily-review"]',fallbackFocus:'.p61-review-grid',details:'If you personally saw your child complete a task, use Daily Review even when she did not submit a request. To record whether a rule was followed, use Daily Rules Check-in. Only choose No Task Today / Excused when the task truly was not expected.',where:'Select Open Daily Review to record the tasks you observed yourself. For behavior or rules, choose Check Today’s Rules on the same Review Center page.'},
+ {icon:'📖',title:'Create a Task',tab:'manage',subtab:'tasks',focus:'[data-p5a-action="new-task"][data-type="habit"]',fallbackFocus:'.page-title',details:'Open Manage Activities → Tasks → Add Task. Enter a clear name, choose the star award and how often it can be earned, check visibility, then save. This creates an activity your child can complete.',where:'Select Add Task to open the task editor. Set its Stars & Frequency and Visibility before saving.'},
+ {icon:'📋',title:'Create a Checklist Routine',tab:'manage',subtab:'routines',focus:'[data-p5a-action="new-task"][data-type="checklist"]',fallbackFocus:'.page-title',details:'Open Manage Activities → Routines → New Routine. Name the routine and select the existing tasks that make up its checklist. The individual tasks earn stars; the routine itself does not award those same stars a second time.',where:'Select New Routine to create a checklist from existing tasks. If you still need a step, create that individual task first.'},
+ {icon:'🛡️',title:'Create a Rule',tab:'manage',subtab:'rules',focus:'[data-p2-action="rule-new"]',fallbackFocus:'.page-title',details:'Open Manage Activities → Rules → Add Rule. Write an expectation your child can understand, choose any award or optional consequence, set visibility, and save. Record what happened in Daily Rules Check-in.',where:'Select Add Rule to define an expectation. You can return to Daily Rules Check-in to record how it went.'},
+ {icon:'🎁',title:'Create a Reward',tab:'manage',subtab:'upcoming',focus:'[data-p4-action="reward-new"]',fallbackFocus:'.page-title',details:'Open Manage Activities → Rewards → Create Reward. Enter the name and type, choose its star price and contents, then set allowed days, use limits, and any requirements. Save or publish it to the Star Shop.',where:'Select Create Reward to open the reward editor. The fields change depending on the reward type you choose.'},
+ {icon:'💌',title:'Approve a Reward Request',tab:'requests',focus:'.p31-request-list',fallbackFocus:'.page-title',details:'Approving a reward claim spends the stated stars and issues a voucher. It does NOT mean that the child already received or used the reward.',steps:[
+  'Open Review Center → Review Requests and find the pending Reward claim.',
+  'Check the listed reward and the requirements. Tap Approve to spend its star cost and issue a voucher; Decline leaves the wallet unchanged.',
+  'When the child actually receives or uses the reward, record that separately under Manage Vouchers.'
+ ],where:'This is the Requests list. When a Reward claim appears, read its details and choose Approve or Decline. Approval issues a voucher; it does not record the reward as delivered.',absent:'There are no pending requests to highlight at the moment. Reward claims will appear in this list when your child sends one.'},
+ {icon:'🎟️',title:'Manage a Voucher',tab:'vouchers',focus:'[data-p4-action="voucher-guardian"]',fallbackFocus:'.p2-list',details:'A voucher is the ticket created when a reward is claimed. Managing it records when the reward is actually delivered or used; it does not charge the same stars again.',steps:[
+  'Open Manage Vouchers from the Dashboard, or Manage Activities → Rewards → Vouchers. Find the issued ticket and select Manage.',
+  'For an item or experience already given, choose Mark as Fulfilled. For timed rewards, choose Activate Timer, then Pause & Confirm Usage after the session.',
+  'If a voucher was already used outside the app, use Mark Voucher as Used to record the real use and close the ticket. Do not record it as used before the child receives the reward.'
+ ],where:'This Manage Vouchers list contains issued tickets. Select Manage on the appropriate ticket. From its detail page you can fulfill an item, run a timer, or record actual use.',absent:'No vouchers have been issued yet. After a reward claim is approved, its ticket will appear on this page.'},
+ {icon:'⭐',title:'Understand Star Changes',tab:'history',focus:'#p5b-history-filter',fallbackFocus:'.page-title',details:'History & Reports shows why stars were earned, spent, deducted, or corrected. Rewards spend stars when a voucher is claimed—not when that same voucher is later marked used. A completed routine summarizes stars already earned by its tasks without adding them again.',where:'Use the History & Reports filters to find a particular task award, rule award, reward purchase, deduction, or correction.'},
+ {icon:'☁️',title:'Check Family Sync',tab:'dashboard',focus:'.pc-sync-card',fallbackFocus:'.quick-actions',details:'Changes are saved on the current device immediately. The garden normally waits about two quiet minutes to share them, or up to ten minutes while edits continue. You can check sharing progress or tap Sync Now from the Dashboard.',where:'Select Check Family Sync to open the sharing status and countdown. Use Sync Now if you want to share pending changes sooner.'},
+ {icon:'🔒',title:'Finish Safely',tab:'dashboard',focus:'.topbar [data-action="lock"]',fallbackFocus:'.topbar',details:'Before leaving, check the Dashboard’s Family Sync status. If changes are waiting and you need to close the browser, select Sync Now and check the result. Then select Lock to return to Child Mode.',where:'The Lock button in the top-right header closes Guardian Mode when you are finished.'}
+];
+p28Lessons.splice(0,p28Lessons.length,...p31LessonsNew);
+// The previous release saved only a numeric lesson index. Translate it when resuming.
+const p31OldReadTour=p28ReadTourProgress;
+p28ReadTourProgress=function(){const saved=p31OldReadTour();if(!saved||saved.orderVersion===3||saved.done)return saved;
+ const oldToNew={0:0,1:0,2:1,3:2,4:9,5:7,6:10,7:11,8:3,9:4,10:5,11:6};
+ return {...saved,step:oldToNew[saved.step]??0,orderVersion:3};
+};
+p28SaveTourProgress=function(step,done=false){try{localStorage.setItem(p28TourProgressKey(),JSON.stringify({step,done,orderVersion:3,updatedAt:Date.now()}));}catch{}};
+// Multi-action reward lessons show explicit, factual how-to instructions.
+p28TourHtml=function(){const i=Math.min(p28Lessons.length-1,Math.max(0,state.p17.tourStep)),t=p28Lessons[i];
+ const chips=p28Lessons.map((_,j)=>`<span class="p28-dot${j===i?' active':''}${j<i?' done':''}" aria-label="Lesson ${j+1}"></span>`).join('');
+ const steps=t.steps?.length?`<div class="p31-tour-steps"><p class="p31-tour-steps-heading">How to do it</p><ol>${t.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>`:'';
+ return p17ModalShell('🌷 Guardian Guided Walkthrough',`Lesson ${i+1} of ${p28Lessons.length}`,`<div class="p14-dialog-body p28-tour"><div class="p28-dots">${chips}</div><div class="p28-lesson-icon">${t.icon}</div><h3>${esc(t.title)}</h3><p>${esc(t.details)}</p>${steps}<div class="p28-tour-actions"><button class="btn btn-plain" type="button" data-p28-action="tour-prev" ${i===0?'disabled':''}>← Back</button><button class="btn btn-soft" type="button" data-p28-action="tour-locate">👀 Show Me Where</button><button class="btn btn-primary" type="button" data-p28-action="tour-next">${i===p28Lessons.length-1?'Finish':'Next →'}</button></div><button class="p28-tour-skip" type="button" data-p28-action="tour-later">Save and Finish Later</button></div>`,'tour-later').replace('data-p17-action="tour-later"','data-p28-action="tour-later"');
+};
+p17TourHtml=p28TourHtml;
+// Locate only a relevant real interface element; if it has no active records, explain exactly where they will appear.
+p28ApplyLocateTip=function(){document.querySelectorAll('.p28-locate-tip').forEach(el=>el.remove());document.querySelectorAll('.p28-spotlight').forEach(el=>el.classList.remove('p28-spotlight'));
+ if(!p28Help.locate||state.view!=='guardian'||!safeGuardian())return;
+ const t=p28Lessons[Math.min(p28Lessons.length-1,Math.max(0,state.p17.tourStep))];
+ let target=null;
+ if(t.title==='Approve a Reward Request'){
+  const rewardRow=[...document.querySelectorAll('.p31-request')].find(el=>/Reward/i.test(el.querySelector('strong')?.textContent||''));
+  target=rewardRow||document.querySelector(t.focus);
+ }else target=document.querySelector(t.focus);
+ const hasAction=Boolean(target);
+ if(!target&&t.fallbackFocus)target=document.querySelector(t.fallbackFocus);
+ if(target){target.classList.add('p28-spotlight');target.scrollIntoView?.({block:'nearest',behavior:'instant'});}
+ const tip=document.createElement('div');tip.className='p28-locate-tip';tip.setAttribute('role','status');
+ tip.innerHTML=`<strong>${t.icon} ${esc(t.title)}</strong><p>${esc(t.where)}</p>${!hasAction&&t.absent?`<p class="p31-locator-empty">${esc(t.absent)}</p>`:''}<button type="button" class="btn btn-primary btn-small" data-p28-action="tour-return">Continue Lesson →</button>`;
+ document.body.append(tip);
+};
+const P31_CSS=String.raw`
+.p31-tour-steps{border:1px solid #efdeea;background:#fffbfd;border-radius:15px;padding:14px 17px;margin:13px 0 18px}
+.p31-tour-steps-heading{font-weight:800;color:#815771;margin:0 0 7px!important}
+.p31-tour-steps ol{margin:0;padding-left:21px;display:grid;gap:9px;color:#6b5367;line-height:1.54;font-size:.92rem}
+.p31-locator-empty{font-size:.84rem;color:#786679;background:#fff;border:1px solid #efdde9;padding:10px;border-radius:10px}
+@media(max-width:640px){.p31-tour-steps{padding:12px}.p31-tour-steps ol{font-size:.85rem}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style>${P31_CSS}</style>`);
+/* ===== End Phase 6C.2B.2E.3 ===== */
+
+
 </script>
 </body>
 </html>
