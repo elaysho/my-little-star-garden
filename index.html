@@ -10828,6 +10828,232 @@ document.head.insertAdjacentHTML('beforeend',`<style>${P31_CSS}</style>`);
 /* ===== End Phase 6C.2B.2E.3 ===== */
 
 
+
+/* ================================================================
+   Phase 6C.2B.2E.4 — Parent-facing polish and reliable excused routines
+   Compatibility: existing local stores, family UIDs, ledger and cloud rules
+   ================================================================ */
+const P32_VERSION='mlsg-6c2b2e4-review-20261117';
+state.p32={forgotOpen:false,forgotFor:'',forgotEmail:'',forgotBusy:false,forgotError:'',forgotInfo:'',excuseBusy:false};
+
+/* Authentication: don't invite email-link sign-in, and make password reset
+   a separate screen with its own email field rather than a buried action. */
+const p32BeforeSendUI=p16SendUI;
+p16SendUI=function(){
+ const root=document.createElement('div');root.innerHTML=p32BeforeSendUI();
+ root.querySelectorAll('.p29-signin-notice').forEach(x=>x.remove());
+ root.querySelectorAll('[data-p23-action="reset-password"]').forEach(b=>{delete b.dataset.p23Action;b.dataset.p32Action='forgot-open';b.textContent='Forgot your password?';});
+ root.querySelectorAll('.p29-password-only small').forEach(s=>{s.textContent='Use your family account password. Your six-digit Guardian PIN is a separate code.';});
+ return root.innerHTML;
+};
+const p32BeforeProfile=p16ProfileScreen;
+p16ProfileScreen=function(){
+ const root=document.createElement('div');root.innerHTML=p32BeforeProfile();
+ const stage=root.querySelector('.p16-stage');
+ if(!stage||state.p16Entry!=='signin')return root.innerHTML;
+ if(state.p32.forgotFor && state.p32.forgotFor!==state.p16Selected){state.p32.forgotOpen=false;state.p32.forgotError='';state.p32.forgotInfo='';}
+ if(!state.p32.forgotOpen)return root.innerHTML;
+ stage.classList.add('p32-forgot-stage');
+ stage.innerHTML=`<div class="p32-forgot-head"><span aria-hidden="true">🔑</span><div><h2>Reset account password</h2><p class="p2-muted">Enter the email address you use for this family garden. We'll send instructions to reset your account password.</p></div></div>
+ ${state.p32.forgotError?`<div class="p26-login-error" role="alert">${esc(state.p32.forgotError)}</div>`:''}
+ ${state.p32.forgotInfo?`<div class="p26-login-info" role="status">${esc(state.p32.forgotInfo)}</div>`:''}
+ <form id="p32-forgot-form" class="form-grid"><div class="field"><label for="p32-forgot-email">Account email address</label><input id="p32-forgot-email" type="email" name="email" autocomplete="email" inputmode="email" value="${esc(state.p32.forgotEmail||state.p16Email||'')}" placeholder="name@example.com" required></div><button class="btn btn-primary btn-wide" type="submit" ${state.p32.forgotBusy?'disabled':''}>${state.p32.forgotBusy?p16Spinner()+' Sending…':'📩 Send Password Reset Email'}</button></form>
+ <button class="btn btn-soft btn-wide" type="button" data-p32-action="forgot-back" ${state.p32.forgotBusy?'disabled':''}>← Back to Sign In</button>`;
+ return root.innerHTML;
+};
+
+/* Move the owner-only rule deduction ceiling to Manage Activities → Rules.
+   Star consequences belong alongside rule configuration, not Firebase setup. */
+const p32BeforeCloud=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p32BeforeCloud();root.querySelectorAll('.p27-rule-limits').forEach(x=>x.remove());root.querySelectorAll('.p9-cloud-login .p2-muted').forEach(x=>{if(/Email-link sign-in is temporarily unavailable/.test(x.textContent||''))x.textContent='Use your family account email and password to sign in.';});return root.innerHTML;};
+const p32BeforeManage=guardianManage;
+guardianManage=function(){const root=document.createElement('div');root.innerHTML=p32BeforeManage();
+ if(state.p2ManageTab==='rules'&&p27Owner()&&!root.querySelector('#p27-rule-cap-form')){
+  const panel=document.createElement('section');panel.className='panel p32-rule-safety';
+  panel.innerHTML=`<div class="panel-head"><div><p class="eyebrow">Owner setting</p><h3>🛡️ Rule Deduction Safety</h3></div></div><p class="p2-muted">Set the largest star deduction a Guardian can configure for one rule incident. Existing records are not changed.</p><form id="p27-rule-cap-form" class="p32-rule-limit-form"><div class="field"><label for="p32-rule-cap">Maximum stars per incident</label><input id="p32-rule-cap" type="number" name="limit" min="20" max="100" step="1" value="${p27RuleCap()}" required></div><button type="submit" class="btn btn-soft">Save Deduction Limit</button></form>`;
+  root.append(panel);
+ }
+ return root.innerHTML;
+};
+
+/* Help Center: search behaves like a proper, responsive input, with clear. */
+const p32BeforeHelp=p28HelpPage;
+p28HelpPage=function(){const root=document.createElement('div');root.innerHTML=p32BeforeHelp();
+ const search=root.querySelector('.p28-search');const input=search?.querySelector('input');
+ if(search&&input){const field=document.createElement('div');field.className='p32-help-search';field.setAttribute('role','search');field.innerHTML='<span class="p32-search-icon" aria-hidden="true">🔎</span><label class="sr-only" for="p28-help-search">Search common questions</label>';
+  field.append(input);const clear=document.createElement('button');clear.type='button';clear.className='p32-search-clear';clear.dataset.p32Action='help-clear';clear.textContent='Clear';clear.hidden=!(p28Help.search||'').length;field.append(clear);search.replaceWith(field);
+ }
+ root.querySelector('.p28-faq-list')?.classList.add('p32-faq-list');
+ return root.innerHTML;
+};
+
+/* On the Learning Center route the older shell bypassed the unified Guardian
+   header decorator: the sync status floated outside the action row and the
+   profile avatar was a non-clickable span. */
+const p32BeforeGuardian=guardian;
+guardian=function(){const html=p32BeforeGuardian();if(!(state.view==='guardian'&&safeGuardian()&&state.guardianTab==='p28-help'))return html;
+ const root=document.createElement('div');root.innerHTML=html;const top=root.querySelector('main header.topbar'),row=top?.querySelector('.row');
+ if(!row)return root.innerHTML;
+ const status=top.querySelector('.p17-status-pill');if(status&&status.parentElement!==row)row.prepend(status);
+ const badge=row.querySelector('.p65-guardian-indicator');if(badge&&badge.tagName!=='BUTTON'){
+  const button=document.createElement('button');button.type='button';button.className='p65-guardian-indicator p19-guardian-menu p32-switch-guardian';button.dataset.p16Action='switch';button.setAttribute('aria-label','Switch Guardian profile');button.title='Switch Guardian profile';button.innerHTML=`<span class="p20-guardian-name">${badge.innerHTML}</span><span class="p32-down-arrow" aria-hidden="true">⌄</span>`;badge.replaceWith(button);
+ }
+ row.classList.add('p32-help-toprow');top.classList.add('p32-help-topbar');
+ return root.innerHTML;
+};
+
+/* Guardian Dashboard: accessible, icon-only Learning Center shortcut next to
+   Share Today's Progress, on wide screens and on mobile. */
+const p32BeforeDashboard=guardianDashboard;
+guardianDashboard=function(){const root=document.createElement('div');root.innerHTML=p32BeforeDashboard();
+ const actions=root.querySelector('.p8-daily-actions')||root.querySelector('[data-p8-action="daily-start"]')?.parentElement;
+ if(actions&&!actions.querySelector('[data-p28-action="open-help"]')){
+  const help=document.createElement('button');help.type='button';help.className='btn btn-soft p32-learning-shortcut';help.dataset.p28Action='open-help';help.setAttribute('aria-label','Open Guardian Learning Center');help.title='Guardian Learning Center';help.innerHTML='📖';actions.append(help);
+ }
+ return root.innerHTML;
+};
+
+/* A day is satisfied if each active routine member was either completed or
+   explicitly excused. Excused tasks earn NO stars. A day with every member
+   excused is not counted as a completed, star-earning routine. */
+function p32CreditedTask(id,day){return p11SavedTaskCompletions(day).some(c=>c.taskId===id);}
+function p32RoutineEvidence(r,day){const members=p3Members(r,day);const completed=members.filter(({task})=>p32CreditedTask(task.id,day));const doneIds=new Set(completed.map(({task})=>task.id));const excused=members.filter(({task})=>!doneIds.has(task.id)&&task.skippable&&p5bExcused(task.id,day));return {members,completed,excused,total:members.length,satisfied:completed.length+excused.length};}
+const p32BeforeProgress=p3RoutineProgress;
+p3RoutineProgress=function(r,date=p2Date()){
+ if(!r||r.type!=='checklist'||!Array.isArray(r.routineItems))return p32BeforeProgress(r,date);
+ const v=p32RoutineEvidence(r,date);return {completed:v.satisfied,total:v.total,earnedCompleted:v.completed.length,excused:v.excused.length};
+};
+const p32BeforeFinished=p2TaskFinished;
+p2TaskFinished=function(task,date){
+ if(task?.type==='checklist'&&Array.isArray(task.routineItems)){const p=p3RoutineProgress(task,date);return p.total>0&&p.completed===p.total&&p.earnedCompleted>0;}
+ return p32BeforeFinished(task,date);
+};
+// If a completion exists and all the remaining required steps are excused,
+// preserve the summary even if an older history normalizer omitted a step.
+const p32BeforeRoutineHistory=p27RoutineHistory;
+p27RoutineHistory=function(day){const rows=p32BeforeRoutineHistory(day);const seen=new Set(rows.map(r=>r.id));
+ for(const r of state.p2Tasks||[]){if(r.type!=='checklist'||!Array.isArray(r.routineItems)||r.draft||r.archived||!p2Due(r,day)||seen.has(r.id))continue;
+  const info=p32RoutineEvidence(r,day);if(!info.total||!info.completed.length||info.satisfied!==info.total)continue;
+  const ids=new Set(info.members.map(({task})=>task.id));
+  const stars=p11SavedTaskCompletions(day).filter(c=>ids.has(c.taskId)).reduce((sum,c)=>sum+Math.max(0,Number(c.starsAwarded||c.legacyAwarded||0)),0);
+  rows.push({id:r.id,name:r.name,icon:r.icon||'📋',total:info.total,completed:info.completed.length,excused:info.excused.length,stars,steps:info.members.map(({task})=>task.name)});
+ }
+ return rows;
+};
+const p32BeforeTaskCard=p2TaskCard;
+p2TaskCard=function(t,guardian=false,day=p2Date()){
+ const html=p32BeforeTaskCard(t,guardian,day);if(t?.type!=='checklist'||!Array.isArray(t.routineItems))return html;
+ const info=p32RoutineEvidence(t,day),root=document.createElement('div');root.innerHTML=html;
+ const status=root.querySelector('.p2-hero .p2-muted');if(status)status.textContent=`Checklist routine · ${info.completed.length} done${info.excused.length?' · '+info.excused.length+' excused':''} · ${info.total} steps`;
+ const small=root.querySelector('.p2-note');if(small)small.textContent=info.members.map(({task})=>p32CreditedTask(task.id,day)?`✅ ${task.name}`:task.skippable&&p5bExcused(task.id,day)?`🕊️ ${task.name} (excused)`:`▫️ ${task.name}`).join(' · ');
+ return root.innerHTML;
+};
+
+/* Keep Guardian-facing explanations aligned with password-only sign-in and
+   the new option to excuse earlier dates. */
+const p32BeforeAuthMessage=p23AuthMessage;
+p23AuthMessage=function(err){const code=String(err?.code||'');
+ if(/invalid-credential|wrong-password|user-not-found|invalid-login-credentials|invalid-email/.test(code))return 'The email or password was not recognized. Check your details or choose Forgot your password?';
+ const message=p32BeforeAuthMessage(err);
+ return String(message).replace(/use your original email sign-in link/gi,'reset your account password').replace(/your usual email link/gi,'your existing account password');
+};
+const p32SpecialGuide=p28GuideData.find(g=>/Stars & Special Situations/.test(g.title));
+if(p32SpecialGuide){const step=p32SpecialGuide.cards.find(c=>/No Task Today \/ Excused/.test(c[1]));if(step)step[2]='In Daily Star Review, select the day (today or an earlier date). Mark an optional task Excused only if it was not required. Excused steps earn no stars and disappear from the award checklist.';}
+const p32ExcuseFAQ=p28Faqs.find(row=>/No Task Today \/ Excused/.test(row[0]));
+if(p32ExcuseFAQ)p32ExcuseFAQ[1]='Open Daily Star Review and choose the appropriate date, including a previous day. For a task that is sometimes not assigned, choose Mark Excused and confirm. It earns no stars, is removed from the task award list, and can satisfy a routine step without counting as completed work.';
+
+/* The two controls below share state.p2ReviewDate. This allows marking an
+   excuse for any previous due date without looking for a date control below
+   the excusal panel. */
+function p32DayAgo(day,offset){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+offset);return d.toISOString().slice(0,10);}
+const p32ReviewToday=()=>p2ValidDate(state.p2ReviewDate)?state.p2ReviewDate:p2Date();
+p5bExcusePanel=function(date){const today=p2Date(),valid=p2ValidDate(date)&&date<=today?date:today;
+ const tasks=(state.p2Tasks||[]).filter(t=>t.skippable&&!t.archived&&!t.draft&&t.type!=='checklist'&&p2Due(t,valid));
+ const excusedCount=tasks.filter(t=>p5bExcused(t.id,valid)).length;
+ const rows=tasks.map(t=>{const exc=p5bExcused(t.id,valid),done=p32CreditedTask(t.id,valid),asking=state.p27.excuseConfirm===t.id+':'+valid;
+  const right=asking?`<div class="p32-excuse-prompt" role="group" aria-label="Confirm excused date"><p>Was <strong>${esc(t.name)}</strong> not assigned or not required on ${esc(valid)}? No stars will be earned for this step.</p><div class="p32-excuse-confirm-actions"><button type="button" class="btn btn-soft btn-small" data-p32-action="confirm-excuse" data-id="${esc(t.id)}" data-date="${esc(valid)}" ${state.p32.excuseBusy?'disabled':''}>${state.p32.excuseBusy?p16Spinner()+' Saving…':'Yes, mark Excused'}</button><button type="button" class="btn btn-plain btn-small" data-p32-action="cancel-excuse" ${state.p32.excuseBusy?'disabled':''}>Cancel</button></div></div>`:'';
+  return `<div class="p32-excuse-row"><span class="p27-excuse-icon">${esc(t.icon||'📖')}</span><div class="p32-excuse-label"><strong>${esc(t.name)}</strong><span>${done?'✅ Completed':exc?'🕊️ Excused · no stars':'Not completed for this date'}</span>${right}</div>${asking?'':`<button class="btn ${exc?'btn-plain':'btn-soft'} btn-small" type="button" data-p32-action="${exc?'undo-excuse':'ask-excuse'}" data-id="${esc(t.id)}" data-date="${esc(valid)}" ${state.p32.excuseBusy||done?'disabled':''}>${done?'Completed':exc?'Undo Excuse':'Mark Excused'}</button>`}</div>`;
+ }).join('');
+ return `<section class="panel p27-excuse-panel p32-excuse-panel"><div class="panel-head"><div><h3>🕊️ No Task Today / Excused</h3><p class="p2-muted">If an optional scheduled task wasn't required, excuse that date. This does not award stars.</p></div><span class="chip">${excusedCount} excused</span></div><div class="p32-excuse-date-row"><label for="p32-excuse-date">Date to review</label><input id="p32-excuse-date" type="date" value="${esc(valid)}" max="${esc(today)}" aria-label="Date for task excuses"><button type="button" class="btn btn-soft btn-small" data-p32-action="yesterday">Yesterday</button><button type="button" class="btn btn-plain btn-small" data-p32-action="today">Today</button></div><p class="p32-excuse-date-hint">You can choose a previous day. This date also controls Daily Star Review below.</p>${tasks.length?`<div class="p32-excuse-rows">${rows}</div>`:'<p class="p2-muted">No optional tasks were scheduled for this date. Enable “No Task Today / Excused” in the task editor for tasks that are sometimes not assigned.</p>'}</section>`;
+};
+
+/* Daily Star Review: collapse member tasks under their routine header,
+   exclude excused tasks entirely from the awardable checklist, keep shared
+   tasks only once, and preserve the original batch submission fields. */
+const p32BeforeReview=p2ReviewPage;
+p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=p32BeforeReview();const form=root.querySelector('#p2-review-form');const list=form?.querySelector('.p2-spaced');if(!list)return root.innerHTML;
+ const day=p32ReviewToday();const tasks=(state.p2Tasks||[]).filter(t=>t.type!=='checklist'&&!t.archived&&!t.draft&&p2Due(t,day)&&t.frequency!=='checkin'&&!(t.skippable&&p5bExcused(t.id,day)));
+ const byId=new Map(tasks.map(t=>[t.id,t])),used=new Set(),groups=[];
+ const row=t=>{const e=p2CompletionEligibility(t,day,'',null),done=p32CreditedTask(t.id,day);
+  return `<label class="p32-review-task"><input type="checkbox" name="taskIds" value="${esc(t.id)}" ${!e.ok?'disabled':''}><span class="p32-task-icon">${esc(t.icon||'📖')}</span><span class="p32-task-detail"><strong>${esc(t.name)}</strong><small>${done?'✓ Already recorded':e.ok?`+${money(t.stars||0)} stars`:(e.reason||'Not currently eligible')}</small></span></label>`;
+ };
+ for(const routine of (state.p2Tasks||[]).filter(r=>r.type==='checklist'&&!r.archived&&!r.draft&&Array.isArray(r.routineItems)&&p2Due(r,day))){
+  const all=p3Members(routine,day),active=all.map(({task})=>byId.get(task.id)).filter(Boolean).filter(t=>!used.has(t.id));
+  const excused=all.filter(({task})=>task.skippable&&p5bExcused(task.id,day)).length;
+  if(!active.length&&!excused)continue;
+  active.forEach(t=>used.add(t.id));
+  const progress=p32RoutineEvidence(routine,day);
+  groups.push(`<div class="p32-review-routine"><div class="p32-review-routine-head"><span class="p32-routine-emoji">${esc(routine.icon||'📋')}</span><div><strong>${esc(routine.name)}</strong><small>${progress.completed.length} finished${progress.excused.length?' · '+progress.excused.length+' excused':''} · ${progress.total} steps in routine</small></div></div>${active.length?`<div class="p32-review-task-list">${active.map(row).join('')}</div>`:'<p class="p32-only-excused">All steps scheduled for this routine were excused or already grouped elsewhere. Nothing to award here.</p>'}${excused?'<p class="p32-excuse-count">🕊️ Excused steps are omitted from this award list.</p>':''}</div>`);
+ }
+ const remaining=tasks.filter(t=>!used.has(t.id));
+ list.classList.add('p32-review-groups');list.innerHTML=`${groups.join('')}${remaining.length?`<div class="p32-review-routine p32-review-independent"><div class="p32-review-routine-head"><span class="p32-routine-emoji">📖</span><div><strong>Individual Tasks</strong><small>Not part of a routine shown above</small></div></div><div class="p32-review-task-list">${remaining.map(row).join('')}</div></div>`:''}${!groups.length&&!remaining.length?'<div class="empty"><h3>Nothing left to award for this date</h3><p>Tasks may already be completed or excused, or none are scheduled.</p></div>':''}`;
+ const text=root.querySelector('#p2-review-form')?.closest('section.panel')?.querySelector('p.p2-note');if(text)text.textContent='Choose completed tasks below. Routine steps are grouped together; an excused task cannot be awarded stars.';
+ return root.innerHTML;
+};
+
+/* No old delegated handler listens to our p32 actions. A successful excuse
+   always exits the confirmation state and refreshes the review immediately. */
+document.addEventListener('click',async event=>{const b=event.target.closest('[data-p32-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();const action=b.dataset.p32Action;
+ if(action==='forgot-open'){
+  state.p32.forgotFor=state.p16Selected;state.p32.forgotEmail=String(document.querySelector('#p23-login-email')?.value||state.p16Email||'').trim();state.p32.forgotError='';state.p32.forgotInfo='';state.p23.authError='';state.p23.authInfo='';state.p32.forgotOpen=true;render();return;
+ }
+ if(action==='forgot-back'){state.p32.forgotOpen=false;state.p32.forgotError='';state.p32.forgotInfo='';render();return;}
+ if(action==='help-clear'){p28Help.search='';const i=document.querySelector('#p28-help-search');if(i){i.value='';i.dispatchEvent(new Event('input',{bubbles:true}));i.focus();}return;}
+ if(action==='ask-excuse'){state.p27.excuseConfirm=b.dataset.id+':'+b.dataset.date;render();return;}
+ if(action==='cancel-excuse'){state.p27.excuseConfirm='';render();return;}
+ if(action==='yesterday'||action==='today'){state.p2ReviewDate=action==='today'?p2Date():p32DayAgo(p2Date(),-1);state.p27.excuseConfirm='';render();return;}
+ if(action==='confirm-excuse'||action==='undo-excuse'){
+  if(state.p32.excuseBusy)return;state.p32.excuseBusy=true;const id=b.dataset.id,date=b.dataset.date;render();
+  try{await p5bSetExcused(id,date,action==='confirm-excuse');state.p27.excuseConfirm='';}
+  catch(error){state.p27.excuseConfirm='';notice(error?.message||'Could not update the excused date.',true);}
+  finally{state.p32.excuseBusy=false;render();}return;
+ }
+},true);
+document.addEventListener('submit',async event=>{if(event.target?.id!=='p32-forgot-form')return;event.preventDefault();event.stopImmediatePropagation();if(state.p32.forgotBusy)return;
+ const email=String(new FormData(event.target).get('email')||'').trim().toLowerCase();state.p32.forgotEmail=email;state.p32.forgotError='';state.p32.forgotInfo='';
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){state.p32.forgotError='Enter a valid account email address.';render();return;}
+ state.p32.forgotBusy=true;render();
+ try{const c=await p8CloudInit();await c.auth.sendPasswordResetEmail(email);state.p32.forgotInfo='If this email is registered, a password-reset message has been sent. Check the inbox and spam folder.';}
+ catch(err){state.p32.forgotError=p23AuthMessage(err);}
+ finally{state.p32.forgotBusy=false;render();}
+},true);
+document.addEventListener('change',event=>{if(event.target?.id!=='p32-excuse-date')return;const d=event.target.value;if(!p2ValidDate(d)||d>p2Date()){notice('Select today or an earlier valid date.',true);return;}state.p2ReviewDate=d;state.p27.excuseConfirm='';render();},true);
+document.addEventListener('input',event=>{if(event.target?.id==='p28-help-search'){const b=document.querySelector('[data-p32-action="help-clear"]');if(b)b.hidden=!event.target.value;}},true);
+
+const P32_CSS=String.raw`
+.p32-forgot-stage{background:#fff!important;border:1px solid #ecd8e4;border-radius:18px;padding:clamp(16px,3vw,24px);display:grid;gap:13px}
+.p32-forgot-stage h2{margin:0 0 6px}.p32-forgot-stage>form{margin:0}.p32-forgot-head{display:flex;align-items:start;gap:12px}.p32-forgot-head>span{font-size:1.9rem}.p32-forgot-stage input{width:100%;min-width:0;box-sizing:border-box}
+.p32-rule-safety{background:#fff}.p32-rule-limit-form{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.p32-rule-limit-form>.field{min-width:190px;max-width:290px;flex:1}.p32-rule-limit-form button{min-height:43px}
+.p32-help-search{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid #d8b9cb;border-radius:14px;padding:5px 10px;box-sizing:border-box;min-width:0;max-width:100%;transition:box-shadow .2s,border-color .2s}
+.p32-help-search:focus-within{border-color:#a8648d;box-shadow:0 0 0 3px rgba(168,100,141,.15)}
+.p32-help-search input{display:block!important;flex:1!important;min-width:0!important;width:100%!important;max-width:none!important;outline:none!important;box-shadow:none!important;border:0!important;background:transparent!important;border-radius:0!important;margin:0!important;padding:9px 2px!important;font-size:.95rem!important}
+.p32-search-icon{font-size:1.12rem}.p32-search-clear{color:#925675;background:#f7eaf3;border:0;border-radius:9px;padding:8px 11px;font-weight:700;cursor:pointer;flex:none}.p32-search-clear[hidden]{display:none}
+.p32-faq-list details{box-shadow:0 1px 3px rgba(102,65,89,.03);padding:13px 15px}.p32-faq-list summary{font-size:.94rem;line-height:1.5}.p32-faq-list summary::marker{color:#a96f93}
+.p32-help-topbar>.row{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:7px;min-width:0;flex-wrap:wrap}.p32-help-topbar .p17-status-pill{max-width:180px;flex:0 1 auto}
+.p32-help-topbar .p65-guardian-indicator{cursor:pointer}.p32-down-arrow{font-size:1rem;margin-left:5px}
+.p8-daily-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.p32-learning-shortcut{width:46px;height:46px;display:inline-flex;align-items:center;justify-content:center;font-size:1.3rem;padding:0;flex:0 0 46px}
+.p32-excuse-panel{background:#fff;border-color:#e2e9e3}.p32-excuse-panel .panel-head{align-items:start}.p32-excuse-date-row{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:15px}
+.p32-excuse-date-row label{font-size:.86rem;font-weight:700;color:#675266}.p32-excuse-date-row input{min-width:154px;flex:0 1 190px;padding:10px;border:1px solid #dfc7d6;border-radius:11px;background:#fff;font:inherit;max-width:100%;box-sizing:border-box}
+.p32-excuse-date-hint{font-size:.8rem;color:#827486;margin:7px 0 11px}.p32-excuse-rows{border-top:1px solid #e8e4e4}.p32-excuse-row{display:flex;align-items:start;gap:12px;padding:12px 0;border-bottom:1px solid #eee3e8}
+.p32-excuse-row>.btn{flex:none}.p32-excuse-label{flex:1;min-width:0}.p32-excuse-label strong{display:block}.p32-excuse-label span{display:block;font-size:.82rem;color:#867788;margin-top:5px}.p32-excuse-prompt{background:#fbf4f8;border:1px solid #edd7e5;border-radius:12px;padding:13px;margin-top:10px}.p32-excuse-prompt p{margin:0 0 10px;font-size:.87rem;line-height:1.55}.p32-excuse-confirm-actions{display:flex;gap:8px;flex-wrap:wrap}
+.p32-review-groups{display:grid;gap:13px!important}.p32-review-routine{border:1px solid #e8d7e2;border-radius:15px;background:#fff;padding:15px}.p32-review-routine-head{display:flex;align-items:center;gap:11px;margin-bottom:10px}.p32-review-routine-head strong{display:block;color:#685066}.p32-review-routine-head small{display:block;margin-top:4px;color:#92758a;font-size:.79rem}.p32-routine-emoji{font-size:1.7rem;flex:0 0 36px}.p32-review-task-list{display:grid;gap:0;border-top:1px solid #efe4eb}
+.p32-review-task{display:flex;align-items:center;gap:11px;padding:12px 4px;border-bottom:1px solid #f1e8ee;cursor:pointer}.p32-review-task:last-child{border:0}.p32-review-task>input{width:18px;height:18px;flex:none;accent-color:#a86b92}.p32-task-icon{font-size:1.36rem;flex:0 0 25px}.p32-task-detail{flex:1;min-width:0}.p32-task-detail strong{display:block;font-size:.92rem}.p32-task-detail small{display:block;font-size:.8rem;color:#8d7487;margin-top:3px}.p32-excuse-count,.p32-only-excused{font-size:.8rem;color:#876e83;margin:8px 0 0}
+@media(max-width:620px){.p32-excuse-row{flex-wrap:wrap}.p32-excuse-row>.btn{margin-left:45px}.p32-excuse-date-row input{flex:1 1 130px}.p32-excuse-date-row label{width:100%}.p32-review-routine{padding:12px}.p32-help-topbar .p17-status-pill{max-width:145px}.p32-help-topbar .wallet{display:none!important}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p32-style">${P32_CSS}</style>`);
+/* ===== End Phase 6C.2B.2E.4 ===== */
+
 </script>
 </body>
 </html>
