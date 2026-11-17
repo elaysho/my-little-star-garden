@@ -11083,13 +11083,9 @@ p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=
  return root.innerHTML;
 };
 // Keep duplicate instances of one shared task in sync as the user checks boxes.
-document.addEventListener('change',ev=>{const cb=ev.target;if(!cb.matches?.('input[data-p33-shared-task]'))return;document.querySelectorAll('input[data-p33-shared-task]').forEach(peer=>{if(peer!==cb&&peer.value===cb.value&&!peer.disabled)peer.checked=cb.checked;});},true);
+/* Shared copies are independently selectable where award limits allow. */
 // The original batch method reads FormData again; suppress duplicate selected IDs only for its duration.
-const p33PriorBatch=p2BatchReview;
-p2BatchReview=async function(form){const seen=new Set(),disabled=[];
- for(const input of form.querySelectorAll('input[name="taskIds"]:checked')){if(seen.has(input.value)){disabled.push(input);input.disabled=true;}else seen.add(input.value);}
- try{return await p33PriorBatch(form);}finally{disabled.forEach(i=>i.disabled=false);}
-};
+/* Superseded by 2E.6 bounded multi-award handler. */
 // Keep the detailed single-task completion form for check-ins and non-award completions.
 const p33PriorDashboard=guardianDashboard;
 guardianDashboard=function(){const root=document.createElement('div');root.innerHTML=p33PriorDashboard();root.querySelectorAll('[data-p2-action="quick-complete"]').forEach(x=>x.remove());return root.innerHTML;};
@@ -11131,7 +11127,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-p33-
  if(plan.special.length||plan.pending.some(t=>!plan.awardable.includes(t))){notice('Some steps need individual completion or are no longer eligible. Open View Steps to review them.',true);return;}
  if(!confirm(`Record ${plan.awardable.length} eligible task${plan.awardable.length===1?'':'s'} in “${r.name}” for today? Stars will be awarded only once per task.`))return;
  state.p33.routineBusy=r.id;b.disabled=true;
- try{const form=document.createElement('form');form.innerHTML=`<input name="date" value="${esc(date)}"><textarea name="note">Completed through routine ${esc(r.name)}</textarea>`+plan.awardable.map(t=>`<input name="taskIds" value="${esc(t.id)}">`).join('');
+ try{const form=document.createElement('form');form.innerHTML=`<input name="date" value="${esc(date)}"><textarea name="note">Completed through routine ${esc(r.name)}</textarea>`+plan.awardable.map(t=>`<input name="taskIds" value="${esc(t.id)}" data-routine-id="${esc(r.id)}">`).join('');
  const awarded=await p2BatchReview(form);await refresh();render();notice(`Recorded ${awarded} task${awarded===1?'':'s'} from ${r.name}. No duplicate routine stars were added.`);
  }catch(err){notice(err.message||'Could not record the routine.',true);render();}finally{state.p33.routineBusy='';}
 },true);
@@ -11158,7 +11154,7 @@ p62NotificationsDialog=function(){if(!state.p62NotificationsOpen)return '';
 document.addEventListener('click',e=>{const n=e.target.closest('[data-p62-action="notifications-filter"],[data-p62-action="notifications-open"]');if(n)state.p33.mailPage=1;},true);
 document.addEventListener('click',async e=>{const btn=e.target.closest('[data-p33-action="mail-page"],[data-p33-action="mark-all-read"]');if(!btn)return;
  e.preventDefault();e.stopImmediatePropagation();const action=btn.dataset.p33Action;
- if(action==='mail-page'){state.p33.mailPage=Math.max(1,Number(btn.dataset.page)||1);render();return;}
+ if(action==='mail-page'){state.p33.mailPage=Math.max(1,Number(btn.dataset.page)||1);render();requestAnimationFrame(()=>{const dlg=document.querySelector('.p33-mail-dialog');if(dlg)dlg.scrollTop=0;const list=dlg?.querySelector('.p62-message-list');if(list)list.scrollTop=0;});return;}
  if(!state.p33.mailBusy){state.p33.mailBusy=true;render();try{
  const rows=p33MailRows().filter(m=>m.unread&&!(m.kind==='request'&&m.ref?.status==='pending'));const time=iso();
  if(rows.length){await atomic(['records'],tx=>{const store=tx.objectStore('records');rows.forEach(m=>{
@@ -11215,6 +11211,262 @@ const P33_CSS=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="p33-style">${P33_CSS}</style>`);
 /* ===== End Phase 6C.2B.2E.5 ===== */
+
+/* ===== Phase 6C.2B.2E.6 — Guardian form clarity, repeatable task awards, incident explanations ===== */
+state.p34=state.p34||{incidentEdit:null,incidentBusy:false};
+// A routine occurrence represents a distinct opportunity only for a task whose award
+// frequency permits it. A once-daily task remains once-daily across every routine.
+const p34OldReviewPage=p2ReviewPage;
+p2ReviewPage=function(){
+ const root=document.createElement('div');root.innerHTML=p34OldReviewPage();const form=root.querySelector('#p2-review-form');if(!form)return root.innerHTML;
+ const day=state.p2ReviewDate||p2Date();
+ const routines=(state.p2Tasks||[]).filter(r=>r.type==='checklist'&&!r.draft&&!r.archived&&p2Due(r,day)&&Array.isArray(r.routineItems));
+ for(const group of root.querySelectorAll('.p32-review-routine')){
+  const title=group.querySelector('.p32-review-routine-head strong')?.textContent?.trim();const routine=routines.find(r=>r.name===title);
+  for(const input of group.querySelectorAll('input[name="taskIds"]')){
+   if(routine)input.dataset.routineId=routine.id;
+   const task=p2Task(input.value),hint=input.closest('label')?.querySelector('small');if(!task||!hint)continue;
+   if(task.frequency==='multi'){
+    const count=p2TaskCompletions(task.id,day).filter(c=>!c.correctedAt&&Number(c.starsAwarded)>0).length;
+    const limit=Number(task.maxPerDay)||1;
+    hint.textContent=count>=limit?`✓ Daily award limit reached (${count}/${limit})`:`${count}/${limit} awards recorded · +${money(task.stars||0)} stars for another completion`;
+   }else if(task.frequency==='cooldown'){
+    hint.textContent=input.disabled?'Waiting for the next eligible award':`+${money(task.stars||0)} stars · waiting period applies between awards`;
+   }else if(hint.textContent.includes('Also in another routine')){
+    hint.textContent=hint.textContent.replace('Also in another routine; counted once','Shared across routines · once per eligible period');
+   }
+  }
+ }
+ root.querySelectorAll('.lead').forEach(p=>{if(p.textContent.includes('Shared tasks appear only once'))p.textContent='Select the tasks completed on the chosen day. A task in multiple routines can earn again only when its frequency allows it.';});
+ const note=form.querySelector('.p2-note');if(note)note.textContent='A shared task appears under each routine. Select the occurrences she actually completed. Multiple-award tasks can earn stars again until their limit; once-daily tasks earn only once.';
+ return root.innerHTML;
+};
+// Batch awards include an explicit duplicate-count limit. For a multi-award task,
+// selecting it once in each routine is an intentional distinct completion.
+p2BatchReview=async function(form){
+ if(!safeGuardian())throw new Error('Guardian access required.');
+ const fd=new FormData(form),date=String(fd.get('date')||state.p2ReviewDate||p2Date());
+ if(!p2ValidDate(date)||date>p2Date())throw new Error('Choose today or a valid past date.');
+ const selected=[...form.querySelectorAll('input[name="taskIds"]:checked:not(:disabled)')];
+ if(!selected.length)throw new Error('Select at least one completed task.');
+ const byTask=new Map(),awards=[];
+ for(const input of selected){
+  const task=p2Task(input.value);if(!task||task.archived||task.draft||!p2Due(task,date))throw new Error('A selected task is no longer available.');
+  if(task.type==='checklist'||task.frequency==='checkin'||task.type==='timed'||p3HasTimer(task))throw new Error(`Complete “${task.name}” individually to record its special steps or timer.`);
+  if(task.skippable&&p5bExcused(task.id,date))throw new Error(`“${task.name}” was excused. Undo the excuse before awarding it.`);
+  const entries=byTask.get(task.id)||[];entries.push(input.dataset.routineId||'');byTask.set(task.id,entries);
+ }
+ for(const [id,contexts] of byTask){
+  const task=p2Task(id),eligible=p2CompletionEligibility(task,date,'',null);
+  if(!eligible.ok)throw new Error(`${task.name}: ${eligible.reason}`);
+  const old=p2TaskCompletions(task.id,date).filter(c=>!c.correctedAt&&Number(c.starsAwarded)>0).length;
+  const count=task.frequency==='multi'?contexts.length:1;
+  if(task.frequency==='multi'&&old+count>(Number(task.maxPerDay)||1))throw new Error(`${task.name}: only ${Math.max(0,(task.maxPerDay||1)-old)} award(s) remain for ${date}. Uncheck extra occurrences.`);
+  if(task.frequency==='cooldown'&&count>1)throw new Error(`“${task.name}” has a waiting period. Only one award can be recorded now.`);
+  for(let i=0;i<count;i++)awards.push({task,routineId:contexts[i]||null});
+ }
+ const note=String(fd.get('note')||'').trim().slice(0,320),stamp=iso();
+ await atomic(['completions','transactions'],tx=>{
+  for(const {task,routineId} of awards){const uid=uniqueId(),period=task.frequency==='weekly'?p2WeekStart(date):task.frequency==='once'?'once':date;
+   const ident=['daily','weekly','once'].includes(task.frequency)?`award:${task.id}:${period}:whole`:`completion:${uid}`;
+   const stars=Number(task.stars)||0;
+   tx.objectStore('completions').add({id:ident,taskId:task.id,taskName:task.name,date,slot:null,stepIndex:null,routineId,support:'unrecorded',note,starsAwarded:stars,occurredAt:date===p2Date()?stamp:`${date}T12:00:00+08:00`,createdAt:stamp,taskValueAtCompletion:stars});
+   if(stars>0)tx.objectStore('transactions').add({id:`task:${ident}`,type:'task',amount:stars,reason:task.name,taskId:task.id,completionId:ident,createdAt:stamp,source:'guardian'});
+  }
+ });return awards.length;
+};
+// Keep per-routine bulk completion meaningful for a repeatable shared task.
+p33RoutinePending=function(r,day=p2Date()){
+ const members=p33Unique(p3Members(r,day).map(({task})=>task).filter(t=>!(t.skippable&&p5bExcused(t.id,day))));
+ const creditedForRoutine=task=>{
+  const comps=p2TaskCompletions(task.id,day).filter(c=>!c.correctedAt&&Number(c.starsAwarded)>0);
+  if(task.frequency==='multi'){
+   // Legacy completions have no routine attribution; preserve old historical completion,
+   // but future records distinguish an individual occurrence of a shared task.
+   const shared=(state.p2Tasks||[]).filter(x=>x.type==='checklist'&&!x.archived&&Array.isArray(x.routineItems)&&p3Members(x,day).some(({task:t})=>t.id===task.id));
+   if(shared.length>1&&comps.some(c=>c.routineId))return comps.some(c=>c.routineId===r.id);
+  }
+  return comps.length>0;
+ };
+ const pending=members.filter(t=>!creditedForRoutine(t));
+ const special=pending.filter(t=>t.frequency==='checkin'||t.type==='timed'||p3HasTimer(t));
+ const awardable=pending.filter(t=>!special.includes(t)&&p33TaskEligible(t,day));
+ const excused=p3Members(r,day).filter(({task})=>task.skippable&&p5bExcused(task.id,day));
+ const complete=members.length+excused.length>0&&pending.length===0&&members.some(creditedForRoutine);
+ return {members,pending,special,awardable,complete};
+};
+// On the review form, clicking two copies of a once-daily task is not two awards.
+// A multi-award task can keep both selected, but never beyond the remaining limit.
+document.addEventListener('change',e=>{
+ const box=e.target;if(!box.matches?.('#p2-review-form input[name="taskIds"]'))return;
+ const task=p2Task(box.value);if(!task||!box.checked)return;
+ const peers=[...document.querySelectorAll('#p2-review-form input[name="taskIds"]')].filter(x=>x.value===box.value);
+ if(task.frequency!=='multi'){peers.forEach(x=>{if(x!==box)x.checked=false;});return;}
+ const count=p2TaskCompletions(task.id,state.p2ReviewDate||p2Date()).filter(c=>!c.correctedAt&&Number(c.starsAwarded)>0).length;
+ const left=Math.max(0,(Number(task.maxPerDay)||1)-count),picked=peers.filter(x=>x.checked);
+ if(picked.length>left){box.checked=false;notice(`Only ${left} award${left===1?'':'s'} remain for “${task.name}” today.`,true);}
+},true);
+// Editors: remove retired explanatory notes and make nested visibility/contents fields flat.
+const p34PreviousTaskEditor=p2TaskEditor;
+p2TaskEditor=function(){const root=document.createElement('div');root.innerHTML=p34PreviousTaskEditor();
+ root.querySelectorAll('.p2-note,.field-help').forEach(n=>{if((n.textContent||'').includes('Stars are awarded when a guardian approves a task, never automatically at the end of a countdown'))n.remove();});
+ const vis=root.querySelector('.p66-visibility-group');if(vis){vis.classList.add('p34-visibility');const nest=vis.querySelector('.p6-visibility');if(nest){nest.classList.add('p34-flat-settings');const h=nest.querySelector('h3');if(h){h.textContent='Where should this task appear?';h.classList.add('p34-subhead');}}}
+ return root.innerHTML;
+};
+const p34PreviousRuleEditor=p2RuleEditor;
+p2RuleEditor=function(){const root=document.createElement('div');root.innerHTML=p34PreviousRuleEditor();root.querySelectorAll('.pb-rule-independent,.p2-note,.field-help').forEach(n=>{if((n.textContent||'').includes('Independent amounts: deductions may be higher than stars earned'))n.remove();});return root.innerHTML;};
+// Reward use-frequency controls also support an hour-based interval, stored independently
+// from day-based cooldowns and propagated to issued vouchers.
+if(!p5bValidFrequency.includes('cooldown-hours'))p5bValidFrequency.push('cooldown-hours');
+const p34PreviousSnapshot=p4Snapshot;
+p4Snapshot=function(r){return {...p34PreviousSnapshot(r),cooldownHours:Math.max(1,Number(r.cooldownHours)||4)};};
+const p34PreviousRewardSave=p4SaveReward;
+p4SaveReward=async function(form){const fd=new FormData(form),hours=Number(fd.get('cooldownHours')||4);if(!Number.isSafeInteger(hours)||hours<1||hours>720)throw new Error('Choose a waiting period between 1 and 720 hours.');
+ const id=String(fd.get('editId')||''),old=new Set((state.p4Rewards||[]).map(r=>r.id));await p34PreviousRewardSave(form);
+ const reward=id?p4Reward(id):(state.p4Rewards||[]).find(r=>!old.has(r.id));if(reward){await put('rewards',{...reward,cooldownHours:hours});await refresh();render();}
+};
+const p34PreviousRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){const root=document.createElement('div');root.innerHTML=p34PreviousRewardEditor();const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+ const r=p4Reward(state.p4SelectedRewardId)||{},frequency=form.querySelector('[name="useFrequency"]');
+ for(const option of form.querySelectorAll('option'))if(option.textContent.trim()==='Per dai')option.textContent='Per day';
+ if(frequency&&!frequency.querySelector('option[value="cooldown-hours"]'))frequency.insertAdjacentHTML('beforeend',`<option value="cooldown-hours" ${r.useFrequency==='cooldown-hours'?'selected':''}>Wait between hours between uses</option>`);
+ const cooldown=form.querySelector('.p11-cooldown');if(cooldown){const field=document.createElement('div');field.className='field p34-hour-cooldown';field.innerHTML=`<label for="p34-reward-wait-hours">Minimum hours between uses</label><input id="p34-reward-wait-hours" name="cooldownHours" type="number" min="1" max="720" step="1" value="${Number(r.cooldownHours)||4}"><p class="field-help">Example: 4 hours means another use cannot start until four hours have passed.</p>`;cooldown.after(field);}
+ const food=form.querySelector('.p27-food-details');if(food){food.classList.add('p34-flat-food');food.querySelectorAll('.p2-note').forEach(x=>x.remove());}
+ form.querySelectorAll('p,p.p2-muted,.field-help').forEach(x=>{const t=(x.textContent||'').trim();if(t.startsWith('One voucher covers the specified amount.')||t.startsWith('Paused timed vouchers may continue on the same day without counting as another use')||t.includes('may claim this reward without a claim-count limit'))x.remove();});
+ const period=form.querySelector('.p5b-requirement-period');const req=form.querySelector('.p27-requirements');if(req&&period){
+  period.classList.add('p34-period');const label=period.querySelector('label');if(label)label.textContent='When must the selected tasks be completed?';
+  const sel=period.querySelector('select');if(sel){for(const o of sel.options){if(o.value==='today')o.textContent='On the day she uses the reward';if(o.value==='week')o.textContent='Every scheduled day this week';}}
+  const hint=period.querySelector('.field-help');if(hint)hint.textContent='Same day: complete the chosen tasks before using the reward. Weekly: complete each scheduled day from Monday to Sunday (or mark an unassigned day Excused). Selected rules are checked on the day of use.';
+  const selected=req.querySelector('.p5a-selected');if(selected)selected.after(period);
+  const group=req.querySelector('.p5a-modes')?.closest('.field');if(group){const l=group.querySelector('label:not(.p5a-modes label)');if(l)l.textContent='Must she complete all selected requirements or just one?';group.classList.add('p34-match-field');}
+  req.querySelectorAll(':scope > .p2-muted').forEach(x=>{x.textContent='Optional. Select the tasks or rules she should complete before using the reward. Claiming the voucher can happen earlier.';});
+  const tabs=req.querySelector('.p5a-req-tabs'),panels=[...req.querySelectorAll(':scope > .p5a-req-panel')],notice=req.querySelector(':scope > .p2-notice');
+  if(tabs){const flow=document.createElement('div');flow.className='p34-req-flow';const first=document.createElement('div');first.className='p34-flow-head';first.textContent='1 · Choose Tasks and Rules';flow.append(first,tabs,...panels);
+   if(selected)flow.append(selected);
+   if(group){const head=document.createElement('div');head.className='p34-flow-head';head.textContent='2 · Decide What Counts';flow.append(head,group);}
+   if(period){const head=document.createElement('div');head.className='p34-flow-head p34-period-heading';head.textContent='3 · When Must Tasks Be Done?';flow.append(head,period);}
+   req.append(flow);if(notice)req.append(notice);
+  }
+ }
+ p11ApplyFrequency(form);p34ApplyRewardUI(form);p34UpdateRequirements(form);return root.innerHTML;
+};
+function p34ApplyRewardUI(form){if(!form)return;const kind=form.querySelector('[name="useFrequency"]')?.value||'unlimited';const field=form.querySelector('.p34-hour-cooldown');if(field){field.hidden=kind!=='cooldown-hours';field.querySelector('input').disabled=kind!=='cooldown-hours';}
+ const help=form.querySelector('.p11-claim-help');if(help){const noCap=form.querySelector('[name="claimFrequency"]')?.value==='unlimited';help.hidden=noCap;if(noCap)help.textContent='';}
+ const uses=form.querySelector('.p11-use-amount');if(uses&&kind==='cooldown-hours'){uses.hidden=true;uses.querySelectorAll('input,select').forEach(el=>el.disabled=true);}
+ const usage=form.querySelector('.p11-use-help');if(usage){usage.textContent={unlimited:'No limit is set on how often a voucher may be used.',daily:'Uses are limited per day.',weekly:'Uses are limited per week (Monday–Sunday).',monthly:'Uses are limited per calendar month.',cooldown:'Wait the selected number of calendar days between uses.','cooldown-hours':''}[kind]||'';usage.hidden=!usage.textContent;}
+}
+function p34UpdateRequirements(form){const section=form?.querySelector('.p27-requirements');if(!section)return;
+ const selectedTasks=section.querySelectorAll('input[name="requiredTaskIds"]:checked').length,selectedRules=section.querySelectorAll('input[name="requiredRuleIds"]:checked').length;
+ const period=section.querySelector('.p34-period'),periodHead=section.querySelector('.p34-period-heading'),match=section.querySelector('.p34-match-field'),matchHead=match?.previousElementSibling;
+ if(period)period.hidden=selectedTasks===0;if(periodHead)periodHead.hidden=selectedTasks===0;
+ if(match)match.hidden=selectedTasks+selectedRules<=1;if(matchHead?.classList.contains('p34-flow-head'))matchHead.hidden=selectedTasks+selectedRules<=1;
+}
+document.addEventListener('change',e=>{if(e.target.matches('#p4-reward-form input[name="requiredTaskIds"],#p4-reward-form input[name="requiredRuleIds"]'))p34UpdateRequirements(e.target.closest('form'));},true);
+const p34PreviousApplyFrequency=p11ApplyFrequency;
+p11ApplyFrequency=function(form){p34PreviousApplyFrequency(form);p34ApplyRewardUI(form);};
+document.addEventListener('change',e=>{if(e.target.matches('#p4-reward-form [name="claimFrequency"],#p4-reward-form [name="useFrequency"]'))p34ApplyRewardUI(e.target.closest('form'));},true);
+// Use actual session/redeem timestamps for the hour-based waiting policy.
+const p34PreviousFrequencyCheck=p5bFrequencyCheck;
+p5bFrequencyCheck=function(row,date=p2Date()){
+ const policy=p5bRewardPolicy(row);if(policy?.useFrequency!=='cooldown-hours')return p34PreviousFrequencyCheck(row,date);
+ const hours=Math.max(1,Math.min(720,Number(policy.cooldownHours)||4));const useTimes=[];
+ for(const v of (state.p4Vouchers||[]).filter(v=>v.rewardId===policy.id)){
+  if(v.type==='timed'){
+   const sessions=(state.p4Sessions||[]).filter(s=>s.voucherId===v.id&&!s.pcManualReversedAt&&['running','interrupted','confirmed'].includes(s.status)&&(s.status!=='confirmed'||s.usedSeconds>0));
+   for(const s of sessions){if(s.startedAt&&Number.isFinite(Date.parse(s.startedAt)))useTimes.push({time:Date.parse(s.startedAt),voucherId:v.id,date:s.usageDate});}
+  }else if(v.redeemedAt&&Number.isFinite(Date.parse(v.pcManualUsedAt||v.redeemedAt))){useTimes.push({time:Date.parse(v.pcManualUsedAt||v.redeemedAt),voucherId:v.id,date:v.pcManualUsedDate||p5bDateForStamp(v.redeemedAt)});}
+ }
+ const latest=useTimes.sort((a,b)=>b.time-a.time)[0];if(!latest)return {ok:true,message:`At least ${hours} hour${hours===1?'':'s'} between uses`};
+ // Resume of the same interrupted timed voucher on its established usage day
+ // is not a new redemption, unlike using another voucher.
+ if(row?.rewardId&&row.id===latest.voucherId&&row.type==='timed'&&latest.date===date&&['paused','active','review'].includes(row.status))return {ok:true,message:'Resume this existing voucher'};
+ const remaining=hours*3600000-(Date.now()-latest.time);
+ return remaining>0?{ok:false,message:`Wait ${Math.ceil(remaining/3600000)} more hour${Math.ceil(remaining/3600000)===1?'':'s'} before the next use`}:{ok:true,message:`At least ${hours} hours between uses`};
+};
+const p34PreviousRewardCard=p4RewardCard;
+p4RewardCard=function(r){let html=p34PreviousRewardCard(r);if(r.useFrequency==='cooldown-hours')html=html.replace(/Up to \d+ \/ cooldown-hours/g,`Wait ${Number(r.cooldownHours)||4} hours between uses`);return html;};
+const p34PreviousChildDetail=p4ChildRewardDetails;
+p4ChildRewardDetails=function(r){let html=p34PreviousChildDetail(r);if(r?.useFrequency==='cooldown-hours')html=html.replace(/Use limit: \d+ per cooldown-hours\./g,`Wait ${Number(r.cooldownHours)||4} hours between uses.`);return html;};
+// Rule incidents: explanation edits are amendments, not changes to the immutable star ledger.
+const p34PreviousIncidentPage=p2IncidentPage;
+p2IncidentPage=function(){
+ const current=(state.p2Incidents||[]).find(i=>i.id===state.p34.incidentEdit);
+ if(!current){const root=document.createElement('div');root.innerHTML=p34PreviousIncidentPage();const form=root.querySelector('#p2-incident-form');if(form){const field=form.querySelector('[name="childExplanation"]')?.closest('.field');if(field)field.insertAdjacentHTML('afterend',`<label class="inline-check p34-child-share"><input type="checkbox" name="p34ChildShow" ${((state.p2Rules||[]).some(r=>r.id===state.p2IncidentRuleId&&r.incidentChildVisible))?'checked':''}> Show the child-friendly explanation in Child Mode</label>`);}return root.innerHTML;}
+ return `<section><p class="eyebrow">Guardian · Rule Log</p><h1 class="page-title">Edit Incident Explanation 📝</h1><p class="lead">Update the description without changing the original deduction, date, or rules.</p></section><section class="panel p34-incident-editor"><div class="p34-incident-facts"><strong>${esc(current.ruleName||'Rule incident')}</strong><span>${esc(current.date)} · ${current.starsDeducted?`−${Number(current.starsDeducted)} stars deducted`:'Reminder (no deduction)'}</span></div><form id="p34-incident-edit-form" class="form-grid"><input type="hidden" name="id" value="${esc(current.id)}">${p2Field('Guardian explanation',`<textarea name="reason" minlength="3" maxlength="400" required>${esc(current.reason||'')}</textarea>`)}${p2Field('Explanation for Child (optional)',`<textarea name="childExplanation" maxlength="240" rows="3" placeholder="A gentle, clear note your child can read">${esc(current.childExplanation||'')}</textarea>`)}<label class="inline-check p34-child-share"><input type="checkbox" name="showToChild" ${current.showToChild?'checked':''}> Show the child-friendly explanation in her Journal and Share My Day</label><p class="field-help">Private Guardian notes remain private unless you deliberately write and enable a separate child-friendly explanation.</p><div class="p34-correction-note">The deducted stars, original date, and rules are preserved. To change an incorrect deduction amount, use its Undo action in History & Reports, then record a corrected incident.</div><div class="p2-actions"><button class="btn btn-primary" type="submit">Save Explanation</button><button class="btn btn-soft" type="button" data-p34-action="incident-edit-cancel">Cancel</button></div></form></section>`;
+};
+const p34PreviousSaveIncident=p2SaveIncident;
+p2SaveIncident=async function(form){const result=await p34PreviousSaveIncident(form);if(result){const fd=new FormData(form),show=fd.has('p34ChildShow');if(result.showToChild!==show){await put('incidents',{...result,showToChild:show});await refresh();}}return result;};
+const p34PreviousHistory=p5bHistoryPage;
+p5bHistoryPage=function(){const root=document.createElement('div');root.innerHTML=p34PreviousHistory();const section=[...root.querySelectorAll('section')].find(s=>(s.querySelector('h3')?.textContent||'').startsWith('Rule Incidents'));
+ if(section){const rows=[...section.querySelectorAll('.p2-card')];const visible=(state.p2Incidents||[]).filter(i=>p5bInRange(i.date,state.p5bHistoryStart,state.p5bHistoryEnd)&&(`${i.ruleName||''} ${i.reason||''}`).toLowerCase().includes(String(state.p5bHistorySearch||'').toLowerCase())).slice(-80).reverse();
+  rows.forEach((card,index)=>{const incident=visible[index];if(!incident)return;card.insertAdjacentHTML('beforeend',`<div class="p34-edit-row"><button type="button" class="btn btn-soft p2-mini" data-p34-action="incident-edit" data-id="${esc(incident.id)}">✏️ Edit Explanation</button>${incident.editedAt?'<span class="p2-muted">Explanation updated</span>':''}</div>`);});
+ }
+ return root.innerHTML;
+};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-p34-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();
+ if(b.dataset.p34Action==='incident-edit'){if(!safeGuardian())return;state.p34.incidentEdit=b.dataset.id;state.guardianTab='incident-editor';render();}
+ else if(b.dataset.p34Action==='incident-edit-cancel'){state.p34.incidentEdit=null;state.guardianTab='history';render();}
+},true);
+document.addEventListener('submit',async e=>{const form=e.target;if(form.getAttribute('id')!=='p34-incident-edit-form')return;e.preventDefault();e.stopImmediatePropagation();if(!safeGuardian()||state.p34.incidentBusy)return;
+ const fd=new FormData(form),id=String(fd.get('id')||''),reason=String(fd.get('reason')||'').trim(),child=String(fd.get('childExplanation')||'').trim(),show=fd.has('showToChild');
+ if(reason.length<3||reason.length>400){notice('Please provide a short Guardian explanation.',true);return;}
+ if(show&&!child){notice('Write a child-friendly explanation before making it visible.',true);return;}
+ state.p34.incidentBusy=true;const submit=form.querySelector('[type="submit"]');if(submit)submit.disabled=true;
+ try{const old=await get('incidents',id);if(!old)throw new Error('Incident not found.');if(!state.p2Incidents.some(i=>i.id===id))throw new Error('Incident is no longer available.');
+ await put('incidents',{...old,reason,childExplanation:child,showToChild:show,editedAt:iso(),editedByGuardianId:state.p64CurrentGuardian||'owner',previousExplanations:[...(old.previousExplanations||[]).slice(-9),{reason:old.reason,childExplanation:old.childExplanation||'',editedAt:iso()}]});
+ await refresh();state.p34.incidentEdit=null;state.guardianTab='history';render();notice('Incident explanation updated. The original star transaction was not changed.');
+ }catch(err){notice(err.message||'Could not update the incident.',true);}finally{state.p34.incidentBusy=false;if(submit)submit.disabled=false;}
+},true);
+// Journal and high-resolution sharing include child-approved *details* rather than only titles.
+p33Incidents=function(day){return (state.p2Incidents||[]).filter(i=>i.date===day&&!i.reversedAt).map(i=>{
+ const ids=Array.isArray(i.ruleIds)?i.ruleIds:[i.ruleId].filter(Boolean);const names=ids.map(id=>(state.p2Rules||[]).find(r=>r.id===id)?.childFriendly||(state.p2Rules||[]).find(r=>r.id===id)?.name).filter(Boolean);
+ const visible=i.showToChild===true;return {id:i.id,date:i.date,name:visible?(names.join(' · ')||i.ruleName||'Rule to practice'):'Rule to practice',stars:Math.max(0,Number(i.starsDeducted)||0),outcome:i.outcome||'reminder',detail:visible?(i.childExplanation||'Talk with your Guardian about this rule and how to improve.'):'Ask your Guardian which rule to practice together.'};
+ });};
+const p34PreviousJournal=p11JournalPage;
+p11JournalPage=function(){const root=document.createElement('div');root.innerHTML=p34PreviousJournal();root.querySelectorAll('.p33-journal-incidents').forEach(block=>{block.classList.add('p34-journal-incidents');block.querySelectorAll('.p33-journal-incident small').forEach(n=>n.classList.add('p34-incident-detail'));});return root.innerHTML;};
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const base=p33PriorDailyCard(snapshot,guardianName,message),scale=1.5,incidents=p33Incidents(snapshot.day);const canvas=document.createElement('canvas');canvas.width=2400;canvas.height=1800;const ctx=canvas.getContext('2d');if(!ctx)return base;
+ ctx.fillStyle='#fdf2f9';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(base,0,0,2400,1350);ctx.save();ctx.scale(scale,scale);
+ const top=918;p10RoundRect(ctx,44,top,1512,256,25,'#fffefd','#e9c4d7');ctx.textAlign='left';ctx.fillStyle='#854b70';ctx.font='800 31px system-ui';ctx.fillText('🌷 WHAT TO IMPROVE?',80,top+48);
+ const first=incidents.slice(0,3);if(!first.length){ctx.font='24px system-ui';ctx.fillStyle='#796278';ctx.fillText('No rule incidents recorded for this day.',80,top+99);}
+ else{let y=top+85;for(const row of first){ctx.fillStyle='#744961';ctx.font='bold 22px system-ui';p10TextLine(ctx,`${row.stars?`−${row.stars} ⭐ · `:''}${row.name}`,80,y,1430,26,1);y+=29;ctx.font='19px system-ui';ctx.fillStyle='#826c7d';p10TextLine(ctx,row.detail,80,y,1430,24,1);y+=55;}if(incidents.length>3){ctx.font='18px system-ui';ctx.fillText(`And ${incidents.length-3} more item(s) in the Journal.`,80,top+236);}}
+ ctx.restore();return canvas;
+};
+// Mail pagination: keep the dialog scrolling inside the iPhone viewport, reset to
+// the start of the newly selected page, and keep Next/Previous within reach.
+document.addEventListener('click',e=>{if(!e.target.closest('[data-p33-action="mail-page"]'))return;requestAnimationFrame(()=>{const dlg=document.querySelector('.p33-mail-dialog');if(dlg)dlg.scrollTop=0;const list=dlg?.querySelector('.p62-message-list');if(list)list.scrollTop=0;});},true);
+const P34_CSS=String.raw`
+#app .p33-mail-dialog{display:flex;flex-direction:column;max-height:min(88dvh,760px)!important;min-height:0;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y}
+#app .p33-mail-dialog .p62-message-list{flex:1 1 auto;min-height:0;max-height:none!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+#app .p33-mail-dialog .p33-pager{position:sticky;bottom:0;z-index:1;background:#fff9fc;padding:10px 0;border-top:1px solid #efdae6;flex:0 0 auto}
+#app .p34-visibility,#app .p66-visibility-group{background:#fff!important}
+#app .p34-flat-settings{padding:0!important;border:0!important;background:transparent!important;margin:0!important;border-radius:0!important}
+#app .p34-flat-settings .p6-radio{background:#fff!important}
+#app .p34-subhead{font-size:.91rem;margin:0 0 6px;color:#76506a}
+#p4-reward-form .p34-flat-food{border:0!important;border-top:0!important;box-shadow:none!important;padding:10px 0 0!important;margin-top:7px!important;background:transparent!important;border-radius:0!important}
+#p4-reward-form .p34-flat-food:before,#p4-reward-form .p34-flat-food:after{display:none!important}
+#p4-reward-form .p27-requirements{background:white!important}
+#p4-reward-form .p34-req-flow{display:grid;gap:12px;min-width:0}
+#p4-reward-form .p34-flow-head{font-size:.92rem;font-weight:800;color:#81516e;margin-top:13px;border-top:1px solid #ecdae5;padding-top:15px}
+#p4-reward-form .p34-req-flow>.p34-flow-head:first-child{margin-top:5px;border-top:0;padding-top:0}
+#p4-reward-form .p34-period[hidden],#p4-reward-form .p34-period-heading[hidden],#p4-reward-form .p34-match-field[hidden],#p4-reward-form .p34-match-field[hidden]+div{display:none!important}
+#p4-reward-form .p27-requirements>.p2-muted{background:white!important;padding:0!important}
+#p4-reward-form .p34-req-flow .p5a-selected{border:1px solid #ead9e3;background:#fff!important}
+#p4-reward-form .p34-period{padding:13px;background:#fff;border:1px solid #ebd8e5;border-radius:14px;margin:0}
+#p4-reward-form .p34-period label{font-weight:800;color:#704965}
+#p4-reward-form .p34-period select{width:100%;max-width:100%;min-width:0;box-sizing:border-box}
+#p4-reward-form .p34-period .field-help{line-height:1.55}
+#p4-reward-form .p34-hour-cooldown[hidden]{display:none!important}
+#app .p34-edit-row{display:flex;gap:12px;align-items:center;justify-content:flex-start;margin-top:10px;flex-wrap:wrap}
+#app .p34-incident-editor .p34-incident-facts{display:grid;gap:6px;margin-bottom:16px;background:#fff7fc;border:1px solid #ead4e2;border-radius:14px;padding:14px}
+#app .p34-incident-facts span{color:#886b81;font-size:.88rem}
+#app .p34-correction-note{background:#fff8ed;border:1px solid #eedcb7;padding:14px;border-radius:12px;color:#7b6250;font-size:.86rem;line-height:1.5}
+#app .p34-child-share{background:#f9f0f6;border-radius:12px;padding:13px;align-items:flex-start}
+#app .p34-incident-detail{white-space:normal;line-height:1.55;overflow-wrap:anywhere;display:block;font-size:.85rem}
+@media(max-width:620px){#app .p33-mail-dialog{max-height:calc(100dvh - 18px)!important;max-width:calc(100vw - 18px)!important;padding:14px;box-sizing:border-box}#app .p33-mail-dialog .p62-message-list{min-height:150px}#app .p33-mail-dialog .p33-pager{position:sticky;bottom:0}#app .p34-incident-editor .p2-actions{display:grid}#app .p34-incident-editor .p2-actions .btn{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p34-style">${P34_CSS}</style>`);
+/* ===== End Phase 6C.2B.2E.6 ===== */
 
 </script>
 </body>
