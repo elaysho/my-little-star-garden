@@ -3831,11 +3831,13 @@ app.addEventListener('click',async event=>{
   }
   if(action==='profile-icon-open'){
    if(!safeGuardian())throw new Error('Guardian access required.');
+   if(!p25CanEditGuardian(id))throw new Error('You can only change your own Guardian icon.');
    state.p65GuardianPicker=state.p65GuardianPicker===id?'':id;
    render();return;
   }
   if(action==='profile-icon-save'){
    if(!safeGuardian())throw new Error('Guardian access required.');
+   if(!p25CanEditGuardian(id))throw new Error('You can only change your own Guardian icon.');
    const emoji=el.dataset.value;
    if(!p65GuardianIcons.includes(emoji))throw new Error('Choose an available profile icon.');
    if(id==='owner')await updateSetting('ownerGuardianIcon',emoji);
@@ -4001,7 +4003,8 @@ p2SaveIncident=async function(form){
   }
   if(!window.confirm(`Record ONE deduction of ${amount} star${amount===1?'':'s'} for this event, covering ${ids.length} selected rule${ids.length===1?'':'s'}?`))return null;
  }
- const stamp=iso(),id=uniqueId(),ruleNames=rules.map(r=>r.name),incident={id,ruleId:rules[0].id,ruleIds:ids,ruleName:ruleNames.join(' · '),ruleNames,date,outcome,reason,starsDeducted:amount,createdAt:stamp,guardianId:state.p64CurrentGuardian||'owner',showToChild:rules.some(r=>r.incidentChildVisible)};
+ const childExplanation=String(fd.get('childExplanation')||'').trim().slice(0,240);
+ const stamp=iso(),id=uniqueId(),ruleNames=rules.map(r=>r.name),incident={id,ruleId:rules[0].id,ruleIds:ids,ruleName:ruleNames.join(' · '),ruleNames,date,outcome,reason,childExplanation,starsDeducted:amount,createdAt:stamp,guardianId:state.p64CurrentGuardian||'owner',showToChild:rules.some(r=>r.incidentChildVisible)};
  await atomic(amount?['incidents','transactions']:['incidents'],tx=>{
   tx.objectStore('incidents').add(incident);
   if(amount)tx.objectStore('transactions').add({id:`deduction:${id}`,type:'deduction',amount:-amount,reason:`${ruleNames.join(' / ')}: ${reason.slice(0,160)}`,incidentId:id,createdAt:stamp,source:'guardian',guardianId:incident.guardianId});
@@ -4639,7 +4642,7 @@ document.addEventListener('click',async event=>{
    }else{p68SavePNG();notice('PNG saved! Attach it to your family Messenger chat.');}
    return;
   }
-  if(action==='rename-open'){if(!safeGuardian())throw new Error('Guardian mode required.');state.p68RenameId=node.dataset.id;render();return;}
+  if(action==='rename-open'){if(!safeGuardian())throw new Error('Guardian mode required.');if(!p25CanEditGuardian(node.dataset.id))throw new Error('You can only edit your own Guardian profile.');state.p68RenameId=node.dataset.id;render();return;}
   if(action==='rename-cancel'){state.p68RenameId='';render();return;}
   if(action==='pause-open'){const v=p4Voucher(node.dataset.id);if(!v||!p4LiveSession(v.id))throw new Error('This timer is not active.');state.p64FullTimer=v.id;state.p68PauseOpen=true;render();return;}
   if(action==='pause-cancel'){state.p68PauseOpen=false;render();return;}
@@ -4665,7 +4668,7 @@ document.addEventListener('submit',async event=>{
    render();notice('Guardian approved this achievement PNG.');return;
   }
   if(form.hasAttribute('data-p68-rename')){
-   if(!safeGuardian())throw new Error('Guardian Mode required.');const id=form.dataset.p68Rename,name=String(new FormData(form).get('name')||'').trim();
+   if(!safeGuardian())throw new Error('Guardian Mode required.');if(!p25CanEditGuardian(form.dataset.p68Rename))throw new Error('You can only edit your own Guardian profile.');const id=form.dataset.p68Rename,name=String(new FormData(form).get('name')||'').trim();
    if(name.length<2||name.length>40)throw new Error('Name must be 2–40 characters.');
    if(id==='owner')await updateSetting('ownerGuardianName',name);
    else{const g=state.p64Profiles.find(x=>x.id===id);if(!g)throw new Error('Profile not found.');await put('records',{...g,name,updatedAt:iso()});}
@@ -9379,7 +9382,7 @@ render=function(){p23OldRender();document.title='My Little Star Garden';
   const more=app.querySelector('.p68-menu-grid');if(more){order.forEach(id=>{const el=more.querySelector(`[data-tab="${id}"]`);if(el)more.append(el);});}
  }
  if(state.view==='guardian'&&safeGuardian()){
-  if(['quest-notes','requests'].includes(state.guardianTab))app.querySelectorAll('main .p19-back,main [data-p61-action="review-page"],main [data-p31-action="back-dashboard"]').forEach(x=>x.remove());
+  if(['quest-notes','requests'].includes(state.guardianTab))app.querySelectorAll('main section.panel [data-p61-action="review-page"],main section.panel [data-p31-action="back-dashboard"]').forEach(x=>x.remove());
   if(state.guardianTab==='milestones'){
    const main=app.querySelector('main .layout-stack');
    const header=main?.querySelector(':scope > section:first-child'),panel=[...main?.querySelectorAll(':scope > section.panel')||[]].find(x=>(x.querySelector('.panel-head h3')?.textContent||'').startsWith('Your Milestones'));
@@ -9423,6 +9426,396 @@ main .p19-daily-item small{display:block;margin-top:3px;color:#967a8d;line-heigh
 @media(max-width:680px){.p23-milestone-add{width:auto!important;min-width:0}.p23-milestone-back{margin:10px 0 0}.p23-auth-settings{min-width:0}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P23_BUILD}">${P23_CSS}</style>`);
+
+
+/* ================================================================
+ * Phase 6C.2B.2A — Guardian & Child Experience Refinement
+ * No database migration. Preserves legacy settings and PIN records.
+ * ================================================================ */
+const P24_BUILD='mlsg-6c2b2a-guardian-child-20261117';
+DEFAULT_SETTINGS.p24MotionTheme='petals';
+if(!state.settings?.p24MotionTheme)state.settings.p24MotionTheme='petals';
+state.p24={dayPages:{},celebrateAt:0};
+const P24_PAGE_SIZE=10,P24_CELEBRATE_MS=60000;
+// Changing the calendar day starts each activity section at page one.
+document.addEventListener('change',event=>{if(event.target.id==='p19-daily-date')state.p24.dayPages={};},true);
+document.addEventListener('click',event=>{if(event.target.closest('[data-p19-action="day-step"]'))state.p24.dayPages={};},true);
+
+/* 1. A single header Back control for Review Center subpages. */
+const p24OldGuardian=guardian;
+guardian=function(){
+ const html=p24OldGuardian();
+ if(!safeGuardian()||state.view!=='guardian')return html;
+ if(!['quest-notes','requests','rule-checkin'].includes(state.guardianTab))return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const main=root.querySelector('main .layout-stack')||root.querySelector('main');
+ const heading=main?.querySelector('.p19-page-header, section:first-child');
+ if(!heading)return html;
+ // Other body-level navigation duplicates the header and can point to Home.
+ if(state.guardianTab==='quest-notes')main.querySelectorAll('[data-p6-action="guardian-notes-back"],[data-p61-action="review-page"][data-id="p61-review-center"]').forEach(el=>el.remove());
+ if(state.guardianTab==='requests')main.querySelectorAll('[data-p31-action="back-dashboard"]').forEach(el=>el.remove());
+ if(state.guardianTab==='rule-checkin')main.querySelectorAll('section.panel [data-p67-action="checkin-back"],section.panel [data-p31-action="back-manage-rules"]').forEach(el=>el.remove());
+ heading.querySelectorAll('.p19-back').forEach(el=>el.remove());
+ const back=document.createElement('button');back.type='button';back.className='btn btn-plain p19-back p24-header-back';
+ if(state.guardianTab==='rule-checkin'){
+   const where=state.p67CheckinOrigin?.tab;
+   back.dataset.p67Action='checkin-back';
+   back.textContent=where==='dashboard'?'← Home':where==='manage'?'← Manage Activities':'← Review Center';
+ } else {back.dataset.p24Action='back-review';back.textContent='← Review Center';}
+ heading.append(back);
+ return root.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const b=event.target.closest('[data-p24-action="back-review"]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ state.guardianTab='p61-review-center';render();
+},true);
+
+/* 2. Daily Journey: truly independent fixed 10-row pagination. */
+const p24OldDailyPage=p19DailyPage;
+p19DailyPage=function(){
+ const root=document.createElement('div');root.innerHTML=p24OldDailyPage();
+ const sections=[...root.querySelectorAll('section.panel')];
+ const targets=[
+  ['quests',s=>/Completed Quests/.test(s.querySelector('h3')?.textContent||'')],
+  ['rules',s=>/Rules Followed/.test(s.querySelector('h3')?.textContent||'')],
+  ['requests',s=>/Requests & Rewards/.test(s.querySelector('h3')?.textContent||'')],
+  ['transactions',s=>/Transactions for this day/.test(s.querySelector('h3')?.textContent||'')]
+ ];
+ const day=state.p19.dailyDate||p2Date();
+ for(const [key,pred] of targets){
+  const section=sections.find(pred);if(!section)continue;
+  const list=section.querySelector('.p19-daily-list,.p2-list');if(!list)continue;
+  const rows=[...list.querySelectorAll(':scope > .p19-daily-item')];
+  if(rows.length<=P24_PAGE_SIZE)continue;
+  const ref=day+':'+key,total=Math.ceil(rows.length/P24_PAGE_SIZE);
+  const page=Math.min(total,Math.max(1,Number(state.p24.dayPages[ref]||1)));
+  state.p24.dayPages[ref]=page;
+  rows.forEach((row,i)=>{if(i<(page-1)*P24_PAGE_SIZE||i>=page*P24_PAGE_SIZE)row.remove();});
+  list.insertAdjacentHTML('afterend',`<nav class="p24-day-pager" aria-label="${esc(key)} page navigation"><small>Showing ${(page-1)*P24_PAGE_SIZE+1}–${Math.min(rows.length,page*P24_PAGE_SIZE)} of ${rows.length}</small><div><button type="button" class="btn btn-soft btn-small" data-p24-action="day-page" data-key="${key}" data-page="${page-1}" ${page===1?'disabled':''}>← Previous</button><span>Page ${page} / ${total}</span><button type="button" class="btn btn-soft btn-small" data-p24-action="day-page" data-key="${key}" data-page="${page+1}" ${page===total?'disabled':''}>Next →</button></div></nav>`);
+ }
+ return root.innerHTML;
+};
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-p24-action="day-page"]');if(!b)return;
+ e.preventDefault();e.stopImmediatePropagation();
+ const value=Number(b.dataset.page);
+ if(!Number.isSafeInteger(value)||value<1)return;
+ state.p24.dayPages[(state.p19.dailyDate||p2Date())+':'+b.dataset.key]=value;render();
+},true);
+
+/* 3. Global history filters across transactions, completions, incidents. */
+const p24PreviousHistory=p5bHistoryPage;
+p5bHistoryPage=function(){
+ const root=document.createElement('div');root.innerHTML=p24PreviousHistory();
+ const type=state.p5bHistoryType||'all';
+ const panels=[...root.querySelectorAll('section.panel')];
+ const activitySections=[
+  {kind:'transactions',match:/^Star Transactions/,allow:true},
+  {kind:'completions',match:/^Task Completions/,allow:type==='all'||type==='task'},
+  {kind:'incidents',match:/^Rule Incidents/,allow:type==='all'||type==='deduction'}
+ ];
+ for(const entry of activitySections){
+   const section=panels.find(p=>entry.match.test(p.querySelector('h3')?.textContent||''));if(!section)continue;
+   section.hidden=!entry.allow;
+   if(entry.allow){const rows=section.querySelectorAll('.p2-list > .p2-card, .p2-list > .p2-row').length;
+     const h=section.querySelector('h3');if(h&&entry.kind!=='transactions')h.textContent=h.textContent.replace(/ \(\d+\)$/,'')+` (${rows})`;
+   }
+ }
+ // Use the transaction-type dropdown as a whole-page activity filter.
+ const select=root.querySelector('#p5b-history-filter select[name="type"]');
+ if(select){
+  const first=select.querySelector('option[value="all"]');if(first)first.textContent='All activity types';
+  const task=select.querySelector('option[value="task"]');if(task)task.textContent='Quests / task stars';
+  const deduction=select.querySelector('option[value="deduction"]');if(deduction)deduction.textContent='Rule incidents / deductions';
+  select.closest('.field')?.querySelector('label')?.replaceChildren('Activity type');
+ }
+ return root.innerHTML;
+};
+
+/* 4. Remove ambient audio. Retain one animation setting with new, quiet themes. */
+const p24PriorSettings=guardianSettings;
+guardianSettings=function(){
+ const root=document.createElement('div');root.innerHTML=p24PriorSettings();
+ root.querySelectorAll('.p66-ambient-settings,.pa-sound-feedback,[data-p9-action="test-click-sound"]').forEach(n=>n.remove());
+ const appearance=[...root.querySelectorAll('.panel')].find(p=>[...p.querySelectorAll('h3')].some(h=>/Appearance/i.test(h.textContent)));
+ if(appearance){
+   const opts=[['petals','🌸 Falling Petals'],['fireflies','✨ Fireflies'],['breeze','🍃 Garden Breeze'],['stars','🌟 Twinkling Stars'],['mixed','🌷 Seasonal Mix']];
+   appearance.insertAdjacentHTML('beforeend',`<div class="p24-motion-panel"><h4>🌷 Living Garden</h4><p class="p2-muted">Gentle, silent background animations in Child Mode. Use None for a still garden.</p>${p2Field('Garden animation',`<select id="p24-motion-theme"><option value="off" ${state.settings?.ambientMotion==='off'?'selected':''}>None</option>${opts.map(([v,n])=>p2Option(v,state.settings?.p24MotionTheme||'petals',n)).join('')}</select>`)}${p2Field('Movement',`<select id="p24-motion-speed">${[['gentle','Gentle (recommended)'],['playful','Playful']].map(([v,n])=>p2Option(v,state.settings?.ambientMotion==='playful'?'playful':'gentle',n)).join('')}</select>`)}<p class="field-help">No continuous audio, no external downloads. Reduced-motion preferences are respected automatically.</p></div>`);
+ }
+ return root.innerHTML;
+};
+const p24OriginalShell=shell;
+shell=function(content,guardian=false){
+ let html=p24OriginalShell(content,guardian);
+ if(guardian||state.view!=='child')return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ root.querySelectorAll('.p66-header-sound,[data-p66-action="ambient-toggle"]').forEach(n=>n.remove());
+ const decor=root.querySelector('.p66-ambient-decor'),kind=state.settings?.p24MotionTheme||'petals';
+ if(decor){
+   const chars={petals:['🌸','❀','✿'],fireflies:['✦','·','✧'],breeze:['🍃','❧','🌿'],stars:['✧','✦','⋆'],mixed:['🌸','🍃','✧','🌷']}[kind]||['🌸'];
+   const playful=state.settings?.ambientMotion==='playful';
+   const count=playful?14:7;
+   decor.innerHTML=Array.from({length:count},(_,i)=>`<span class="p24-particle p24-${esc(kind)}" aria-hidden="true" style="--left:${(17+i*41)%96}%;--top:${(12+i*29)%86}%;--duration:${14+(i*7)%22}s;--delay:${-((i*11)%26)}s">${chars[i%chars.length]}</span>`).join('');
+ }
+ return root.innerHTML;
+};
+// The inherited renderer still calls the old audio synchronizer. Shut it off.
+p66AudioStop();p66AudioSync=function(){p66AudioStop();};
+document.addEventListener('change',async e=>{
+ const field=e.target;if(!['p24-motion-theme','p24-motion-speed'].includes(field.id))return;
+ e.stopImmediatePropagation();
+ try{
+  if(field.id==='p24-motion-theme'){
+   const value=field.value;if(!['petals','fireflies','breeze','stars','mixed','off'].includes(value))return;
+   await updateSetting('p24MotionTheme',value);
+   if(value==='off')await updateSetting('ambientMotion','off');
+   else if(state.settings?.ambientMotion==='off')await updateSetting('ambientMotion','gentle');
+  }else if(['gentle','playful'].includes(field.value))await updateSetting('ambientMotion',field.value);
+  await refresh();render();notice('Living Garden preference saved.');
+ }catch(err){notice(err.message||'Could not update Living Garden.',true);}
+},true);
+
+/* 5. Per-device 60-second Celebrate cooldown. Never changes star values. */
+const P24_COOLDOWN_KEY='mlsg:celebrate-replay-at';
+function p24LastCelebrated(){try{return Number(localStorage.getItem(P24_COOLDOWN_KEY)||0)||state.p24.celebrateAt||0;}catch{return state.p24.celebrateAt||0;}}
+function p24CelebrateLeft(){return Math.max(0,P24_CELEBRATE_MS-(Date.now()-p24LastCelebrated()));}
+function p24MarkCelebrated(){state.p24.celebrateAt=Date.now();try{localStorage.setItem(P24_COOLDOWN_KEY,String(state.p24.celebrateAt));}catch{}}
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-p64-action="notice-celebrate"],[data-p62-action="request-celebrate"],[data-p61-action="replay-celebration"]');
+ if(!b)return;
+ const remaining=p24CelebrateLeft();
+ if(remaining>0){e.preventDefault();e.stopImmediatePropagation();notice(`You can celebrate again in ${Math.ceil(remaining/1000)} seconds. Your stars are already safe! 🌷`);return;}
+ p24MarkCelebrated();
+},true);
+const p24OldNotifications=p62NotificationsDialog;
+p62NotificationsDialog=function(){const root=document.createElement('div');root.innerHTML=p24OldNotifications();const left=p24CelebrateLeft();
+ if(left){root.querySelectorAll('[data-p64-action="notice-celebrate"],[data-p62-action="request-celebrate"]').forEach(b=>{b.disabled=true;b.textContent='🎉 Celebrate later';b.title=`Ready again in ${Math.ceil(left/1000)} seconds`;});}
+ return root.innerHTML;
+};
+
+/* 6. Star notifications explain meaningful, child-visible transaction changes. */
+const p24OldRefresh=refresh;
+refresh=async function(){
+ await p24OldRefresh();if(!state.profile)return;
+ const records=await getAll('records');
+ const anchor=records.find(r=>r.key==='p64-notification-baseline')?.at;
+ if(!anchor)return;
+ const seen=new Set(records.filter(r=>r.key?.startsWith('p64-notice-seen:')).map(r=>r.key.slice('p64-notice-seen:'.length)));
+ const previous=state.p64NoticeEvents||[];
+ const other=previous.filter(n=>n.kind!=='stars');
+ const interesting=new Set(['task','bonus','rule-earned','challenge','deduction','earning-correction','refund','purchase']);
+ const txs=(state.summary.transactions||[]).filter(t=>t.createdAt>anchor&&interesting.has(t.type)&&Number(t.amount)!==0);
+ const messages=txs.map(t=>{
+  const inc=t.incidentId&&state.p2Incidents.find(i=>i.id===t.incidentId);
+  const task=t.completionId&&state.p2Completions.find(c=>c.id===t.completionId);
+  const name=task?.taskName||task&&p2Task(task.taskId)?.name||'';
+  let title='',detail='';
+  if(t.type==='task'){title=`You earned ${money(t.amount)} star${t.amount===1?'':'s'}! ⭐`;detail=`For completing ${name||'a quest'}. Great work!`;}
+  else if(t.type==='rule-earned'){title=`You earned ${money(t.amount)} star${t.amount===1?'':'s'}! 🌼`;detail='For following a rule your guardian confirmed.';}
+  else if(t.type==='bonus'||t.type==='challenge'){title=`You earned ${money(t.amount)} bonus stars! ⭐`;detail=t.reason?.slice(0,100)||'A guardian celebrated your effort.';}
+  else if(t.type==='deduction'){title=`${money(-t.amount)} star${t.amount===-1?'':'s'} deducted 🛡️`;detail=inc?.childExplanation?.trim()||'Your guardian recorded a rule deduction. You can ask them to explain it together.';}
+  else if(t.type==='purchase'){title=`${money(-t.amount)} stars spent 🎁`;detail='You used stars to claim a reward.';}
+  else if(t.type==='refund'){title='Stars returned to your garden 🌷';detail='A guardian returned stars from a previous transaction.';}
+  else {title='A star award was corrected 🌷';detail='A guardian corrected an earlier award. This is not a new rule incident.';}
+  const id='tx-'+t.id;
+  return {id,kind:'stars',at:t.createdAt,title,detail,unread:!seen.has(id),transactionType:t.type};
+ });
+ state.p64NoticeEvents=[...messages,...other].sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+};
+// The incident form keeps private Guardian notes separate from the optional
+// child-facing sentence. Empty explanations are never filled with private notes.
+const p24OldIncidentPage=p2IncidentPage;
+p2IncidentPage=function(){const root=document.createElement('div');root.innerHTML=p24OldIncidentPage();const form=root.querySelector('#p2-incident-form');if(form){const required=form.querySelector('textarea[name="reason"]')?.closest('.field');const child=document.createElement('div');child.className='field';child.innerHTML='<label for="p24-child-explanation">Explanation for Child (optional)</label><textarea id="p24-child-explanation" name="childExplanation" maxlength="240" rows="2" placeholder="A kind, simple explanation your sister can read."></textarea><p class="field-help">Your private “What happened?” notes are never automatically copied into her notifications.</p>';required?.insertAdjacentElement('afterend',child);}return root.innerHTML;};
+
+/* 7. Child Adventure Journal is a main page, not a subpage. */
+const p24OldJournal=p11JournalPage;
+p11JournalPage=function(){const root=document.createElement('div');root.innerHTML=p24OldJournal();root.querySelectorAll('[data-p11-action="journal-home"]').forEach(n=>n.remove());return root.innerHTML;};
+
+const P24_CSS=String.raw`
+.p24-header-back{margin-left:auto;flex-shrink:0}
+.p24-day-pager{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;border-top:1px solid #eddae5;padding:12px 0 0;margin-top:7px}.p24-day-pager>div{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.p24-day-pager>div span,.p24-day-pager small{font-size:.79rem;color:#866b7f}
+.p24-motion-panel{border-top:1px solid #ead5e0;margin-top:16px;padding-top:16px;display:grid;gap:12px}.p24-motion-panel h4{font-size:1.08rem}
+.p24-particle{position:absolute;left:var(--left);top:var(--top);opacity:.22;pointer-events:none;user-select:none;font-size:clamp(15px,2.2vw,24px);animation:p24-drift var(--duration) ease-in-out infinite alternate;animation-delay:var(--delay);filter:blur(.2px)}
+.p24-particle.p24-fireflies,.p24-particle.p24-stars{opacity:.32;color:#e6b76e;text-shadow:0 0 10px #f6e4a5}
+.p24-particle.p24-breeze{opacity:.16}
+@keyframes p24-drift{0%{transform:translate3d(-7px,5px,0) rotate(-9deg);opacity:.14}50%{transform:translate3d(12px,-16px,0) rotate(7deg);opacity:.32}100%{transform:translate3d(22px,10px,0) rotate(11deg);opacity:.12}}
+@media(max-width:560px){.p24-day-pager{flex-direction:column;align-items:flex-start}.p24-day-pager>div{width:100%;justify-content:space-between}.p24-header-back{margin-left:0}}
+@media(prefers-reduced-motion:reduce){.p24-particle{animation:none!important;opacity:.07!important}}
+.calm-mode .p24-particle{display:none!important}
+.p19-daily-list,.p2-list.p22-daily-compact{max-height:none!important;overflow:visible!important}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P24_BUILD}">${P24_CSS}</style>`);
+
+
+/* ================================================================
+ * Phase 6C.2B.2B — Guardian Profile Permissions
+ * Existing local IDs, PINs, and historical records remain untouched.
+ * Owner-managed cloud directory is independent of full garden snapshots.
+ * ================================================================ */
+const P25_BUILD='mlsg-6c2b2b-guardian-profiles-20261117';
+state.p25={canonical:new Map(),dirty:new Set(),busy:false,lastRead:0,loading:false,queueTimer:null,ownerBootstrapped:false};
+// Owner privileges always require matching Firebase ownership and owner PIN
+// in a family-ready garden. Local-only gardens retain their original owner PIN.
+function p25CanAdminGuardians(){return Boolean(safeGuardian()&&(p14OwnerVerified()||p14OwnerBootstrap()));}
+function p25CanEditGuardian(id){
+ if(!safeGuardian()||!id)return false;
+ if(p25CanAdminGuardians())return true;
+ if(state.p64CurrentGuardian!==id)return false;
+ const c=state.p8Cloud;
+ if(pcFamilyReady()&&c?.user&&c?.family)return Boolean(c.role==='guardian'&&state.p16AuthVerified&&c.profileId===id);
+ return true; // Offline personal display edits stay local until verified online.
+}
+function p25RequireOwner(){if(!p25CanAdminGuardians())throw Error('Only the verified family owner can add or remove Guardian profiles.');}
+const p25OldAdd=p64AddGuardian;
+p64AddGuardian=async function(form){p25RequireOwner();return p25OldAdd(form);};
+const p25OldRemove=p64RemoveGuardian;
+p64RemoveGuardian=async function(id){
+ p25RequireOwner();
+ if((state.p10MemberMappings||[]).some(m=>m.profileId===id))throw Error('This Guardian still has a linked Firebase account. Revoke the account in Advanced Owner Settings before deleting the profile.');
+ const exists=state.p64Profiles.some(x=>x.id===id);
+ if(!exists)throw Error('Profile not found.');
+ await p25OldRemove(id);
+ if(!state.p64Profiles.some(x=>x.id===id)&&state.p8Cloud?.user&&state.p8Cloud?.family){
+  try{await p8FamilyRef().collection('guardianProfiles').doc(id).delete();}catch(e){notice('The local profile was removed. Cloud directory cleanup needs an internet connection.',true);}
+ }
+};
+// Keep a larger, child-friendly icon palette while preserving existing icons.
+for(const emoji of ['🐨','🐸','🐧','🦄','🐯','🐼','🐶','🐱','🦊','🦉','🐝','🐢','🪻','🌼','🌺','🍀','🌙','☀️','☁️','💛','💜','🩷','💚','🎨','📚','👵','👴','👧','👦','🧑','🌟','🍓'])if(!p65GuardianIcons.includes(emoji))p65GuardianIcons.push(emoji);
+
+// Queue only edited display fields, never PIN hashes or role grants.
+const p25OriginalPut=put;
+put=async function(store,row){
+ const res=await p25OriginalPut(store,row);
+ if(store==='records'&&row?.key?.startsWith('p64-guardian:')&&row?.updatedAt&&p25CanEditGuardian(row.id)){
+  await p25OriginalPut('auth',{key:'p25-profile-pending:'+row.id,profileId:row.id,name:row.name,icon:row.icon||'💗',updatedAt:iso()});
+  state.p25.dirty.add(row.id);
+  p25QueueFlush();
+ }
+ return res;
+};
+const p25OriginalSetting=updateSetting;
+updateSetting=async function(key,value){
+ const res=await p25OriginalSetting(key,value);
+ if(['ownerGuardianName','ownerGuardianIcon'].includes(key)&&p25CanEditGuardian('owner')){
+  await p25OriginalPut('auth',{key:'p25-profile-pending:owner',profileId:'owner',name:state.settings.ownerGuardianName||'Primary Guardian',icon:state.settings.ownerGuardianIcon||'🔑',updatedAt:iso()});
+  state.p25.dirty.add('owner');
+  p25QueueFlush();
+ }
+ return res;
+};
+async function p25DeletePending(key){
+ const db=await openDb();
+ if(!db){cachedStore.auth=cachedStore.auth.filter(r=>r.key!==key);persistFallback(cachedStore);return;}
+ await new Promise((resolve,reject)=>{const tx=db.transaction('auth','readwrite');tx.objectStore('auth').delete(key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
+}
+function p25QueueFlush(){if(state.p25.queueTimer)clearTimeout(state.p25.queueTimer);state.p25.queueTimer=setTimeout(()=>{p25FlushProfiles().catch(()=>{});},1800);}
+async function p25FlushProfiles(){
+ if(state.p25.busy||!state.p8Cloud?.user||!state.p8Cloud?.family||!state.p16AuthVerified||!navigator.onLine)return;
+ const pending=(await getAll('auth')).filter(r=>r.key?.startsWith('p25-profile-pending:'));
+ if(!pending.length)return;
+ state.p25.busy=true;
+ try{
+  const fv=window.firebase.firestore.FieldValue;
+  for(const row of pending){
+   if(!p25CanEditGuardian(row.profileId))continue;
+   const ref=p8FamilyRef().collection('guardianProfiles').doc(row.profileId);
+   const doc=await ref.get({source:'server'});
+   if(!doc.exists){if(!p25CanAdminGuardians())continue;
+    await ref.set({profileId:row.profileId,name:row.name,icon:row.icon,createdAt:fv.serverTimestamp(),updatedAt:fv.serverTimestamp(),createdByUid:state.p8Cloud.user.uid});
+   } else await ref.update({name:row.name,icon:row.icon,updatedAt:fv.serverTimestamp()});
+   const latest=await get('auth',row.key);
+   if(latest?.updatedAt===row.updatedAt){await p25DeletePending(row.key);state.p25.dirty.delete(row.profileId);}
+  }
+ }finally{state.p25.busy=false;}
+}
+// Owner-initiated one-time migration of the legacy records to protected docs.
+async function p25BootstrapDirectory(){
+ if(!p25CanAdminGuardians()||!state.p8Cloud?.family||!navigator.onLine)return;
+ if(state.p25.loading)return;
+ state.p25.loading=true;
+ try{
+  const collection=p8FamilyRef().collection('guardianProfiles');
+  const existing=await collection.limit(20).get({source:'server'});
+  const known=new Set(existing.docs.map(d=>d.id));
+  const entries=[{id:'owner',name:state.settings.ownerGuardianName||'Primary Guardian',icon:state.settings.ownerGuardianIcon||'🔑'},...(state.p64Profiles||[])];
+  const fv=window.firebase.firestore.FieldValue;
+  for(const g of entries){if(known.has(g.id))continue;
+   await collection.doc(g.id).set({profileId:g.id,name:g.name,icon:g.icon||'💗',createdAt:fv.serverTimestamp(),updatedAt:fv.serverTimestamp(),createdByUid:state.p8Cloud.user.uid});
+  }
+  state.p25.ownerBootstrapped=true;
+ }finally{state.p25.loading=false;}
+}
+async function p25ReadCanonical(){
+ if(state.p25.loading||!state.p8Cloud?.family||!state.p8Cloud?.user||!navigator.onLine)return;
+ state.p25.loading=true;
+ try{
+  const query=await p8FamilyRef().collection('guardianProfiles').limit(20).get({source:'server'});
+  state.p25.canonical=new Map(query.docs.map(d=>[d.id,d.data()]));state.p25.lastRead=Date.now();
+  const pending=new Set((await getAll('auth')).filter(r=>r.key?.startsWith('p25-profile-pending:')).map(r=>r.profileId));
+  state.p25.dirty=pending;
+  state.p64Profiles=state.p64Profiles.map(p=>({...p,...(!pending.has(p.id)&&state.p25.canonical.get(p.id)?{name:state.p25.canonical.get(p.id).name,icon:state.p25.canonical.get(p.id).icon}:{})}));
+ }finally{state.p25.loading=false;}
+}
+const p25OldPage=p64GuardianPage;
+p64GuardianPage=function(){
+ const root=document.createElement('div');root.innerHTML=p25OldPage();
+ const lead=root.querySelector('section .lead');if(lead)lead.textContent='Each guardian has a separate PIN on this device. Display names and icons can connect to your family directory; PINs remain private to each browser.';
+ const owner=p25CanAdminGuardians();
+ const people=[{id:'owner',name:state.settings.ownerGuardianName||'Primary Guardian'},...state.p64Profiles];
+ root.querySelectorAll('.p64-guardian-card').forEach((card,i)=>{
+  const id=people[i]?.id;if(!id)return;
+  const meta=state.p25.canonical.get(id);
+  if(meta&&!state.p25.dirty.has(id)){const name=card.querySelector('.grow > strong');if(name)name.textContent=meta.name||name.textContent;const avatar=card.querySelector('.p2-symbol');if(avatar)avatar.textContent=meta.icon||avatar.textContent;}
+  if(!p25CanEditGuardian(id))card.querySelectorAll('[data-p65-action^="profile-icon"],[data-p68-action="rename-open"],.p65-guardian-icons,.p68-rename-form').forEach(el=>el.remove());
+  if(!owner)card.querySelectorAll('[data-p64-action="guardian-remove"]').forEach(el=>el.remove());
+ });
+ if(!owner){
+  root.querySelector('#p64-guardian-form')?.closest('section.panel')?.remove();
+  const count=root.querySelector('.p64-guardian-grid')?.closest('section.panel');
+  count?.insertAdjacentHTML('beforeend','<p class="p2-muted p25-guardian-help">You can update your own name and icon. Only the family owner may add or remove Guardian profiles.</p>');
+ }
+ root.querySelectorAll('[data-p64-action="settings-back"]').forEach(n=>n.remove());
+ return root.innerHTML;
+};
+const p25OldGuardian=guardian;
+guardian=function(){let html=p25OldGuardian();
+ if(!safeGuardian()||state.view!=='guardian'||state.guardianTab!=='p64-guardians')return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const heading=root.querySelector('main .layout-stack > section:first-child');
+ if(heading){heading.querySelectorAll('.p19-back').forEach(el=>el.remove());
+  heading.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-plain p19-back" data-p25-action="back-settings">← Settings & Backup</button>');}
+ return root.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const b=event.target.closest('[data-p25-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(b.dataset.p25Action==='back-settings'){state.guardianTab='settings';render();return;}
+ if(b.dataset.p25Action==='refresh-directory'){
+  if(!p25CanAdminGuardians()){notice('Only the owner can refresh the Guardian directory.',true);return;}
+  p25BootstrapDirectory().then(()=>p25ReadCanonical()).then(()=>{notice('Guardian directory checked.');render();}).catch(e=>{notice('Could not update the Guardian directory: '+String(e.message||e),true);render();});
+ }
+},true);
+const p25OldRender=render;
+render=function(){p25OldRender();if(safeGuardian()&&state.guardianTab==='p64-guardians'){
+ const main=app.querySelector('main .layout-stack');
+ if(p25CanAdminGuardians()&&main&&!main.querySelector('[data-p25-action="refresh-directory"]')){
+  const section=main.querySelector('section.panel');section?.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-soft btn-small p25-directory-button" data-p25-action="refresh-directory">☁️ Check Guardian Directory</button>');
+ }
+ }};
+const p25OldRefresh=refresh;
+refresh=async function(){await p25OldRefresh();
+ if(!state.profile||!state.p8Cloud?.user||!state.p8Cloud?.family||!state.p16AuthVerified)return;
+ if(Date.now()-state.p25.lastRead>90000&&!state.p25.loading){try{await p25ReadCanonical();}catch{}}
+ p25QueueFlush();
+};
+window.addEventListener('online',()=>{p25QueueFlush();});
+const P25_STYLE=String.raw`
+.p25-guardian-help{margin-top:15px;padding:12px 15px;background:#fff6fa;border-radius:12px}
+.p25-directory-button{margin:12px 0 4px}
+@media(max-width:600px){.p25-directory-button{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P25_BUILD}">${P25_STYLE}</style>`);
 
 initialize();
 
