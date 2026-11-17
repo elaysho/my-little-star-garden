@@ -7118,7 +7118,7 @@ function p14ReviewDialog(){const r=state.p14Review;if(!r)return '';
  r.mode==='device'||r.mode==='empty'?`${canPublish?'<button class="btn btn-primary" data-p14-action="sync-publish">⬆ Publish This Device</button>':''}<button class="btn btn-plain" data-p14-action="close-dialog">Not Now</button>`:
  `<button class="btn btn-primary" data-p14-action="sync-download">⬇ Load Cloud to This Browser</button>${r.mode==='conflict'||r.mode==='unlinked'?p14OwnerVerified()?'<button class="btn btn-soft" data-p14-action="sync-replace-cloud">⬆ Replace Cloud (Owner)</button>':'':' '}${r.mode==='cloud'&&canPublish?'':''}<button class="btn btn-plain" data-p14-action="close-dialog">Keep Both Unchanged</button>`;
  const confirmation=state.p14SyncChoice?`<div class="p14-confirm"><h3>${state.p14SyncChoice==='download'?'Replace this browser with the cloud?':'Publish this browser over the current cloud?'}</h3><p>Every existing version remains in cloud snapshot history when you publish, and this device's JSON safety backup will download before a local restore. This does not merge individual changes.</p><label class="field">Type <strong>${state.p14SyncChoice==='download'?'RESTORE':'PUBLISH'}</strong> to confirm<input id="p14-confirm-word" autocomplete="off" spellcheck="false" placeholder="${state.p14SyncChoice==='download'?'RESTORE':'PUBLISH'}"></label><div class="actions"><button class="btn btn-primary" data-p14-action="sync-confirm" ${state.p14ReviewBusy?'disabled':''}>Confirm ${state.p14SyncChoice==='download'?'Local Restore':'Cloud Publish'}</button><button class="btn btn-plain" data-p14-action="sync-cancel">Cancel</button></div></div>`:'';
- return p14DialogShell('☁️ Review Family Progress',type[1],`<div class="p14-dialog-body"><p class="p14-review-banner ${['conflict','unlinked'].includes(r.mode)?'p14-review-conflict':''}"><strong>${esc(type[0])}</strong> ${esc(type[1])}</p><div class="p14-compare-grid"><section><h3>📱 This Device</h3><small>Browser records</small>${p14SummaryHtml(r.local)}</section><section><h3>☁️ Family Cloud</h3><small>${r.remoteRevision?'Revision '+r.remoteRevision:'Not published'}</small>${p14SummaryHtml(r.remote)}</section></div><div class="p14-safe-note">🔐 No progress will be replaced without an explicit action. No changes are merged automatically. Guided merging uses a verified common revision and validates stars, rewards, and approvals before publishing.</div>${confirmation||`<div class="p14-dialog-actions">${buttons}</div>`}</div>`);
+ return p14DialogShell('☁️ Review Family Progress',type[1],`<div class="p14-dialog-body"><p class="p14-review-banner ${['conflict','unlinked'].includes(r.mode)?'p14-review-conflict':''}"><strong>${esc(type[0])}</strong> ${esc(type[1])}</p><div class="p14-compare-grid"><section><h3>📱 This Device</h3><small>Browser records</small>${p14SummaryHtml(r.local)}</section><section><h3>☁️ Family Cloud</h3><small>${r.remoteRevision?'Revision '+r.remoteRevision:'Not published'}</small>${p14SummaryHtml(r.remote)}</section></div><div class="p14-safe-note">🔐 No progress will be replaced without an explicit action. Only independently validated, low-risk changes can combine automatically. Changes requiring a guardian decision are not published until the verified owner reviews them.</div>${confirmation||`<div class="p14-dialog-actions">${buttons}</div>`}</div>`);
 }
 async function p14HistoryLoad(){
  if(state.p14HistoryLoading)return;
@@ -7334,6 +7334,15 @@ function p15Stable(value){
 }
 function p15Same(a,b){return p15Stable(a)===p15Stable(b);}
 function p15RowId(store,row){return row[store==='records'?'key':'id'];}
+function p15ReadOnlyReceipt(store,id,base,local,cloud){
+ // Only this standalone notification read marker is safe to reconcile automatically.
+ // Do not expand this to approvals, vouchers, awards or other records.
+ if(store!=='records'||!String(id).startsWith('p64-notice-seen:')||!local||!cloud)return null;
+ const valid=row=>row&&row.key===id&&Object.keys(row).every(k=>k==='key'||k==='seenAt')&&
+  typeof row.seenAt==='string'&&Number.isFinite(Date.parse(row.seenAt));
+ if(!valid(local)||!valid(cloud)||(base&&!valid(base)))return null;
+ return {key:id,seenAt:Date.parse(local.seenAt)>=Date.parse(cloud.seenAt)?local.seenAt:cloud.seenAt};
+}
 function p15Changes(base,now){const result=[];for(const store of DATA_STORES){
  const b=new Map((base[store]||[]).map(row=>[p15RowId(store,row),row]));
  const n=new Map((now[store]||[]).map(row=>[p15RowId(store,row),row]));
@@ -7359,6 +7368,7 @@ function p15Plan(base,local,cloud){
    if(p15Same(l,c)){chosen=l;reason='same';}
    else if(p15Same(l,b)){chosen=c;reason='cloud';}
    else if(p15Same(c,b)){chosen=l;reason='device';}
+   else if((chosen=p15ReadOnlyReceipt(store,id,b,l,c))!==null){reason='read-marker';}
    else{
     const key=store+'|'+id;
     conflicts.push({key,store,id,base:b||null,local:l||null,cloud:c||null});
@@ -7548,9 +7558,72 @@ function p15FieldDiff(c,side){
  const diffs=[...keys].filter(k=>!['id','key'].includes(k)&&!p15Same(c.base?.[k],item?.[k]));
  return diffs.length?`<div class="p15-fields">${diffs.slice(0,7).map(k=>`<span><b>${esc(k)}</b>: ${esc(p15FieldValue(item?.[k]))}</span>`).join('')}${diffs.length>7?`<small>+${diffs.length-7} more changed fields</small>`:''}</div>`:'<div class="p15-fields"><small>Unchanged fields or deleted record</small></div>';
 }
+// Phase 6C.1.3 — show semantic changes, not opaque database keys.
+const P18_STORE_NAMES={records:'Saved garden information',transactions:'Star transaction',tasks:'Quest',
+ completions:'Quest completion',rules:'Rule',incidents:'Rule incident',challenges:'Challenge',
+ rewards:'Reward',vouchers:'Reward voucher',usageSessions:'Reward usage',milestones:'Milestone',
+ collectibles:'Sticker',worldLayout:'Garden decoration',media:'Saved media',timers:'Reward timer'};
+const P18_FIELDS={seenAt:'Notification viewed',childSeenAt:'Child viewed message',readAt:'Message read',
+ guardianSeenAt:'Guardian viewed',status:'Status',amount:'Stars changed',starsAwarded:'Stars earned',
+ createdAt:'Created',updatedAt:'Last updated',approvedAt:'Approved',completedAt:'Completed',
+ completedOn:'Completion date',date:'Date',ruleDate:'Rule date',claimedAt:'Reward claimed',
+ redeemedAt:'Reward redeemed',remainingSeconds:'Time remaining (seconds)',name:'Name',
+ targetName:'Activity',taskName:'Quest',note:'Note',guardianNote:'Guardian message',
+ reason:'Reason',type:'Type',frequency:'Frequency',maxPerDay:'Daily maximum',
+ approvedBy:'Approved by',guardianName:'Guardian',message:'Message',feedback:'Feedback',
+ earnedAt:'Stars earned on',reversedAt:'Correction date',title:'Title',description:'Description'};
+function p18Title(c){
+ const row=c.local||c.cloud||c.base||{},id=String(c.id||''),store=c.store;
+ if(store==='records'){
+  if(id.startsWith('p64-notice-seen:'))return '⭐ Notification marked as read';
+  if(id.startsWith('p5b-seen-quest:'))return 'Quest marked as viewed';
+  if(id.startsWith('guardian-request:'))return 'Guardian request: '+String(row.targetName||row.taskName||row.kind||'activity');
+  if(id.startsWith('p67-rule-checkin:'))return 'Daily rule check-in';
+  if(id.startsWith('p6-note:'))return 'Quest note';
+  if(id.startsWith('p68-share-approval:'))return 'Sharing approval';
+  if(id.startsWith('p17-proposal-merge:'))return 'Reviewed family merge';
+  const name=row.name||row.targetName||row.taskName||row.title||row.reason;
+  return name?String(name).slice(0,100):'Saved garden information';
+ }
+ const name=row.name||row.taskName||row.targetName||row.ruleName||row.title;
+ const label=P18_STORE_NAMES[store]||'Garden record';
+ return name?`${label}: ${String(name).slice(0,100)}`:label;
+}
+function p18FieldLabel(field){return P18_FIELDS[field]||String(field).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/^./,c=>c.toUpperCase());}
+function p18Readable(field,value){
+ if(value===undefined)return 'Not present';
+ if(value===null)return 'None';
+ if(typeof value==='boolean')return value?'Yes':'No';
+ if(typeof value==='string'){
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)&&Number.isFinite(Date.parse(value))){
+   try{return new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});}catch(e){return value;}
+  }
+  if(!value.trim())return 'Empty';
+  return value.length>300?value.slice(0,300)+'… (see technical details for full value)':value;
+ }
+ if(typeof value==='object'){
+  const v=p15Stable(value);return v.length>300?v.slice(0,300)+'… (see technical details for full value)':v;
+ }
+ if(field==='amount'||field==='starsAwarded')return `${Number(value)>0?'+':''}${value} stars`;
+ return String(value);
+}
+function p18FieldDifferences(c){
+ const keys=[...new Set([...Object.keys(c.local||{}),...Object.keys(c.cloud||{})])];
+ return keys.filter(k=>k!=='key'&&k!=='id'&&!p15Same(c.local?.[k],c.cloud?.[k]));
+}
+function p18ReviewableDiff(c){
+ const keys=p18FieldDifferences(c);
+ const content=keys.length?keys.map(k=>{
+  const local=p18Readable(k,c.local?.[k]),cloud=p18Readable(k,c.cloud?.[k]);
+  const baseline=c.base&&!p15Same(c.base?.[k],undefined)?`<small>Before both changes: ${esc(p18Readable(k,c.base?.[k]))}</small>`:'';
+  return `<div class="p18-diff-field"><strong>${esc(p18FieldLabel(k))}</strong><div class="p18-diff-sides"><div><b>📱 This Device</b><span>${esc(local)}</span></div><div><b>☁️ Family Cloud</b><span>${esc(cloud)}</span></div></div>${baseline}</div>`;
+ }).join(''):'<p class="p2-muted">One version removed this entry, or it has no editable fields to compare.</p>';
+ const technical=`<details class="p18-technical"><summary>Show technical record details (optional)</summary><p>Record ID: <code>${esc(c.id)}</code></p><pre>${esc(JSON.stringify({device:c.local,cloud:c.cloud,common:c.base},null,2).slice(0,12000))}</pre></details>`;
+ return `<div class="p18-differences"><h4>What is different?</h4>${content}</div>${technical}`;
+}
 function p15ConflictHtml(c,choice,i){
- const hint=`${c.base?'Changed on both sides':'Created with the same ID on both sides'}`;
- return `<article class="p15-conflict"><div class="p15-conflict-top"><span class="p15-index">${i+1}</span><div class="grow"><strong>${esc(c.store)} · ${esc(p15RowTitle(c.local||c.cloud,c.store,c.id))}</strong><small>${esc(hint)}</small></div></div><div class="p15-conflict-grid"><section><b>📱 This Device</b><span>${esc(p15RowTitle(c.local,c.store,c.id))}</span><small>${esc(p15RowDetails(c.local,c.store))}</small>${p15FieldDiff(c,'device')}</section><section><b>☁️ Family Cloud</b><span>${esc(p15RowTitle(c.cloud,c.store,c.id))}</span><small>${esc(p15RowDetails(c.cloud,c.store))}</small>${p15FieldDiff(c,'cloud')}</section></div><label class="p15-select-label" for="p15-choice-${i}">Choose which version to keep<select id="p15-choice-${i}" data-p15-decision="${esc(c.key)}"><option value="">Choose one…</option><option value="device" ${choice==='device'?'selected':''}>Keep this device's version</option><option value="cloud" ${choice==='cloud'?'selected':''}>Keep the cloud's version</option></select></label></article>`;
+ const hint=c.base?'Both devices edited the same saved item':'Both devices created an item with the same identifier';
+ return `<article class="p15-conflict"><div class="p15-conflict-top"><span class="p15-index">${i+1}</span><div class="grow"><strong>${esc(p18Title(c))}</strong><small>${esc(hint)}</small></div></div>${p18ReviewableDiff(c)}<label class="p15-select-label" for="p15-choice-${i}">Which version of these changes should be kept?<select id="p15-choice-${i}" data-p15-decision="${esc(c.key)}"><option value="">Choose after reviewing…</option><option value="device" ${choice==='device'?'selected':''}>Keep this device's changes</option><option value="cloud" ${choice==='cloud'?'selected':''}>Keep the family's cloud changes</option></select></label></article>`;
 }
 function p15MergeDialog(){const s=state.p15Merge;if(!s)return '';
  if(s.loading)return p14DialogShell('🧩 Preparing Guided Merge','Verifying the common ancestor and comparing both devices.','<div class="p14-dialog-body"><p role="status">🔎 Validating past cloud revision, records, and current changes…</p></div>');
@@ -7558,12 +7631,13 @@ function p15MergeDialog(){const s=state.p15Merge;if(!s)return '';
  const p=s.plan,chosen=p.conflicts.filter(c=>['device','cloud'].includes(s.decisions[c.key])).length;
  const nLocal=p.localChanges.reduce((n,c)=>n+c.added+c.edited+c.removed,0);
  const nCloud=p.cloudChanges.reduce((n,c)=>n+c.added+c.edited+c.removed,0);
- const changeList=(changes)=>changes.length?changes.map(o=>`<span class="p15-change-pill">${esc(o.store)} <strong>+${o.added} ~${o.edited} −${o.removed}</strong></span>`).join(''):'<span class="p15-change-pill">No differences</span>';
- const conflictList=p.conflicts.length?p.conflicts.map((c,i)=>p15ConflictHtml(c,s.decisions[c.key],i)).join(''):'<p class="p15-no-conflicts">✨ No individual record conflicts! Independent updates are ready for review.</p>';
+ const changeList=(changes)=>changes.length?changes.map(o=>`<span class="p15-change-pill">${esc(P18_STORE_NAMES[o.store]||o.store)} <strong>+${o.added} added · ${o.edited} updated · ${o.removed} removed</strong></span>`).join(''):'<span class="p15-change-pill">No differences</span>';
+ const conflictList=p.conflicts.length?p.conflicts.map((c,i)=>p15ConflictHtml(c,s.decisions[c.key],i)).join(''):'<p class="p15-no-conflicts">✨ No decisions needed. The app can combine the remaining changes safely.</p>';
+ const readReceipts=p.auto.filter(c=>c.reason==='read-marker').length;
  const risky=p.sensitive.length||p.conflicts.some(c=>P15_SENSITIVE.has(c.store));
  const preview=s.proposal?`<section class="p15-preview"><h3>🌟 Proposed Combined Garden</h3>${p14SummaryHtml(s.proposal.summary)}<p class="p2-muted tiny">These totals are a simulation. Nothing is saved yet.</p><div class="p14-confirm"><label class="p15-check"><input id="p15-ack" type="checkbox" ${s.ack?'checked':''}> I reviewed both versions, including any star transactions, vouchers, and pending approvals.</label><label class="field">Type <strong>MERGE</strong> to publish<input id="p15-word" placeholder="MERGE" autocomplete="off" spellcheck="false"></label><div class="p14-dialog-actions"><button class="btn btn-primary" data-p15-action="publish" type="button">🔐 Publish Reviewed Merge</button><button class="btn btn-soft" data-p15-action="rebuild" type="button">Change Decisions</button></div></div></section>`:
  `<div class="p14-dialog-actions"><button type="button" class="btn btn-primary" data-p15-action="preview">✨ Preview Combined Garden</button><button type="button" class="btn btn-plain" data-p15-action="close">Not Now</button></div>`;
- const body=`<div class="p14-dialog-body p15-body"><div class="p14-review-banner p14-review-conflict"><strong>Verified common version · Revision ${money(s.baseRevision)}</strong> The garden on this device and the family cloud both changed since this revision. Each choice below is reviewed before anything is uploaded.</div><div class="p15-branches"><section><b>📱 This Device</b><strong>${money(nLocal)} changed records</strong><div class="p15-change-list">${changeList(p.localChanges)}</div></section><section><b>☁️ Family Cloud · Rev. ${money(s.remoteRevision)}</b><strong>${money(nCloud)} changed records</strong><div class="p15-change-list">${changeList(p.cloudChanges)}</div></section></div><section class="p15-changes"><h3>Changes that can be combined</h3><p class="p2-muted tiny">${money(p.auto.length)} independent record updates were safely identified from the common version. None is duplicated by record ID.</p>${risky?`<div class="p14-safe-note">⚠️ ${money(p.sensitive.length)} independently changed star, voucher, timer, or approval records require extra care. The proposed total is validated, and you must explicitly acknowledge it before publishing.</div>`:''}</section><section class="p15-conflict-section"><div class="p14-row"><h3>Changes needing your decision</h3><span class="chip">${chosen} of ${p.conflicts.length} selected</span></div>${conflictList}</section>${s.error?`<p class="info error" role="alert">${esc(s.error)}</p>`:''}${preview}<p class="p15-caution">🔒 Publishing downloads a local safety backup, checks the cloud revision again, then creates a new cloud snapshot. It only updates this device after cloud publish succeeds. Conflicts involving duplicate awards or inconsistent vouchers are blocked—not silently discarded.</p></div>`;
+ const body=`<div class="p14-dialog-body p15-body"><div class="p14-review-banner p14-review-conflict"><strong>Verified common version · Revision ${money(s.baseRevision)}</strong> The garden on this device and the family cloud both changed since this revision. Each choice below is reviewed before anything is uploaded.</div><div class="p15-branches"><section><b>📱 This Device</b><strong>${money(nLocal)} changed records</strong><div class="p15-change-list">${changeList(p.localChanges)}</div></section><section><b>☁️ Family Cloud · Rev. ${money(s.remoteRevision)}</b><strong>${money(nCloud)} changed records</strong><div class="p15-change-list">${changeList(p.cloudChanges)}</div></section></div><section class="p15-changes"><h3>Changes that can be combined</h3><p class="p2-muted tiny">${money(p.auto.length)} record changes can be combined without choosing a version. ${readReceipts?`${money(readReceipts)} notification read acknowledgement(s) are combined automatically—they do not change stars or vouchers.`:''}</p>${risky?`<div class="p14-safe-note">⚠️ ${money(p.sensitive.length)} independently changed star, voucher, timer, or approval records require extra care. The proposed total is validated, and you must explicitly acknowledge it before publishing.</div>`:''}</section><section class="p15-conflict-section"><div class="p14-row"><h3>Changes needing your decision</h3><span class="chip">${chosen} of ${p.conflicts.length} selected</span></div>${conflictList}</section>${s.error?`<p class="info error" role="alert">${esc(s.error)}</p>`:''}${preview}<p class="p15-caution">🔒 Publishing downloads a local safety backup, checks the cloud revision again, then creates a new cloud snapshot. It only updates this device after cloud publish succeeds. Conflicts involving duplicate awards or inconsistent vouchers are blocked—not silently discarded.</p></div>`;
  return p14DialogShell('🧩 Resolve Family Changes',`Three-way comparison · Revision ${money(s.baseRevision)} → ${money(s.remoteRevision)}`,body);
 }
 const p15PriorGuardian=guardian;
@@ -7675,6 +7749,27 @@ const p15CSS=`
 @media(max-width:620px){.p15-branches,.p15-conflict-grid{grid-template-columns:1fr}.p15-conflict{padding:13px}.p15-change-pill{font-size:.73rem}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P15_BUILD}">${p15CSS}</style>`);
+const P18_CSS=`
+.p18-differences{border:1px solid #efdae6;border-radius:14px;background:#fffafd;padding:13px;display:grid;gap:12px;min-width:0}
+.p18-differences h4{font-size:.95rem;color:#694761;margin:0}
+.p18-diff-field{display:grid;gap:8px;padding-bottom:12px;border-bottom:1px solid #f1e5eb;min-width:0}
+.p18-diff-field:last-child{border-bottom:0;padding-bottom:0}
+.p18-diff-field>strong{font-size:.88rem;color:#765169}
+.p18-diff-sides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.p18-diff-sides>div{display:grid;gap:5px;align-content:start;background:#fff0f7;border:1px solid #efdae6;border-radius:10px;padding:10px;min-width:0}
+.p18-diff-sides>div:nth-child(2){background:#f0f7f2;border-color:#d9e7de}
+.p18-diff-sides b{font-size:.73rem;color:#775e6c}
+.p18-diff-sides span{font-size:.83rem;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
+.p18-diff-field>small{font-size:.71rem;color:#8b7887;overflow-wrap:anywhere}
+.p18-technical{color:#866c7c;font-size:.73rem;min-width:0}
+.p18-technical summary{cursor:pointer;font-size:.75rem}
+.p18-technical pre{font-size:.69rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:230px;overflow:auto;border:1px solid #eee1e8;padding:9px;border-radius:9px}
+.p18-technical code{overflow-wrap:anywhere}
+.p17-conflict .p18-differences{margin:10px 0}
+@media(max-width:440px){.p18-diff-sides{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p18-human-readable-conflicts">${P18_CSS}</style>`);
+
 
 /* ===========================================================
  My Little Star Garden · Phase 6C.1
@@ -8298,11 +8393,11 @@ function p17ReviewHtml(){const r=state.p17.review;if(!r)return '';
  if(r.loading)return p17ModalShell('Preparing Family Changes','Checking the archived common version…',`<div class="p14-dialog-body">${p16Spinner()} Reading and validating records…</div>`,'review-close');
  if(r.error)return p17ModalShell('Submission Needs Attention','Both copies are preserved.',`<div class="p14-dialog-body"><p class="info warning">${esc(r.error)}</p><p>The source device can export a complete JSON backup. This submission cannot be safely auto-merged without its original common version.</p><div class="actions"><button class="btn btn-soft" data-p17-action="proposal-download">Download Submitted Copy</button><button class="btn btn-plain" data-p17-action="review-close">Close</button></div></div>`,'review-close');
  const plan=r.plan,decisions=state.p17.decisions,selected=plan.conflicts.filter(x=>['device','cloud'].includes(decisions[x.key])).length;
- const conflicts=plan.conflicts.map((c,i)=>`<article class="p17-conflict"><strong>${i+1}. ${esc(p15RowTitle(c.local||c.cloud,c.store,c.id))}</strong><small>${esc(c.store)} · ${esc(c.id)}</small><div class="p17-two"><div><b>📱 Submitted</b><p>${esc(p15RowTitle(c.local,c.store,c.id))}</p><small>${esc(p15RowDetails(c.local,c.store))}</small>${p15FieldDiff(c,'device')}</div><div><b>☁️ Cloud</b><p>${esc(p15RowTitle(c.cloud,c.store,c.id))}</p><small>${esc(p15RowDetails(c.cloud,c.store))}</small>${p15FieldDiff(c,'cloud')}</div></div><label class="field">Owner's decision<select data-p17-decision="${esc(c.key)}"><option value="">Choose which to keep…</option><option value="device" ${decisions[c.key]==='device'?'selected':''}>Use submitted version</option><option value="cloud" ${decisions[c.key]==='cloud'?'selected':''}>Keep cloud version</option></select></label></article>`).join('');
+ const conflicts=plan.conflicts.map((c,i)=>`<article class="p17-conflict"><strong>${i+1}. ${esc(p18Title(c))}</strong><small>Review the highlighted differences before deciding</small>${p18ReviewableDiff(c)}<label class="field">Owner's decision<select data-p17-decision="${esc(c.key)}"><option value="">Choose after reviewing…</option><option value="device" ${decisions[c.key]==='device'?'selected':''}>Use submitted changes</option><option value="cloud" ${decisions[c.key]==='cloud'?'selected':''}>Keep current family changes</option></select></label></article>`).join('');
  const proposal=state.p17.preview;
  const reject=state.p17.rejectConfirm?`<div class="p14-confirm"><strong>Leave this submission out of the shared garden?</strong><p>The parent's local copy will remain unchanged. Explain your decision to them before asking them to sync again.</p><div class="actions"><button class="btn btn-danger" data-p17-action="review-reject-confirm">Confirm Not Applied</button><button class="btn btn-plain" data-p17-action="review-reject-cancel">Keep Reviewing</button></div></div>`:'';
  const preview=proposal?`<section class="p17-preview"><h3>Proposed combined garden</h3>${p14SummaryHtml(p14Summary(proposal))}<label class="inline-check"><input id="p17-owner-ack" type="checkbox" required> I reviewed star changes, rewards and vouchers.</label><label class="field">Type PUBLISH to confirm<input id="p17-owner-word" autocomplete="off" placeholder="PUBLISH"></label><button class="btn btn-primary" data-p17-action="review-publish">🔐 Publish Reviewed Changes</button></section>`:`<button class="btn btn-primary" data-p17-action="review-preview" ${selected!==plan.conflicts.length?'disabled':''}>Preview Combined Garden</button>`;
- return p17ModalShell('🛡️ Review Guardian Changes',`${esc(r.proposal.info.profileId||'Family guardian')} · submitted by ${esc(String(r.proposal.info.createdByUid).slice(0,8))}…`, `<div class="p14-dialog-body"><p class="p14-safe-note">${plan.auto.length} independent record changes can be preserved. ${plan.conflicts.length} disagreement(s) need your decision. Neither the source device nor cloud has been modified.</p>${conflicts||'<div class="info success">✓ No individual record disagreements.</div>'}${r.errors?`<p class="info error" role="alert">${esc(r.errors)}</p>`:''}${preview}${reject}<div class="actions"><button class="btn btn-plain" data-p17-action="review-reject">Mark Not Applied</button><button class="btn btn-soft" data-p17-action="proposal-download">⬇ Download Submission</button><button class="btn btn-plain" data-p17-action="review-close">Close</button></div></div>`,'review-close');
+ return p17ModalShell('🛡️ Review Guardian Changes',`${esc(r.proposal.info.profileId||'Family guardian')} · submitted by ${esc(String(r.proposal.info.createdByUid).slice(0,8))}…`, `<div class="p14-dialog-body"><p class="p14-safe-note">${plan.auto.length} changes can be combined safely${plan.auto.some(c=>c.reason==='read-marker')?', including harmless notification read receipts':''}. ${plan.conflicts.length} meaningful disagreement(s) need your decision. Neither the source device nor cloud has been modified.</p>${conflicts||'<div class="info success">✓ No individual record disagreements.</div>'}${r.errors?`<p class="info error" role="alert">${esc(r.errors)}</p>`:''}${preview}${reject}<div class="actions"><button class="btn btn-plain" data-p17-action="review-reject">Mark Not Applied</button><button class="btn btn-soft" data-p17-action="proposal-download">⬇ Download Submission</button><button class="btn btn-plain" data-p17-action="review-close">Close</button></div></div>`,'review-close');
 }
 async function p17PreviewProposal(){const r=state.p17.review;if(!r?.plan)throw Error('Load a pending proposal first.');
  const merged=p15Resolve(r.plan,state.p17.decisions);
