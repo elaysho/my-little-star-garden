@@ -666,7 +666,7 @@ async function p2SaveTask(form){
  const old=p2Task(v.editId);const record={id:old?.id||uniqueId(),name,icon:p2Icon(v.icon),description:String(v.description||'').trim().slice(0,500),category:String(v.category||'Anytime').trim().slice(0,48)||'Anytime',type,frequency,stars,maxPerDay,cooldownHours,days,checkins,steps,stepMode:v.stepMode==='per-step'?'per-step':'whole',stepStars,durationMin,startTime:String(v.startTime||''),startDate:String(v.startDate||''),endDate:String(v.endDate||''),draft:v.draft==='on',archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
  await put('tasks',record);await refresh();state.guardianTab='manage';state.p2ManageTab='tasks';notice(`Task “${record.name}” saved.`);
 }
-async function p2SaveRule(form){const v=Object.fromEntries(new FormData(form));const name=String(v.name||'').trim().slice(0,90),expected=String(v.expected||'').trim().slice(0,400);if(!name||!expected)throw new Error('Add a rule name and expected behavior.');const stars=Number(v.stars),dailyMax=Number(v.dailyMax);if(!Number.isSafeInteger(stars)||stars<1||stars>20||!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000)throw new Error('Check the deduction values and daily limit.');const old=p2Rule(v.editId);const row={id:old?.id||uniqueId(),name,expected,why:String(v.why||'').trim().slice(0,400),reminder:String(v.reminder||'').trim().slice(0,400),consequence:['reminder','repair','deduction'].includes(v.consequence)?v.consequence:'reminder',stars,dailyMax,earnStars:Number(v.earnStars||0),repair:String(v.repair||'').trim().slice(0,400),archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};await put('rules',row);await refresh();state.guardianTab='manage';state.p2ManageTab='rules';notice(`Rule “${row.name}” saved.`);}
+async function p2SaveRule(form){const v=Object.fromEntries(new FormData(form));const name=String(v.name||'').trim().slice(0,90),expected=String(v.expected||'').trim().slice(0,400);if(!name||!expected)throw new Error('Add a rule name and expected behavior.');const stars=Number(v.stars),dailyMax=Number(v.dailyMax);if(!Number.isSafeInteger(stars)||stars<1||stars>p27RuleCap()||!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000)throw new Error('Check the deduction values and daily limit.');const old=p2Rule(v.editId);const row={id:old?.id||uniqueId(),name,expected,why:String(v.why||'').trim().slice(0,400),reminder:String(v.reminder||'').trim().slice(0,400),consequence:['reminder','repair','deduction'].includes(v.consequence)?v.consequence:'reminder',stars,dailyMax,earnStars:Number(v.earnStars||0),repair:String(v.repair||'').trim().slice(0,400),archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};await put('rules',row);await refresh();state.guardianTab='manage';state.p2ManageTab='rules';notice(`Rule “${row.name}” saved.`);}
 async function p2SaveChallenge(form){const v=Object.fromEntries(new FormData(form));const task=p2Task(v.taskId);if(!task)throw new Error('Choose an existing task.');const name=String(v.name||'').trim().slice(0,90);const targetCount=Number(v.targetCount),stars=Number(v.stars);if(!name||!Number.isSafeInteger(targetCount)||targetCount<1||targetCount>100||!Number.isSafeInteger(stars)||stars<0||stars>500)throw new Error('Check your challenge settings.');const old=state.p2Challenges.find(c=>c.id===v.editId);const row={id:old?.id||uniqueId(),name,taskId:task.id,targetCount,stars,period:v.period==='all'?'all':'weekly',distinctDays:v.distinctDays==='on',archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString()};await put('challenges',row);await refresh();state.guardianTab='manage';state.p2ManageTab='challenges';notice('Challenge saved.');}
 async function p2SaveCompletion(task,date,slot,stepIndex,support,note,noStars=false){
  if(!task||!p2ValidDate(date))throw new Error('Select an existing task and a valid date.');
@@ -3972,7 +3972,7 @@ function p66IncidentForm(){
  return `<section><p class="eyebrow">Guardian · Rule Log</p><h1 class="page-title">Record an Incident 🛡️</h1><p class="lead">One event can relate to several rules. A reminder can be recorded without taking away stars.</p></section><section class="panel p66-incident-panel">${rules.length?`<form id="p2-incident-form" class="form-grid">
  <fieldset class="p2-fieldset"><legend>01 · Rules involved</legend><p class="p2-muted">Choose every relevant rule. One incident is recorded, regardless of how many you select.</p><div class="p66-rule-choices">${rules.map(r=>`<label class="p66-choice"><input type="checkbox" name="ruleIds" value="${esc(r.id)}" ${r.id===selected?'checked':''}><span>${esc(r.icon||'🛡️')} ${esc(r.name)}${r.consequence==='deduction'?` · up to ${Number(r.stars)||0} ⭐`:' · reminder'}</span></label>`).join('')}</div></fieldset>
  <div class="grid2">${p2Field('Date of incident',`<input type="date" name="date" value="${p2Date()}" max="${p2Date()}" required>`)}${p2Field('Outcome',`<select name="outcome"><option value="reminder">Reminder / discussion (0 stars)</option><option value="repair">Make-it-right opportunity (0 stars)</option><option value="deduction">Single manual deduction (guardian-confirmed)</option></select>`)}</div>
- <div class="p66-deduction-field">${p2Field('Total stars to deduct for this event',`<input type="number" name="deductionStars" value="1" min="0" max="20" step="1">`)}<p class="field-help">Never multiplies automatically by the number of rules. Only available when a selected rule allows deductions.</p></div>
+ <div class="p66-deduction-field">${p2Field('Total stars to deduct for this event',`<input type="number" name="deductionStars" value="1" min="0" max="${p27RuleCap()}" step="1">`)}<p class="field-help">Never multiplies automatically by the number of rules. Only available when a selected rule allows deductions.</p></div>
  ${p2Field('What happened? (required)',`<textarea name="reason" required minlength="3" maxlength="400" placeholder="A calm, factual explanation"></textarea>`)}
  <label class="inline-check"><input type="checkbox" name="reviewed" required> I reviewed the situation, her needs, and the available alternatives.</label>
  <p class="p2-notice">Please avoid deducting stars for distress, sensory needs, or things outside her control. You can always record a reminder.</p>
@@ -4262,7 +4262,7 @@ p2SaveRule=async function(form){
   const fd=new FormData(form),id=String(fd.get('editId')||''),known=new Set(state.p2Rules.map(r=>r.id));
   const consequence=String(fd.get('consequence')||'none'),stars=Number(fd.get('stars')),dailyMax=Number(fd.get('dailyMax')),earnStars=Number(fd.get('earnStars'));
   if(!['none','reminder','repair','deduction'].includes(consequence))throw new Error('Choose a valid default response.');
-  if(!Number.isSafeInteger(stars)||stars<1||stars>20||!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000||!Number.isSafeInteger(earnStars)||earnStars<0||earnStars>40)throw new Error('Check the star and daily limit settings.');
+  if(!Number.isSafeInteger(stars)||stars<1||stars>p27RuleCap()||!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000||!Number.isSafeInteger(earnStars)||earnStars<0||earnStars>40)throw new Error('Check the star and daily limit settings.');
   await p67PreviousRuleSave(form);
   const row=id?p2Rule(id):state.p2Rules.find(r=>!known.has(r.id));
   if(row){await put('rules',{...row,consequence,stars,dailyMax,earnStars});await refresh();}
@@ -6147,7 +6147,7 @@ p2SaveRule=async function(form){
  const stars=Number(fd.get('stars')),earnStars=Number(fd.get('earnStars')),dailyMax=Number(fd.get('dailyMax'));
  const consequence=String(fd.get('consequence')||'none');
  if(!name||name.length>90||!expected||expected.length>400)throw Error('Enter a rule name and expected behavior.');
- if(!Number.isSafeInteger(stars)||stars<1||stars>20)throw Error('Choose between 1 and 20 stars to deduct. This is independent of the stars earned.');
+ if(!Number.isSafeInteger(stars)||stars<1||stars>p27RuleCap())throw Error(`Choose between 1 and ${p27RuleCap()} stars to deduct. This is independent of the stars earned.`);
  if(!Number.isSafeInteger(earnStars)||earnStars<0||earnStars>40)throw Error('Choose between 0 and 40 positive stars. It may be lower than the deduction.');
  if(!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000)throw Error('Choose a valid maximum deductions per day (zero means no daily cap).');
  if(!['none','reminder','repair','deduction'].includes(consequence))throw Error('Choose a valid default consequence.');
@@ -9342,8 +9342,19 @@ document.addEventListener('submit',async event=>{const form=event.target;if(!['p
    if(p16GuardianIdentity()!==state.p64CurrentGuardian)throw Error('Please unlock your own Guardian profile before changing its sign-in password.');
    await p8FamilyCheck();
    if(password.length<10||password.length>128||password!==String(data.get('confirm')||''))throw Error('Choose matching passwords of at least 10 characters.');
-   const cred=window.firebase.auth.EmailAuthProvider.credential(owner.email,password);
-   try{await owner.linkWithCredential(cred);}catch(err){if(err?.code==='auth/provider-already-linked'){await owner.updatePassword(password);}else throw err;}
+   // Recheck providers immediately before modifying the Firebase credential.
+   await owner.reload();
+   const linked=(owner.providerData||[]).some(p=>p.providerId==='password');
+   const currentPassword=String(data.get('currentPassword')||'');
+   if(linked){
+    if(!currentPassword)throw Error('Enter your CURRENT account password before setting a new one.');
+    const fresh=window.firebase.auth.EmailAuthProvider.credential(owner.email,currentPassword);
+    await owner.reauthenticateWithCredential(fresh);
+    await owner.updatePassword(password);
+   }else{
+    try{await owner.linkWithCredential(window.firebase.auth.EmailAuthProvider.credential(owner.email,password));}
+    catch(err){if(err?.code==='auth/requires-recent-login')throw Error('Firebase needs fresh identity verification to add a password. Sign out, sign in again, and try immediately. If email links are limited, use password reset or another already-linked sign-in method; do not create another account.');throw err;}
+   }
    // Ensure the verified family UID was not changed by account linking.
    if(c.auth.currentUser?.uid!==owner.uid)throw Error('Account identity changed unexpectedly. Sign in again and ask the owner for assistance.');
    state.p23.setupOpen=false;state.p23.authInfo='Password sign-in is ready for your existing family account. You will still need your Guardian PIN.';
@@ -10025,6 +10036,173 @@ const P26_STYLES=`
 @media(prefers-reduced-motion:reduce){.p26-turning-sheet{animation:none!important;display:none!important}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P26_BUILD}">${P26_STYLES}</style>`);
+
+/* =============================================================
+ Phase 6C.2B.2D · Form clarity, authenticated password management,
+ routine history reconstruction and optional-day improvements.
+ Browser storage formats and star transactions remain unchanged.
+ ============================================================= */
+const P27_BUILD='mlsg-6c2b2d-20261117';
+state.p27={excuseConfirm:'',ruleCap:20};
+function p27RuleCap(){return Number.isSafeInteger(state.p27?.ruleCap)&&state.p27.ruleCap>=20&&state.p27.ruleCap<=100?state.p27.ruleCap:20;}
+const p27OldRefresh=refresh;
+refresh=async function(){await p27OldRefresh();try{const rule=await get('records','p27-rule-deduction-cap');state.p27.ruleCap=Number(rule?.value)||20;}catch(e){console.warn('Could not load owner rule cap',e);}};
+function p27Owner(){return safeGuardian()&&state.p64CurrentGuardian==='owner'&&(!state.p8Cloud?.family||p14OwnerVerified());}
+
+/* Task frequency controls are relevant only for the selected award mode.
+ Preserve hidden values in editing forms to avoid changing unrelated settings. */
+const p27OldTaskEditor=p2TaskEditor;
+p2TaskEditor=function(){const root=document.createElement('div');root.innerHTML=p27OldTaskEditor();const form=root.querySelector('#p2-task-form');if(!form)return root.innerHTML;
+ const frequency=form.querySelector('[name="frequency"]');if(frequency)frequency.setAttribute('data-p27-frequency','');
+ const classes=[['maxPerDay','multi'],['cooldownHours','cooldown']];
+ for(const [name,mode] of classes){const field=form.querySelector(`[name="${name}"]`)?.closest('.field');if(field){field.dataset.p27FrequencyField=mode;field.classList.add('p27-frequency-dependent');}}
+ const checkin=form.querySelector('[name="checkins"]')?.closest('.field');if(checkin){checkin.dataset.p27FrequencyField='checkin';checkin.classList.add('p27-frequency-dependent');}
+ const starsField=frequency?.closest('fieldset');if(starsField){starsField.classList.add('p27-award-frequency');const hint=document.createElement('p');hint.className='p2-note p27-frequency-explainer';hint.textContent='Only the options for this award frequency will appear below. Hidden settings remain saved when you edit an existing task.';frequency.closest('.grid2')?.after(hint);}
+ return root.innerHTML;
+};
+function p27SyncFrequency(form){if(!form)return;const type=form.querySelector('[name="type"]')?.value;const mode=form.querySelector('[name="frequency"]')?.value||'daily';for(const field of form.querySelectorAll('[data-p27-frequency-field]')){field.hidden=(type==='checklist'||type==='onetime'||field.dataset.p27FrequencyField!==mode);}
+ const explainer=form.querySelector('.p27-frequency-explainer');if(explainer)explainer.textContent={daily:'Award once on each eligible day.',multi:'Set how many approved completions can earn stars each day.',checkin:'Choose which scheduled check-in periods may earn stars.',weekly:'Award once during the Monday–Sunday week.',once:'This task awards stars only once.',cooldown:'Set how many hours must pass between awards.'}[mode]||'Guardian approval is required before any stars are awarded.';}
+document.addEventListener('change',e=>{if(e.target.matches('#p2-task-form [name="frequency"],#p2-task-form [name="type"]'))p27SyncFrequency(e.target.closest('form'));},true);
+
+/* Reward fields follow the meaning of each section rather than their history
+ of being added as separate cards. Saved voucher terms are not rewritten. */
+const p27OldRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){const root=document.createElement('div');root.innerHTML=p27OldRewardEditor();const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+ const fields=[...form.querySelectorAll('fieldset.p2-fieldset')];const match=text=>fields.find(f=>(f.querySelector('legend')?.textContent||'').includes(text));
+ const details=match('Reward Details'),contents=match('Price & Reward Contents'),food=match('Food & Treat Details'),sponsor=form.querySelector('.p17-sponsor');
+ if(details&&sponsor){sponsor.classList.add('p27-sponsor-inline');details.append(sponsor);}
+ if(contents&&food){const inner=document.createElement('div');inner.className='p5b-food-fields p27-food-details '+(food.classList.contains('p3-hidden')?'p3-hidden':'');inner.append(...[...food.children].filter(x=>x.tagName!=='LEGEND'));contents.append(inner);food.remove();}
+ const usage=match('How Often Can She Use It'),requirements=match('Requirements Before Use'),publish=match('Publish');
+ if(usage)usage.querySelector('legend').textContent='04 · How Often Can She Use It?';
+ if(requirements){requirements.querySelector('legend').textContent='05 · Requirements Before Use (Optional)';requirements.classList.add('p27-requirements');}
+ if(publish)publish.querySelector('legend').textContent='06 · Publish';
+ return root.innerHTML;
+};
+
+/* A non-destructive, owner-controlled ceiling for future rule deductions. */
+const p27OldRuleEditor=p2RuleEditor;
+p2RuleEditor=function(){const root=document.createElement('div');root.innerHTML=p27OldRuleEditor();const input=root.querySelector('#p2-rule-form [name="stars"]');if(input){input.max=String(p27RuleCap());input.closest('.field')?.insertAdjacentHTML('beforeend',`<p class="field-help">The family owner has set a maximum of ${p27RuleCap()} stars per recorded incident. Deductions are never automatic.</p>`);}return root.innerHTML;};
+const p27OldCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p27OldCloudPage();
+ if(p27Owner()){
+  const owner=root.querySelector('.p22-owner-config-card')||root.querySelector('.p14-admin');
+  if(owner){const block=document.createElement('section');block.className='p14-admin-block p27-rule-limits';block.innerHTML=`<h3>Guardian Star Safety</h3><p class="p2-muted">Choose the highest single deduction that may be configured for a rule. Ordinary Guardians cannot raise this limit. This changes future rule configuration, not old transactions.</p><form id="p27-rule-cap-form" class="form-grid"><div class="field"><label>Maximum stars per incident</label><input name="limit" type="number" min="20" max="100" step="1" value="${p27RuleCap()}" required></div><button class="btn btn-soft" type="submit">Save Deduction Limit</button></form>`;owner.append(block);}
+ }
+ const account=root.querySelector('.p14-account');if(account){const status=account.querySelector('.p23-auth-settings');if(status){const linked=(state.p8Cloud?.user?.providerData||[]).some(p=>p.providerId==='password');status.classList.add('p27-password-settings');
+  const title=status.querySelector('h3');if(title)title.textContent='🔑 Manage Sign-In Password';
+  const intro=status.querySelector('.p2-muted');if(intro)intro.innerHTML=linked?'Your email account already has a password. To change it, confirm your current password first. Your Guardian PIN stays separate.':'This email account does not show a linked password provider. You can add a password to this same verified account.';
+  const toggle=status.querySelector('[data-p23-action="toggle-setup"]');if(toggle)toggle.textContent=state.p23.setupOpen?'Hide Password Form':linked?'Change Account Password':'Add Account Password';
+  const form=status.querySelector('#p23-password-setup-form');if(form){const first=form.querySelector('p.p2-muted');if(first)first.textContent=linked?'Changing a password requires your current account password. It will not change your family UID or six-digit Guardian PIN.':'Adding a first password may require fresh Firebase authentication; no new account will be created.';
+   if(linked){const field=document.createElement('div');field.className='field';field.innerHTML='<label for="p27-current-password">Current account password</label><input type="password" id="p27-current-password" name="currentPassword" autocomplete="current-password" required><p class="field-help">This is your Firebase email/password, not your Guardian PIN.</p>';form.querySelector('.field')?.before(field);}
+   const save=form.querySelector('button[type="submit"]');if(save&&!state.p23.authBusy)save.textContent=linked?'Verify & Change Password':'Add Sign-In Password';}
+  const note=document.createElement('p');note.className='p2-muted p27-auth-note';note.textContent='Already have a password but forgot it? Use “Forgot Password” from the sign-in page. Do not create a second Firebase account.';status.append(note);
+ }}
+ // Account mappings stack rather than clipping long UIDs and selects on small screens.
+ root.querySelectorAll('.p10-account-link').forEach(row=>{row.classList.add('p27-linked-account');const uid=row.querySelector('strong');if(uid){uid.classList.add('p27-uid');uid.title=uid.textContent||'';}});
+ return root.innerHTML;
+};
+document.addEventListener('submit',async e=>{if(e.target.id!=='p27-rule-cap-form')return;e.preventDefault();e.stopImmediatePropagation();const btn=e.target.querySelector('[type="submit"]');try{if(!p27Owner())throw Error('Only the verified owner can change Guardian star limits.');const limit=Number(new FormData(e.target).get('limit'));if(!Number.isInteger(limit)||limit<20||limit>100)throw Error('Choose a maximum between 20 and 100 stars.');btn.disabled=true;btn.textContent='Saving…';await put('records',{key:'p27-rule-deduction-cap',value:limit,updatedAt:iso(),updatedBy:state.p8Cloud?.user?.uid||'local-owner'});state.p27.ruleCap=limit;await refresh();notice(`Maximum deduction is now ${limit} stars. Existing records are unchanged.`);render();}catch(err){notice(String(err?.message||err),true);if(btn){btn.disabled=false;btn.textContent='Save Deduction Limit';}}},true);
+
+/* Owner-friendly optional-day section: no confusion between a completion,
+ an excused day, or an unassigned task. Confirmation is inline, not an alert. */
+p5bExcusePanel=function(date){const tasks=(state.p2Tasks||[]).filter(t=>t.skippable&&!t.archived&&!t.draft&&t.type!=='checklist'&&p2Due(t,date));
+ const rows=tasks.map(t=>{const exc=p5bExcused(t.id,date),done=p5bCompleted(t.id,date),asking=state.p27.excuseConfirm===t.id+':'+date;
+  return `<div class="p27-excuse-row"><span class="p27-excuse-icon">${esc(t.icon||'📖')}</span><div class="grow"><strong>${esc(t.name)}</strong><small>${done?'✅ Completed — no excuse needed':exc?'🕊️ Excused on '+esc(date)+' · no stars':'Expected today · not yet completed'}</small>${asking?`<div class="p27-excuse-confirm" role="group" aria-label="Confirm excuse"><p>Confirm: there was no assignment for this task on ${esc(date)}. This will not award stars.</p><button type="button" class="btn btn-soft btn-small" data-p5b-action="excuse" data-id="${esc(t.id)}" data-date="${esc(date)}">Yes, excuse this day</button><button type="button" class="btn btn-plain btn-small" data-p27-action="excuse-cancel">Cancel</button></div>`:''}</div>${!asking?`<button type="button" class="btn ${exc?'btn-plain':'btn-soft'} btn-small" data-${exc?'p5b-action="unexcuse"':'p27-action="excuse-ask"'} data-id="${esc(t.id)}" data-date="${esc(date)}" ${done?'disabled':''}>${done?'Completed':exc?'Undo excuse':'No task today'}</button>`:''}</div>`;
+ }).join('');
+ return `<section class="panel p27-excuse-panel"><div class="panel-head"><div><p class="eyebrow">When nothing was assigned</p><h3>🕊️ No Task Today / Excused</h3></div><span class="chip">${tasks.filter(t=>p5bExcused(t.id,date)).length} excused</span></div><p class="p2-muted">Use this only if a scheduled task wasn't assigned or wasn't required that day. <strong>It is not a completed quest:</strong> no stars are given. It may count toward weekly reward requirements.</p>${tasks.length?`<div class="p27-excuse-rows">${rows}</div>`:'<p class="p27-excuse-empty">No optional tasks are scheduled for this date. To use this for a task, enable “No Task Today / Excused” when editing that task.</p>'}</section>`;
+};
+const p27OldReviewPage=p2ReviewPage;
+p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=p27OldReviewPage();const excuse=root.querySelector('.p27-excuse-panel');const first=root.querySelector('section.panel');if(excuse&&first&&first!==excuse)first.before(excuse);return root.innerHTML;};
+document.addEventListener('click',e=>{const btn=e.target.closest('[data-p27-action]');if(!btn)return;const action=btn.dataset.p27Action;if(!['excuse-ask','excuse-cancel'].includes(action))return;e.preventDefault();e.stopImmediatePropagation();state.p27.excuseConfirm=action==='excuse-ask'?btn.dataset.id+':'+btn.dataset.date:'';render();},true);
+
+/* Routines are groupings, not additional star awards. Journal used to show
+ only individual member completions, which made an entire routine invisible.
+ Reconstruct from saved member completions and today's routine membership. */
+function p27RoutineHistory(day){const completions=p11SavedTaskCompletions(day),result=[];
+ for(const routine of state.p2Tasks||[]){if(routine.type!=='checklist'||routine.draft||!p2Due(routine,day))continue;
+  if(!Array.isArray(routine.routineItems)){
+   if(!p2TaskFinished(routine,day))continue;
+   const legacy=completions.filter(c=>c.taskId===routine.id);
+   result.push({id:routine.id,name:routine.name,icon:routine.icon||'📋',total:(routine.steps||[]).length,completed:(routine.steps||[]).length,excused:0,stars:legacy.reduce((a,c)=>a+Math.max(0,Number(c.starsAwarded)||0),0),legacy:true,steps:(routine.steps||[]).map(x=>typeof x==='string'?x:x.name||'Step')});
+   continue;
+  }
+  const members=p3Members(routine,day);if(!members.length)continue;
+  const complete=members.filter(({task})=>completions.some(c=>c.taskId===task.id));
+  const excused=members.filter(({task})=>task.skippable&&p5bExcused(task.id,day)&&!complete.some(x=>x.task.id===task.id));
+  if(complete.length+excused.length!==members.length||!complete.length)continue;
+  const memberIds=new Set(members.map(({task})=>task.id));
+  result.push({id:routine.id,name:routine.name,icon:routine.icon||'📋',total:members.length,completed:complete.length,excused:excused.length,
+    stars:completions.filter(c=>memberIds.has(c.taskId)).reduce((sum,c)=>sum+Math.max(0,Number(c.starsAwarded)||0),0),
+    steps:members.map(({task})=>task.name)});
+ }
+ return result;
+}
+const p27OldDayProgress=p11DayProgress;
+p11DayProgress=function(day){const result=p27OldDayProgress(day);result.routines=p27RoutineHistory(day);result.completedRoutines=result.routines.length;return result;};
+function p27RoutineSection(routines,guardian=false){return `<section class="panel p27-routines-history"><div class="panel-head"><div><p class="eyebrow">Finished together, one step at a time</p><h3>📋 Completed Routines (${routines.length})</h3></div></div><p class="p2-muted">A routine groups individual tasks. These stars were already earned by its steps and are <strong>not counted twice</strong>.</p>${routines.length?`<div class="p27-routine-list">${routines.map(r=>`<div class="p27-routine-item"><span class="p27-routine-icon">${esc(r.icon)}</span><div class="grow"><strong>${esc(r.name)}</strong><small>${r.completed} completed step${r.completed===1?'':'s'}${r.excused?` · ${r.excused} excused`:''} · ${r.stars} step stars</small><small>${esc(r.steps.join(' · '))}</small></div></div>`).join('')}</div>`:'<p class="p2-muted">No fully completed routines found for this date.</p>'}<p class="field-help">Historical routines use the task membership currently saved in this garden. If a routine was edited afterward, some older completions may not be reconstructable.</p></section>`;}
+const p27OldJournal=p11JournalPage;
+p11JournalPage=function(){const day=state.p11JournalDay||p2Date();const root=document.createElement('div');root.innerHTML=p27OldJournal();const target=[...root.querySelectorAll('section.panel')].find(s=>s.querySelector('.p11-journal-heading'));if(target)target.after(document.createRange().createContextualFragment(p27RoutineSection(p27RoutineHistory(day))));return root.innerHTML;};
+const p27OldDaily=p19DailyPage;
+p19DailyPage=function(){const day=state.p19.dailyDate||p2Date(),root=document.createElement('div');root.innerHTML=p27OldDaily();const sections=[...root.querySelectorAll('section.panel')];const target=sections.find(s=>(s.querySelector('h3')?.textContent||'').includes('Completed Quests'))?.closest('.grid2');
+ if(target)target.after(document.createRange().createContextualFragment(p27RoutineSection(p27RoutineHistory(day),true)));return root.innerHTML;};
+
+/* Neutral, accessible visual refinements. */
+const P27_CSS=String.raw`
+#p2-task-form [data-p27-frequency-field][hidden]{display:none!important}
+#p2-task-form .p27-frequency-explainer{margin:10px 0 3px}
+#p2-task-form .p6-visibility{background:#fff!important;border:1px solid #ecdce5!important}
+#p4-reward-form .p27-food-details{margin-top:15px;padding-top:13px;border-top:1px dashed #ecd6e4}
+#p4-reward-form .p27-food-details.p3-hidden{display:none!important}
+#p4-reward-form .p27-sponsor-inline{background:#fff9fc;border:1px solid #efdce7;padding:15px;margin-top:15px;border-radius:14px}
+#p4-reward-form .p27-requirements{background:#fff!important}
+#p4-reward-form .p27-requirements>.p2-muted{background:#fff6fa;border-radius:12px;padding:12px;line-height:1.5}
+#p4-reward-form .p27-requirements .p5a-modes{display:grid;gap:8px}
+#p4-reward-form .p27-requirements .p5a-req-scroll{max-height:260px;overflow:auto}
+#p4-reward-form .p27-requirements .p5a-chips{margin:9px 0;gap:7px}
+.p27-linked-account{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:12px!important;padding:16px!important;min-width:0!important;max-width:100%!important;box-sizing:border-box!important}
+.p27-linked-account>*{min-width:0!important;max-width:100%!important}
+.p27-linked-account select,.p27-linked-account input{display:block;min-height:44px;width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important}
+.p27-uid{font-size:.82rem;overflow-wrap:anywhere;word-break:break-word}
+.p27-linked-account .actions,.p27-linked-account .p2-actions{display:flex;flex-wrap:wrap;gap:8px}
+.p27-password-settings .p27-auth-note{margin-top:8px}
+.p23-password-login-form .btn,.p23-password-inner button,.p26-login-panel #p23-password-login-form button{min-height:46px}
+.p26-login-panel [data-p23-action="reset-password"]{min-height:46px!important;min-width:100%!important;display:block;margin-top:8px!important}
+.p27-rule-limits{background:transparent;border:0;border-top:1px solid #ead7e2;padding:17px 0;margin:12px 0}
+.p27-rule-limits input{max-width:240px}
+.p27-excuse-panel{border-color:#dce9e2;background:#fafffc}
+.p27-excuse-panel .panel-head{margin-bottom:6px}
+.p27-excuse-rows{border-top:1px solid #e0e8e0;margin-top:16px}
+.p27-excuse-row{display:flex;align-items:center;gap:12px;border-bottom:1px solid #e1e9e3;padding:13px 0}
+.p27-excuse-row .grow{flex:1;min-width:0}.p27-excuse-row strong,.p27-routine-item strong{display:block;line-height:1.35}
+.p27-excuse-row small,.p27-routine-item small{display:block;color:#827a83;font-size:.79rem;line-height:1.4;margin-top:4px}
+.p27-excuse-icon,.p27-routine-icon{font-size:1.65rem;flex:0 0 32px;text-align:center}
+.p27-excuse-confirm{background:#fff;border:1px solid #e8dfdf;padding:13px;border-radius:12px;margin-top:8px}
+.p27-excuse-confirm p{font-size:.86rem;margin:0 0 12px}.p27-excuse-confirm button{margin:4px}
+.p27-excuse-empty{padding:12px;color:#7b817c;font-size:.9rem}
+.p27-routines-history{margin-top:14px}.p27-routine-list{border-top:1px solid #ecdde5;margin-top:12px}
+.p27-routine-item{display:flex;align-items:flex-start;gap:12px;padding:11px 4px;border-bottom:1px solid #ecdde5}
+@media(max-width:620px){.p27-excuse-row{flex-wrap:wrap}.p27-excuse-row>.btn{margin-left:45px}.p27-routine-item{align-items:flex-start}.p27-linked-account .btn{width:100%}.p27-rule-limits input{max-width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P27_BUILD}">${P27_CSS}</style>`);
+const p27OldRender=render;
+render=function(){p27OldRender();p27SyncFrequency(app.querySelector('#p2-task-form'));};
+
+/* Keep the large discovery card only in Word of the Day Step 1. */
+const p27PriorLearn=p22LearnPage;
+p22LearnPage=function(){const root=document.createElement('div');root.innerHTML=p27PriorLearn();const step=Math.max(0,Math.min(3,Number(state.p26?.wordStep)||0));if(step>0){const word=root.querySelector('.p22-word-card');if(word)word.remove();root.querySelector('.p22-layout')?.classList.add('p27-word-focus');}return root.innerHTML;};
+const p27PriorEditor=p2TaskEditor;
+p2TaskEditor=function(){const root=document.createElement('div');root.innerHTML=p27PriorEditor();const label=root.querySelector('.p5b-task-skip label');if(label){const checkbox=label.querySelector('input');label.replaceChildren();if(checkbox)label.append(checkbox);label.append(document.createTextNode(' This task is sometimes not assigned (allow “No Task Today”)'));}const note=root.querySelector('.p5b-task-skip .field-help');if(note)note.textContent='When a scheduled assignment is not given, a Guardian can mark that date as Excused in Daily Review. This does not earn stars and is not a completion.';return root.innerHTML;};
+const P27_EXTRA_CSS=String.raw`
+.p22-layout.p27-word-focus{display:block!important;max-width:770px;margin-inline:auto}
+.p22-layout.p27-word-focus .p22-practice{width:100%!important;max-width:100%!important;min-width:0}
+.p22-layout.p27-word-focus .p22-practice .panel{margin-inline:auto}
+.p5b-task-skip{background:#f6fbf7;border:1px solid #e3ebe5;border-radius:12px;padding:12px 14px}
+.p5b-task-skip label{display:flex;align-items:flex-start;gap:8px;line-height:1.5}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style>${P27_EXTRA_CSS}</style>`);
+/* Replace legacy email-link-only security hint for existing password users. */
+const p27PasswordHintOld=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p27PasswordHintOld();const hint=root.querySelector('.p23-auth-settings #p23-password-setup-form .p2-muted.tiny');if(hint){const linked=(state.p8Cloud?.user?.providerData||[]).some(x=>x.providerId==='password');hint.textContent=linked?'Enter your current password to confirm your identity. If you have forgotten it, use Forgot Password on the sign-in page.':'Adding a password may require a fresh verified sign-in. If an email-link limit has been reached, do not create a new account; try an available recovery method instead.';}return root.innerHTML;};
 
 initialize();
 
