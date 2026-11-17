@@ -7,7 +7,7 @@
   <meta name="description" content="A little world for growing routines, collecting stars, and celebrating progress.">
   <meta name="color-scheme" content="light">
   
-  <title>My Little Star Garden — Phase 6B.5 Guided Merge</title>
+  <title>My Little Star Garden — Phase 6C.1.2 Family Sync</title>
 <style>
 :root{
  --ink:#594459;--muted:#8a7186;--rose:#d88cad;--rose-dark:#914b73;--rose-light:#f9dfeb;
@@ -7497,7 +7497,7 @@ async function p15FindAncestor(baseline,cloudRevision){
  return valid;
 }
 async function p15PrepareMerge(){
- if(!safeGuardian())throw Error('Unlock Guardian Mode first.');
+ if(!p14OwnerVerified())throw Error('Unlock Guardian Mode first.');
  const review=state.p14Review;
  if(!review||review.mode!=='conflict'||!review.baseline)throw Error('Open Review & Sync and select a two-sided conflict first.');
  if(state.p8Cloud.role==='viewer')throw Error('Viewer accounts cannot publish a merge.');
@@ -7581,7 +7581,7 @@ const p15PriorCloudPage=p8CloudPage;
 p8CloudPage=function(){return p15PriorCloudPage().replace('Sync is manual and never merges conflicting star records automatically.','Sync is manual. Independent changes can be merged only after a verified three-way comparison and Guardian approval.');};
 async function p15Publish(){
  const s=state.p15Merge;
- if(!safeGuardian()||!s?.proposal?.candidate||state.p8Cloud.role==='viewer')throw Error('Preview a complete, authorized merge first.');
+ if(!p14OwnerVerified()||!s?.proposal?.candidate)throw Error('Only the verified family owner can publish a reviewed merge.');
  await p10CloudIdentityCheck();
  if(document.getElementById('p15-word')?.value.trim().toUpperCase()!=='MERGE')throw Error('Type MERGE in the confirmation field.');
  if(!document.getElementById('p15-ack')?.checked)throw Error('Confirm that you reviewed both versions and their star / voucher implications.');
@@ -7657,7 +7657,7 @@ app.addEventListener('click',async event=>{
  if(action==='close'){
   state.p15Merge=null;state.p14Review=null;state.p15MergeBusy=false;render();return;
  }
- if(!safeGuardian()){notice('Unlock Guardian Mode to review a merge.',true);return;}
+ if(!p14OwnerVerified()){notice('Only the verified family owner can review merge conflicts.',true);return;}
  state.p15MergeBusy=true;button.disabled=true;
  try{
   if(action==='prepare')await p15PrepareMerge();
@@ -8035,6 +8035,566 @@ const p16Css=`
 .p16-switch-top{white-space:nowrap;font-size:.77rem!important}.p16-layout{padding:20px 14px;align-items:center}.p16-card{width:min(100%,680px);max-width:680px;padding:28px;display:grid;gap:18px;text-align:left}.p16-header{display:flex;align-items:center;gap:16px}.p16-hero-icon{flex:none;background:#fde6f2;border:1px solid #f4d0e2;width:64px;height:64px;display:grid;place-items:center;font-size:2rem;border-radius:20px}.p16-header h1{font-size:clamp(1.45rem,3.5vw,2rem);line-height:1.2;margin:4px 0 8px}.p16-header p{margin:0;line-height:1.5}.p16-connected{display:flex;align-items:center;gap:12px;padding:12px 15px;background:#eff8f1;border:1px solid #cde5d4;border-radius:14px;color:#42654c;font-size:.85rem;overflow-wrap:anywhere}.p16-connected small{font-size:.75rem;opacity:.8}.p16-not-signed{background:#fff4fa;border-color:#f0d9e5;color:#866b7c}.p16-profiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.p16-profile{min-width:0;display:grid;place-items:center;align-content:start;gap:6px;padding:18px 7px;background:#fffafb;border:2px solid #efdbe6;border-radius:17px;color:#654b60;font:inherit;cursor:pointer;min-height:133px;transition:background .15s,border-color .15s}.p16-profile:hover{background:#fff3fa;border-color:#d5a7c1}.p16-profile.p16-selected{background:#fdf0f8;border-color:#ae7295;box-shadow:0 0 0 2px #e7cadc66}.p16-avatar{font-size:2rem}.p16-profile strong{text-align:center;font-size:.9rem;line-height:1.3;overflow-wrap:anywhere}.p16-profile small{font-size:.69rem;color:#8f7a8a}.p16-stage{display:grid;gap:12px;background:#fff8fc;border:1px solid #edd5e3;border-radius:18px;padding:18px;min-width:0}.p16-stage h2{margin:0;font-size:1.13rem;color:#68485f}.p16-stage p{font-size:.87rem;line-height:1.6;margin:0;color:#846a7d}.p16-stage input,.p16-fresh input{width:100%;min-height:46px;border:1.5px solid #e2bfd2;border-radius:11px;background:#fff;padding:10px 12px;font:inherit;min-width:0}.p16-stage label{color:#75536b;font-weight:750}.p16-pin-input{font-size:1.5rem!important;letter-spacing:.44em;text-align:center;-webkit-text-security:disc;max-width:310px}.p16-stage .form-grid,.p16-fresh .form-grid{gap:11px}.p16-inline-actions{display:flex;flex-wrap:wrap;gap:10px}.p16-notice{border:1px solid #c5dfcc;background:#f0f9f1;border-radius:12px;color:#457254;padding:11px 13px;line-height:1.55;font-size:.83rem}.p16-alert{border:1px solid #e6b1be;background:#fff0f3;border-radius:12px;color:#8d3b59;padding:11px 13px;line-height:1.55;overflow-wrap:anywhere;font-size:.83rem}.p16-exit,.p16-offline,.p16-back{justify-self:start}.p16-offline{font-size:.82rem}.p16-sent{display:grid;gap:10px;background:#f0f8f2;border:1px solid #c8e3d1;border-radius:16px;padding:18px;color:#4c6e56}.p16-sent h2{color:#45684d}.p16-sent p{font-size:.88rem!important;color:#526e5a!important}.p16-sent small{display:block;line-height:1.5}.p16-sent .p16-hero-icon{background:#e7f3e9;border-color:#cae1ce}.p16-link-card{max-width:560px;text-align:center;justify-items:center;min-height:270px;align-content:center}.p16-link-card h1{font-size:clamp(1.5rem,4vw,1.95rem);margin:0}.p16-link-card p{color:#886f80;line-height:1.6}.p16-link-card form{text-align:left;justify-self:stretch;width:100%}.p16-link-card button{justify-self:stretch}.p16-spinner{display:inline-block;width:19px;height:19px;border:3px solid #e8cadb;border-top-color:#a7658b;border-radius:50%;animation:p16-spin .8s linear infinite;vertical-align:middle;margin-right:6px}.p16-big-spinner .p16-spinner{width:43px;height:43px;border-width:5px}@keyframes p16-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.p16-spinner{animation:none;border-top-color:#a7658b}}.p16-fresh-offline{border-top:1px solid #eddbe6;padding-top:17px;font-size:.84rem;color:#8a7180}.p16-fresh-offline summary{cursor:pointer;font-weight:750}.p16-fresh-offline p{margin:10px 0}.p16-fresh h1{font-size:clamp(1.4rem,4vw,2rem)}@media(max-width:540px){.p16-switch-top span{display:none}.p16-switch-top{min-width:37px;padding:8px!important}.p16-card{padding:20px 16px;gap:15px}.p16-header{align-items:flex-start;gap:12px}.p16-hero-icon{height:54px;width:54px;font-size:1.6rem}.p16-profiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.p16-profile{min-height:122px;padding:14px 6px}.p16-stage{padding:15px}.p16-inline-actions .btn{flex:1 1 auto}.p16-link-card{min-height:290px}.p16-exit{font-size:.78rem}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P16_BUILD}">${p16Css}</style>`);
+
+/* ==============================================================
+   Phase 6C.1.2 · Family Auto-Sync + Guardian Experience
+   Keeps IndexedDB and historical snapshot formats backward compatible.
+   Safe independent changes may reconcile automatically. Conflicting
+   records are *never* silently overwritten: they are submitted for
+   owner review in an immutable proposal and the local copy is kept.
+   =============================================================== */
+const P17_BUILD='mlsg-6c1.2-family-auto-sync-20261117';
+state.p17={busy:false,phase:'checking',message:'Connecting to your family garden…',error:'',lastCheck:0,lastAttempt:0,
+ status:'offline',lastSuccess:0,queue:[],queueLoaded:false,queueBusy:false,review:null,decisions:{},preview:null,
+ restore:null,restoreBusy:false,tour:false,tourStep:0,notice:'',lastKnownHash:'',pending:null};
+const p17LastSyncName='mlsg-autosync-status-v1';
+let p17WritesPending=0,p17ApplyingRemote=false;
+const p17DeviceBaseKey='mlsg-device-family-baseline-v1';
+const p17SubmissionKey='mlsg-pending-change-v1';
+const p17StatusMessages={
+  shared:['cloud-check','✓ Shared with family','This device and the cloud have the same progress.'],
+  waiting:['cloud-upload','Saved here · Sharing soon','Changes are on this device. We’ll share them when we can.'],
+  pending:['shield-check','Waiting for family owner','Your changes were sent for review. Nothing has been lost.'],
+  offline:['cloud-off','Saved on this device','The internet or family sign-in is unavailable.'],
+  checking:['refresh-cw','Checking your garden…','We’re comparing the latest family progress.'],
+  attention:['alert-circle','Sync needs attention','Your local progress is safe. Please try again or ask the owner.']
+};
+const p17OldBaselineKey=p8BaselineKey;
+const p17OldGetBaseline=p8GetBaseline;
+let p17NewBaselineFound=false;
+// Storage itself is scoped to this browser. It must not reset when a parent
+// switches Firebase accounts within the same family workspace.
+p8BaselineKey=function(){const c=state.p8Cloud;return `${p17DeviceBaseKey}:${c.config?.projectId||'-'}:${c.familyId||'-'}`;};
+p8GetBaseline=function(){const current=p17OldGetBaseline();if(current)return current;
+ if(!p17NewBaselineFound){
+  try{const c=state.p8Cloud,legacy=`mlsg-cloud-baseline:${c.config?.projectId||'-'}:${c.familyId||'-'}:${c.user?.uid||'-'}`;
+   let old=pcBaselines.get(legacy)||null;
+   if(!old){try{old=JSON.parse(localStorage.getItem(legacy)||'null');}catch{}}
+   if(old?.hash&&old.revision>=1){p8SaveBaseline(old.revision,old.hash);p17NewBaselineFound=true;return old;}
+  }catch{}
+ }return null;
+};
+function p17Scope(){const c=state.p8Cloud;return `${c.config?.projectId||'-'}:${c.familyId||'-'}`;}
+function p17PendingKey(){return `${p17SubmissionKey}:${p17Scope()}`;}
+function p17ReadPending(){try{return JSON.parse(localStorage.getItem(p17PendingKey())||'null')||state.p17.pending;}catch{return state.p17.pending||null;}}
+function p17SetPending(v){state.p17.pending=v;try{if(v)localStorage.setItem(p17PendingKey(),JSON.stringify(v));else localStorage.removeItem(p17PendingKey());}catch{}
+ put('auth',{key:p17PendingKey(),value:v,savedAt:iso()}).catch(()=>{});}
+async function p17GetDeviceId(){const key='p17-device-id';const r=await get('auth',key);if(r?.id)return r.id;
+ const id=uniqueId().replace(/[^a-zA-Z0-9-]/g,'').slice(0,96);await put('auth',{key,id,createdAt:iso()});return id;
+}
+function p17Status(status,message=''){const s=state.p17;s.status=status;s.message=message||p17StatusMessages[status]?.[2]||'';
+ if(status==='shared')s.lastSuccess=Date.now();
+ const chip=document.querySelector('[data-p17-status]');if(chip){chip.dataset.status=status;chip.textContent=p17StatusMessages[status]?.[1]||'Family Sync';chip.title=s.message;}
+ const text=document.querySelector('[data-p17-status-text]');if(text)text.textContent=s.message;
+}
+function p17IsReady(){const c=state.p8Cloud;return Boolean(c?.user&&c?.family&&c?.familyId&&c?.role&&getStorageMode()!=='memory'&&navigator.onLine!==false);}
+function p17CanWrite(){return p17IsReady()&&['owner','guardian'].includes(state.p8Cloud.role);}
+let p17Debounce=0;
+function p17Schedule(ms=4500){if(p17Debounce)clearTimeout(p17Debounce);p17Debounce=setTimeout(()=>{p17Debounce=0;p17Attempt().catch(()=>{});},ms);}
+const p17OriginalPut=put;
+put=async function(store,value){const dataWrite=DATA_STORES.includes(store);if(dataWrite&&p17ApplyingRemote)throw Error('The family garden is refreshing. Please try that action again.');
+ if(dataWrite)p17WritesPending++;try{const result=await p17OriginalPut(store,value);if(dataWrite){
+ if(p17IsReady())p17Status('waiting');p17Schedule(8500);
+ }return result;}finally{if(dataWrite)p17WritesPending--;}};
+const p17OriginalAtomic=atomic;
+atomic=async function(stores,callback){const dataWrite=stores.some(s=>DATA_STORES.includes(s));
+ if(dataWrite&&p17ApplyingRemote)throw Error('The family garden is refreshing. Please try again.');if(dataWrite)p17WritesPending++;
+ try{const result=await p17OriginalAtomic(stores,callback);if(dataWrite){if(p17IsReady())p17Status('waiting');p17Schedule(8500);}return result;}
+ finally{if(dataWrite)p17WritesPending--;}};
+const p17OldRefresh=refresh;
+refresh=async function(){await p17OldRefresh();
+ try{const row=await get('auth',p17PendingKey());if(row&&state.p17.pending===null)state.p17.pending=row.value||null;}catch{}
+};
+// Every automatic cloud restore first keeps a recoverable, private copy in
+// this browser's auth store. It does not alter any guardian PIN credentials.
+async function p17KeepSafetyBackup(data,why){await put('auth',{key:'p17-auto-restore-safety',storedAt:iso(),reason:why,
+ backup:{app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data}});}
+async function p17ReplaceSafely(data,expectedLocalHash){
+ if(p17WritesPending||p17ApplyingRemote)throw Error('Another activity is still saving. We will retry after it finishes.');
+ p17ApplyingRemote=true;
+ try{if(await p8LocalHash(await getBackupData())!==expectedLocalHash)throw Error('Local changes arrived before the garden could update. No progress was replaced.');
+  await replaceBackupData(data);await refresh();}
+ finally{p17ApplyingRemote=false;}
+}
+async function p17DownloadRemote(remote,expectedLocalHash){
+ const now=await getBackupData();if(await p8LocalHash(now)!==expectedLocalHash)throw Error('New local changes appeared while checking. No progress was replaced.');
+ const current=await p8CloudSyncDoc().get({source:'server'});
+ if(Number(current.data()?.revision||0)!==remote.revision||current.data()?.snapshotId!==remote.head?.snapshotId)throw Error('Family progress changed during download. Retrying safely.');
+ await p17KeepSafetyBackup(now,`Before auto-loading cloud revision ${remote.revision}`);
+ // Child activity may arrive asynchronously; check again after storing backup.
+ if(await p8LocalHash(await getBackupData())!==expectedLocalHash)throw Error('New local changes appeared before loading. No progress was replaced.');
+ await p17ReplaceSafely(remote.snapshot.data,expectedLocalHash);
+ const hash=await p8LocalHash(await getBackupData());p8SaveBaseline(remote.revision,hash);
+ state.p8Cloud.revision=remote.revision;state.p8Cloud.remote=remote.head;
+ p17Status('shared',`Family revision ${remote.revision} is safely available on this device.`);
+}
+function p17Parts(backup){const raw=JSON.stringify(backup),parts=[];for(let i=0;i<raw.length;i+=P8_CHUNK_SIZE)parts.push(raw.slice(i,i+P8_CHUNK_SIZE));
+ if(!parts.length||parts.length>500)throw Error('This garden is too large to upload. Export a JSON backup and ask the owner for help.');return parts;
+}
+async function p17PublishSnapshot(candidate,expected,kind='routine'){
+ const c=await p8CloudSignedIn();if(!p17CanWrite())throw Error('A verified family account with editing access is required.');
+ if(kind==='owner-merge'&&!p14OwnerVerified())throw Error('Only the family owner may publish resolved conflicts.');
+ const uid=c.user.uid,ref=p8FamilyRef(),pointer=p8CloudSyncDoc(),parts=p17Parts({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),timezone:state.settings.timezone,data:candidate});
+ previewBackup({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:candidate});p15SemanticCheck(candidate);
+ const nextRevision=expected.revision+1,stamp='rev-'+uniqueId().replace(/[^a-zA-Z0-9-]/g,'');
+ const snap=ref.collection('snapshots').doc(stamp),createdAt=window.firebase.firestore.FieldValue.serverTimestamp();
+ for(let i=0;i<parts.length;i++){
+  if(c.auth.currentUser?.uid!==uid)throw Error('Signed-in account changed. No new cloud revision was published.');
+  await snap.collection('chunks').doc(String(i).padStart(6,'0')).set({payload:parts[i]});
+ }
+ await snap.set({revision:nextRevision,chunks:parts.length,sourceUid:uid,createdAt,
+  syncKind:kind});
+ await c.db.runTransaction(async tx=>{
+  const head=await tx.get(pointer),revision=head.exists?Number(head.data().revision||0):0;
+  if(revision!==expected.revision||(expected.revision>0&&head.data()?.snapshotId!==expected.snapshotId))throw Error('The family cloud changed during upload. No revision was published.');
+  tx.set(pointer,{revision:nextRevision,snapshotId:stamp,authorUid:uid,updatedAt:createdAt,syncKind:kind});
+ });
+ c.revision=nextRevision;c.remote={revision:nextRevision,snapshotId:stamp};return {revision:nextRevision,snapshotId:stamp};
+}
+function p17CompletelyUnchanged(base,local){return DATA_STORES.every(s=>p15Changes(base,local).length===0);}
+async function p17ProposalSubmit(local,baseline,remote,localHash){
+ const p=state.p17;const uid=state.p8Cloud?.user?.uid;
+ if(!p17CanWrite())throw Error('A family editor must sign in before sharing changes.');
+ if(!uid)throw Error('The guardian is no longer signed in.');
+ const prior=p17ReadPending();
+ if(prior?.hash===localHash){
+  const doc=await p8FamilyRef().collection('proposals').doc(prior.id).get({source:'server'});
+  if(doc.exists&&['pending','uploading'].includes(doc.data()?.status)){
+   p17SetPending(prior);p17Status('pending','Your changes are saved here and already sent for owner review.');return 'pending';
+  }
+  if(doc.exists&&doc.data()?.status==='resolved'){
+   // Only replace local records if they have NOT changed since submitting.
+   const newest=await p8CloudFetchSnapshot();
+   if(newest.snapshot&&await p8LocalHash(await getBackupData())===localHash){
+    await p17DownloadRemote(newest,localHash);p17SetPending(null);return 'resolved';
+   }
+  }
+  if(doc.exists&&doc.data()?.status==='rejected'){
+   p17Status('attention','The family owner declined these changes. Your local copy is still safe. Contact the owner.');return 'rejected';
+  }
+ }
+ // At most one snapshot proposal per unchanged local version. Revisions are
+ // never changed directly by a Guardian in the proposal queue.
+ const id='proposal-'+uniqueId().replace(/[^a-zA-Z0-9-]/g,''),device=await p17GetDeviceId();
+ const ref=p8FamilyRef().collection('proposals').doc(id);
+ const backup={app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:local};
+ const parts=p17Parts(backup),createdAt=window.firebase.firestore.FieldValue.serverTimestamp();
+ await ref.set({createdByUid:uid,profileId:state.p8Cloud.profileId||'',deviceId:device,createdAt,
+  baseRevision:Number(baseline?.revision||0),baseHash:String(baseline?.hash||''),remoteRevision:Number(remote.revision||0),
+  localHash,chunkCount:parts.length,status:'uploading',summary:p14Summary(local),sourceTime:Date.now()});
+ for(let i=0;i<parts.length;i++)await ref.collection('chunks').doc(String(i).padStart(6,'0')).set({payload:parts[i]});
+ await ref.update({status:'pending',submittedAt:createdAt});
+ p17SetPending({id,hash:localHash,submittedAt:Date.now()});p17Status('pending','Your changes were sent to the owner for review. They remain saved on this device.');return 'submitted';
+}
+async function p17Attempt(force=false){
+ const p=state.p17;if(p.busy)return;
+ if(!p17IsReady()){p17Status('offline','Your progress stays on this device until family sign-in and internet are available.');return;}
+ const now=Date.now();if(!force&&now-p.lastAttempt<11000)return;
+ p.busy=true;p.lastAttempt=now;p17Status('checking');
+ try{
+  const local=await getBackupData(),localHash=await p8LocalHash(local),baseline=p8GetBaseline();
+  // A one-document revision probe avoids repeatedly fetching the full
+  // garden while both versions are already confirmed identical.
+  if(baseline?.hash===localHash){
+   const head=await p8CloudSyncDoc().get({source:'server'});
+   if(head.exists&&Number(head.data()?.revision||0)===Number(baseline.revision)){
+    p17Status('shared');return;
+   }
+  }
+  const remote=await p8CloudFetchSnapshot();
+  if(!p17IsReady())return;
+  const rev=remote.revision,prior=p17ReadPending();
+  // A signed-in but not-yet-loaded fresh browser must NEVER upload its blank garden.
+  if(!state.profile&&!baseline){p17Status('waiting','Please use Load Our Family Garden to bring the existing garden to this new device.');return;}
+  if(prior?.hash===localHash){const doc=await p8FamilyRef().collection('proposals').doc(prior.id).get({source:'server'});
+   if(doc.exists&&doc.data().status==='pending'){p17Status('pending');return;}
+   if(doc.exists&&doc.data().status==='rejected'){p17Status('attention','The owner declined the changes. Your local copy is preserved.');return;}
+   if(doc.exists&&doc.data().status==='resolved'&&remote.snapshot){await p17DownloadRemote(remote,localHash);p17SetPending(null);return;}
+  }
+  if(!remote.snapshot){
+   if(!p17CanWrite()){p17Status('attention','Ask the owner to publish the first family garden.');return;}
+   if(state.p8Cloud.role!=='owner'){p17Status('attention','The family owner must publish the first garden.');return;}
+   const current=await p8LocalHash(await getBackupData());if(current!==localHash)throw Error('Local data changed. Retrying later.');
+   const published=await p17PublishSnapshot(local,{revision:0,snapshotId:''});
+   if(await p8LocalHash(await getBackupData())===localHash)p8SaveBaseline(published.revision,localHash);
+   p17Status('shared','Your family garden is now available to approved family devices.');return;
+  }
+  const remoteHash=await p8LocalHash(remote.snapshot.data);
+  if(localHash===remoteHash){p8SaveBaseline(rev,localHash);p17SetPending(null);p17Status('shared');return;}
+  if(!baseline){if(p17CanWrite())await p17ProposalSubmit(local,null,remote,localHash);else p17Status('attention','This device has no verified sync history. Ask the owner to help connect it.');return;}
+  const localChanged=localHash!==baseline.hash,remoteChanged=rev!==Number(baseline.revision);
+  if(!localChanged&&remoteChanged){await p17DownloadRemote(remote,localHash);p17SetPending(null);return;}
+  if(!localChanged&&!remoteChanged){p17Status('shared');return;}
+  if(!remoteChanged&&localChanged){
+   if(!p17CanWrite()){p17Status('waiting','This account cannot publish changes; ask a family editor.');return;}
+   if(await p8LocalHash(await getBackupData())!==localHash)throw Error('More changes are being saved. Retrying soon.');
+   const published=await p17PublishSnapshot(local,{revision:rev,snapshotId:remote.head?.snapshotId});
+   if(await p8LocalHash(await getBackupData())===localHash){p8SaveBaseline(published.revision,localHash);p17SetPending(null);p17Status('shared');}
+   else p17Status('waiting','New changes arrived during the upload. They will be shared next.');return;
+  }
+  if(localChanged&&remoteChanged){
+   if(!p17CanWrite()){p17Status('attention','Your account has view-only access. Ask the family owner to resolve the changes.');return;}
+   try{
+    const ancestor=await p15FindAncestor(baseline,rev),plan=p15Plan(ancestor,local,remote.snapshot.data);
+    if(plan.conflicts.length===0){
+     const candidate=p15Resolve(plan,{}).merged;
+     // Only perform an unattended reconciliation if ALL ledger integrity
+     // invariants still hold, and source data has not moved.
+     p15SemanticCheck(candidate);
+     if(await p8LocalHash(await getBackupData())!==localHash)throw Error('Local data changed during the comparison.');
+     const latest=await p8CloudSyncDoc().get({source:'server'});
+     if(Number(latest.data()?.revision)!==rev||latest.data()?.snapshotId!==remote.head?.snapshotId)throw Error('The shared garden changed. Retrying.');
+     const pub=await p17PublishSnapshot(candidate,{revision:rev,snapshotId:remote.head.snapshotId},'auto');
+     // Do not replace any newly edited local work.
+     if(await p8LocalHash(await getBackupData())===localHash){await p17KeepSafetyBackup(local,'Before combining independent device changes');
+      await p17ReplaceSafely(candidate,localHash);const newHash=await p8LocalHash(await getBackupData());p8SaveBaseline(pub.revision,newHash);p17SetPending(null);p17Status('shared','Independent family updates were combined safely.');
+     }else p17Status('waiting','A cloud revision was shared, but newer local work remains.');return;
+    }
+   }catch(error){/* Missing ancestors or unsafe awards fall through to owner review. */}
+   await p17ProposalSubmit(local,baseline,remote,localHash);return;
+  }
+ }catch(error){p17Status('attention',String(error?.message||'Could not check family sync. Your device is safe.'));}
+ finally{p.busy=false;p.lastCheck=Date.now();}
+}
+const p17PriorFamilyCheck=p8FamilyCheck;
+p8FamilyCheck=async function(){const result=await p17PriorFamilyCheck();if(state.p8Cloud?.user&&state.p8Cloud?.family){
+ try{const saved=await get('auth',p17PendingKey());state.p17.pending=p17ReadPending()||saved?.value||null;}catch{}
+ p17Schedule(3200);
+ }return result;};
+const p17PriorLogout=p8CloudLogout;
+p8CloudLogout=async function(){const ret=await p17PriorLogout();p17Status('offline','The family account is signed out. Changes remain saved here.');return ret;};
+window.addEventListener('online',()=>p17Schedule(1000));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')p17Schedule(1500);});
+setInterval(()=>{if(document.visibilityState==='visible'&&state.p8Cloud?.user&&state.p8Cloud?.family)p17Attempt().catch(()=>{});},35000);
+
+function p17ModalShell(title,sub,body,closeAction){return p14DialogShell(title,sub,body).replace('data-p14-action="close-dialog"',`data-p17-action="${closeAction}"`);}
+// --- Owner queue and immutable proposals ---
+async function p17RefreshQueue(){if(!p14OwnerVerified())throw Error('Only the verified owner can review family proposals.');
+ const p=state.p17;p.queueBusy=true;
+ try{const snap=await p8FamilyRef().collection('proposals').where('status','==','pending').limit(25).get({source:'server'});
+  p.queue=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.sourceTime||0)-(a.sourceTime||0));p.queueLoaded=true;
+ }finally{p.queueBusy=false;render();}
+}
+async function p17FetchProposal(id){if(!p14OwnerVerified())throw Error('Owner access required.');
+ const ref=p8FamilyRef().collection('proposals').doc(id),manifest=await ref.get({source:'server'});
+ if(!manifest.exists||manifest.data().status!=='pending')throw Error('This submission is no longer pending. Refresh the list.');
+ const info=manifest.data(),chunks=await ref.collection('chunks').get({source:'server'});
+ const backup=p8DownloadCloudChunks({chunks:info.chunkCount},chunks);return {ref,info,data:backup.data,id};
+}
+async function p17OpenProposal(id){const p=state.p17;
+ p.review={loading:true,id};p.preview=null;p.decisions={};p.rejectConfirm=false;render();
+ try{
+  const proposal=await p17FetchProposal(id),remote=await p8CloudFetchSnapshot();
+  if(!remote.snapshot)throw Error('The family owner must first publish a cloud garden.');
+  if(remote.snapshot.data.records.some(r=>r.kind==='p17-proposal-merge'&&r.proposalId===id))throw Error('This change set is already in the published family garden.');
+  const baseline={revision:proposal.info.baseRevision,hash:proposal.info.baseHash};
+  const ancestor=await p15FindAncestor(baseline,remote.revision);
+  const plan=p15Plan(ancestor,proposal.data,remote.snapshot.data);
+  p.review={id,proposal,remote,plan,remoteHash:await p8LocalHash(remote.snapshot.data),errors:'',loading:false};
+ }catch(error){p.review={id,error:error.message||'Unable to review this submission.'};}
+ render();
+}
+function p17ReviewHtml(){const r=state.p17.review;if(!r)return '';
+ if(r.loading)return p17ModalShell('Preparing Family Changes','Checking the archived common version…',`<div class="p14-dialog-body">${p16Spinner()} Reading and validating records…</div>`,'review-close');
+ if(r.error)return p17ModalShell('Submission Needs Attention','Both copies are preserved.',`<div class="p14-dialog-body"><p class="info warning">${esc(r.error)}</p><p>The source device can export a complete JSON backup. This submission cannot be safely auto-merged without its original common version.</p><div class="actions"><button class="btn btn-soft" data-p17-action="proposal-download">Download Submitted Copy</button><button class="btn btn-plain" data-p17-action="review-close">Close</button></div></div>`,'review-close');
+ const plan=r.plan,decisions=state.p17.decisions,selected=plan.conflicts.filter(x=>['device','cloud'].includes(decisions[x.key])).length;
+ const conflicts=plan.conflicts.map((c,i)=>`<article class="p17-conflict"><strong>${i+1}. ${esc(p15RowTitle(c.local||c.cloud,c.store,c.id))}</strong><small>${esc(c.store)} · ${esc(c.id)}</small><div class="p17-two"><div><b>📱 Submitted</b><p>${esc(p15RowTitle(c.local,c.store,c.id))}</p><small>${esc(p15RowDetails(c.local,c.store))}</small>${p15FieldDiff(c,'device')}</div><div><b>☁️ Cloud</b><p>${esc(p15RowTitle(c.cloud,c.store,c.id))}</p><small>${esc(p15RowDetails(c.cloud,c.store))}</small>${p15FieldDiff(c,'cloud')}</div></div><label class="field">Owner's decision<select data-p17-decision="${esc(c.key)}"><option value="">Choose which to keep…</option><option value="device" ${decisions[c.key]==='device'?'selected':''}>Use submitted version</option><option value="cloud" ${decisions[c.key]==='cloud'?'selected':''}>Keep cloud version</option></select></label></article>`).join('');
+ const proposal=state.p17.preview;
+ const reject=state.p17.rejectConfirm?`<div class="p14-confirm"><strong>Leave this submission out of the shared garden?</strong><p>The parent's local copy will remain unchanged. Explain your decision to them before asking them to sync again.</p><div class="actions"><button class="btn btn-danger" data-p17-action="review-reject-confirm">Confirm Not Applied</button><button class="btn btn-plain" data-p17-action="review-reject-cancel">Keep Reviewing</button></div></div>`:'';
+ const preview=proposal?`<section class="p17-preview"><h3>Proposed combined garden</h3>${p14SummaryHtml(p14Summary(proposal))}<label class="inline-check"><input id="p17-owner-ack" type="checkbox" required> I reviewed star changes, rewards and vouchers.</label><label class="field">Type PUBLISH to confirm<input id="p17-owner-word" autocomplete="off" placeholder="PUBLISH"></label><button class="btn btn-primary" data-p17-action="review-publish">🔐 Publish Reviewed Changes</button></section>`:`<button class="btn btn-primary" data-p17-action="review-preview" ${selected!==plan.conflicts.length?'disabled':''}>Preview Combined Garden</button>`;
+ return p17ModalShell('🛡️ Review Guardian Changes',`${esc(r.proposal.info.profileId||'Family guardian')} · submitted by ${esc(String(r.proposal.info.createdByUid).slice(0,8))}…`, `<div class="p14-dialog-body"><p class="p14-safe-note">${plan.auto.length} independent record changes can be preserved. ${plan.conflicts.length} disagreement(s) need your decision. Neither the source device nor cloud has been modified.</p>${conflicts||'<div class="info success">✓ No individual record disagreements.</div>'}${r.errors?`<p class="info error" role="alert">${esc(r.errors)}</p>`:''}${preview}${reject}<div class="actions"><button class="btn btn-plain" data-p17-action="review-reject">Mark Not Applied</button><button class="btn btn-soft" data-p17-action="proposal-download">⬇ Download Submission</button><button class="btn btn-plain" data-p17-action="review-close">Close</button></div></div>`,'review-close');
+}
+async function p17PreviewProposal(){const r=state.p17.review;if(!r?.plan)throw Error('Load a pending proposal first.');
+ const merged=p15Resolve(r.plan,state.p17.decisions);
+ if(merged.unresolved.length)throw Error('Choose a version for each conflicting record first.');
+ previewBackup({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:merged.merged});p15SemanticCheck(merged.merged);
+ state.p17.preview=merged.merged;render();
+}
+async function p17PublishProposal(){if(!p14OwnerVerified())throw Error('Only the verified owner can publish resolutions.');
+ const r=state.p17.review,merged=state.p17.preview;if(!r?.plan||!merged)throw Error('Preview the merge first.');
+ if(!document.getElementById('p17-owner-ack')?.checked||document.getElementById('p17-owner-word')?.value.trim().toUpperCase()!=='PUBLISH')throw Error('Confirm the reviewed merge first.');
+ const cloud=await p8CloudFetchSnapshot();if(cloud.revision!==r.remote.revision||cloud.head?.snapshotId!==r.remote.head?.snapshotId)throw Error('The family cloud changed. Reopen and compare the submission again.');
+ const check=await r.proposal.ref.get({source:'server'});if(check.data()?.status!=='pending')throw Error('This proposal has already been handled.');
+ const candidate=structuredClone(merged),uid=state.p8Cloud.user.uid;
+ candidate.records.push({key:`p17-proposal-merge:${r.id}`,kind:'p17-proposal-merge',proposalId:r.id,
+  guardianUid:r.proposal.info.createdByUid,ownerUid:uid,createdAt:iso(),fromRevision:r.remote.revision,
+  decisions:state.p17.decisions});
+ p15SemanticCheck(candidate);
+ // Safety copy of the currently published cloud, plus a local owner backup.
+ const ownerLocal=await getBackupData(),ownerHash=await p8LocalHash(ownerLocal);
+ downloadText(`Star-Garden-Owner-Before-Resolve-${Date.now()}.json`,JSON.stringify({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:ownerLocal},null,2),'application/json');
+ const published=await p17PublishSnapshot(candidate,{revision:r.remote.revision,snapshotId:r.remote.head.snapshotId},'owner-merge');
+ try{await r.proposal.ref.update({status:'resolved',reviewedBy:uid,reviewedAt:window.firebase.firestore.FieldValue.serverTimestamp(),publishedRevision:published.revision});}
+ catch(error){p8CloudStatus('Published, but submission status could not be marked resolved. Ask owner to refresh. '+error.message,true);}
+ // Owner device is not overwritten unless the unshared local data is unchanged
+ // from a clean common baseline. Otherwise it will reconcile at next check.
+ const ownerBaseline=p8GetBaseline();
+ if(ownerBaseline&&ownerBaseline.hash===ownerHash&&await p8LocalHash(await getBackupData())===ownerHash){
+  await p17KeepSafetyBackup(ownerLocal,'Before applying owner-reviewed cloud version');await p17ReplaceSafely(candidate,ownerHash);p8SaveBaseline(published.revision,await p8LocalHash(await getBackupData()));
+ }
+ state.p17.review=null;state.p17.preview=null;state.p17.queueLoaded=false;state.p17.queue=[];p17Status('waiting','Reviewed changes were published. Other devices can load the updated family garden.');
+ render();p17Schedule(12000);
+}
+// --- Family Sync settings and header ---
+function p17StatusBadge(){const s=state.p17,entry=p17StatusMessages[s.status]||p17StatusMessages.offline;
+ return `<button type="button" class="p17-status-pill" data-p17-action="retry" data-p17-status="${esc(s.status)}" title="${esc(s.message)}" aria-label="Family Sync: ${esc(entry[1])}. Tap to retry.">☁️ ${esc(entry[1])}</button>`;
+}
+const p17PriorShell=shell;
+shell=function(content,guardianMode=false){const html=p17PriorShell(content,guardianMode);if(!guardianMode)return html;
+ const root=document.createElement('div');root.innerHTML=html;const header=root.querySelector('main header.topbar');
+ if(header){const tag=header.querySelector('.mode-tag');tag?.insertAdjacentHTML('afterend',p17StatusBadge());}
+ return root.innerHTML;
+};
+const p17PriorCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p17PriorCloudPage();
+ const overview=root.querySelector('.p14-overview');
+ if(overview){overview.querySelectorAll('p').forEach(x=>{if(/Sync is manual|never merges/i.test(x.textContent))x.textContent='Independent changes share automatically while this site is open and connected. Conflicts are held for owner review.';});
+  overview.insertAdjacentHTML('beforeend',`<div class="p17-cloud-state" role="status"><strong>${esc(p17StatusMessages[state.p17.status]?.[1]||'Family Sync')}</strong><p data-p17-status-text>${esc(state.p17.message)}</p><button type="button" class="btn btn-soft btn-small" data-p17-action="retry">Try Sync Now</button></div>`);
+ }
+ root.querySelectorAll('.pc-sync-advice').forEach(x=>x.remove());
+ const actions=root.querySelector('.p14-workspace-actions');
+ if(actions){const heading=actions.querySelector('h3');if(heading)heading.textContent='🌷 Automatic Family Sync';
+  const p=actions.querySelector('.p2-muted');if(p)p.textContent='Your work stays on this device until it is safely shared. If a change needs review, the owner will handle it.';
+  const review=actions.querySelector('[data-p14-action="review-sync"]');if(review){if(!p14OwnerVerified())review.remove();else{review.textContent='Advanced Manual Review (Owner)';review.classList.remove('btn-primary');review.classList.add('btn-soft','btn-small');}}
+  actions.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-primary" data-p17-action="retry" ${p17IsReady()?'':'disabled'}>☁️ Sync My Changes</button>`);
+  if(p14OwnerVerified())actions.insertAdjacentHTML('afterend',`<section class="panel p17-owner-queue"><div class="p14-row"><div><h3>🛡️ Owner Review Center</h3><p class="p2-muted">Only you can publish resolved guardian conflicts. No device is overwritten while you review.</p></div><button class="btn btn-soft" data-p17-action="queue-refresh">Check Submissions</button></div>${state.p17.queueLoaded?state.p17.queue.length?state.p17.queue.map(x=>`<article class="p17-submission"><div><strong>💌 ${esc(p10LinkedName(x.profileId)||x.profileId||'Guardian')}</strong><small>Submitted ${esc(p14SnapshotDate(x.submittedAt||x.createdAt))} · Local ${Number(x.summary?.wallet||0)} spendable stars</small></div><button class="btn btn-primary btn-small" data-p17-action="review-open" data-id="${esc(x.id)}">Review</button></article>`).join(''):'<p class="p2-muted">No submissions are waiting for you. 🌷</p>':'<p class="p2-muted">Choose Check Submissions to see pending changes.</p>'}</section>`);
+ }
+ if(!p14OwnerVerified())root.querySelectorAll('.p14-history,.p14-local-link').forEach(x=>x.remove());
+ root.querySelectorAll('.p14-footnote p').forEach(x=>x.textContent='Cloud sync works while this page is open, connected and signed in. Changes waiting for review remain saved locally. Export JSON backups regularly.');
+ return root.innerHTML;
+};
+const p17PriorReviewDialog=p14ReviewDialog;
+p14ReviewDialog=function(){let html=p17PriorReviewDialog();if(!p14OwnerVerified()){
+  const root=document.createElement('div');root.innerHTML=html;
+  root.querySelectorAll('[data-p15-action="prepare"]').forEach(x=>{x.dataset.p17Action='submit';x.removeAttribute('data-p15-action');x.textContent='💌 Send My Changes to Owner';});
+  root.querySelectorAll('[data-p14-action="sync-replace-cloud"]').forEach(x=>x.remove());
+  return root.innerHTML;
+ }return html;
+};
+const p17PriorGuardian=guardian;
+guardian=function(){const html=p17PriorGuardian();if(!safeGuardian()||state.view!=='guardian'||!state.p17.review)return html;
+ const root=document.createElement('div');root.innerHTML=html;root.querySelector('main')?.insertAdjacentHTML('beforeend',p17ReviewHtml());return root.innerHTML;
+};
+
+// --- Guardians: once a profile is selected, reduce clutter. ---
+const p17PriorProfiles=p16ProfileScreen;
+p16ProfileScreen=function(){const html=p17PriorProfiles();if(!state.p16Selected||!state.p16Entry)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const selected=root.querySelector(`.p16-profile.p16-selected`),cards=root.querySelector('.p16-profiles');
+ if(selected&&cards){const avatar=selected.querySelector('.p16-avatar')?.textContent||'💗',name=selected.querySelector('strong')?.textContent||'Guardian';
+  cards.outerHTML=`<section class="p17-selected-profile"><span aria-hidden="true">${esc(avatar)}</span><div><small>Chosen Guardian</small><strong>${esc(name)}</strong></div><button type="button" class="btn btn-plain btn-small" data-p16-action="back-profiles">Change</button></section>`;
+ }
+ return root.innerHTML;
+};
+
+// --- Fresh-browser garden loading: no native JS confirm/alert. ---
+async function p17StartGardenLoad(){const p=state.p17;p.restore={phase:'checking',error:'',remote:null};render();
+ try{
+  if(state.profile||getStorageMode()==='memory')throw Error('This browser cannot safely start a new cloud garden. Existing local progress must be reviewed separately.');
+  const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();
+  if(!c.profileId)throw Error('This account is not linked to a Guardian profile yet. Ask the family owner to connect it first.');
+  const remote=await p8CloudFetchSnapshot();if(!remote.snapshot)throw Error('Your family garden has not been published yet. Ask the owner to sync their device.');
+  if(c.profileId!=='owner'&&!remote.snapshot.data.records.some(x=>x.key==='p64-guardian:'+c.profileId))throw Error('Your Guardian profile is not yet included in the shared family garden. Ask the owner to sync their latest profiles.');
+  previewBackup(remote.snapshot);
+  p.restore={phase:'ready',remote,error:''};
+ }catch(error){p.restore={phase:'error',error:error.message||'Unable to load family garden.'};}
+ render();
+}
+async function p17ConfirmGardenLoad(){const p=state.p17,r=p.restore;if(!r?.remote||r.phase!=='ready'||p.restoreBusy)return;
+ p.restoreBusy=true;p.restore={...r,phase:'loading'};render();
+ try{
+  if(state.profile||getStorageMode()==='memory')throw Error('This device can no longer safely download the first garden.');
+  const latest=await p8CloudSyncDoc().get({source:'server'});
+  if(Number(latest.data()?.revision)!==r.remote.revision||latest.data()?.snapshotId!==r.remote.head.snapshotId)throw Error('Your family garden changed. Please try loading again.');
+  const c=await p8CloudSignedIn();
+  if(!c.profileId)throw Error('Choose a linked Guardian account first.');
+  if(c.profileId!=='owner'&&!r.remote.snapshot.data.records.some(x=>x.key==='p64-guardian:'+c.profileId))throw Error('Your linked Guardian profile is missing from this garden. No local data was changed.');
+  const before=await getBackupData();
+  if(DATA_STORES.some(k=>before[k].length>0))await p17KeepSafetyBackup(before,'Before first cloud garden load');
+  await p17ReplaceSafely(r.remote.snapshot.data,await p8LocalHash(before));
+  p8SaveBaseline(r.remote.revision,await p8LocalHash(await getBackupData()));
+  // Local, private Firebase-to-Guardian binding for the person whose account
+  // downloaded this garden. This is intentionally not included in shared JSON.
+  if(c.profileId!=='owner'){
+   if(!p10ValidProfileId(c.profileId))throw Error('The linked Guardian profile was not found after loading. Ask the owner to verify the family profiles.');
+   await put('auth',{key:'p10-cloud-local-identity',projectId:c.config.projectId,familyId:c.familyId,uid:c.user.uid,profileId:c.profileId,linkedAt:iso()});
+  }
+  p.restore={phase:'complete'};p17Status('shared','The family garden was loaded on this device.');
+  state.view=(await hasPin())?'child':'restore-pin';
+ }catch(error){p.restore={phase:'error',error:error.message||'Could not download the garden.'};}
+ finally{p.restoreBusy=false;render();}
+}
+const p17OldFirstRestore=pcFamilyFirstRestore;
+pcFamilyFirstRestore=async function(){return p17StartGardenLoad();};
+function p17LoadDialog(){const r=state.p17.restore;if(!r)return '';
+ const body=r.phase==='checking'||r.phase==='loading'?`<div class="p17-loading">${p16Spinner()}<h3>${r.phase==='checking'?'Checking family access…':'Saving your family garden…'}</h3><p>Please keep this page open. Your progress won't be overwritten without a safe check.</p></div>`:
+ r.phase==='error'?`<p class="info error" role="alert">${esc(r.error)}</p><div class="actions"><button class="btn btn-soft" data-p17-action="load-retry">Try Again</button><button class="btn btn-plain" data-p17-action="load-close">Close</button></div>`:
+ r.phase==='ready'?`<p class="p2-muted">We found your family's garden. Check the details before saving it to this browser.</p><div class="p17-load-stats">${p14SummaryHtml(p14Summary(r.remote.snapshot.data))}</div><p class="p14-safe-note">This is a new browser and its local progress hasn't been set up yet. Your family cloud won't be changed.</p><div class="actions"><button class="btn btn-primary" data-p17-action="load-confirm">🌷 Load My Family Garden</button><button class="btn btn-plain" data-p17-action="load-close">Not Now</button></div>`:
+ `<div class="info success">Your family's progress is ready on this device!</div><button class="btn btn-primary" data-p17-action="load-close">Continue</button>`;
+ return p17ModalShell('🌷 Load Our Family Garden','A safe, guided setup for this device.',`<div class="p14-dialog-body">${body}</div>`,'load-close');
+}
+const p17BeforeRender=render;
+render=function(){p17BeforeRender();if(state.p17.restore){
+ const stage=document.getElementById('app');stage?.insertAdjacentHTML('beforeend',p17LoadDialog());
+ }};
+
+// --- Rewards sponsor: store profile IDs, not just mutable names. ---
+function p17SponsorLabel(s){if(!s||s.type==='family')return 'Your family';
+ if(s.type==='guardian')return s.name||p10LinkedName(s.id)||'Family Guardian';
+ return String(s.name||'A special helper').slice(0,80);
+}
+const p17PreviousRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){const root=document.createElement('div');root.innerHTML=p17PreviousRewardEditor();
+ const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+ const reward=p4Reward(state.p4SelectedRewardId)||{},s=reward.sponsor||{type:'family'};
+ const choose=s.type==='guardian'?`guardian:${s.id||''}`:s.type==='custom'?'custom':'family';
+ const options=p10ProfileChoices().map(g=>`<option value="guardian:${esc(g.id)}" ${choose===`guardian:${g.id}`?'selected':''}>${esc(g.icon||'💗')} ${esc(g.name)}</option>`).join('');
+ const block=`<section class="p17-sponsor"><h3>💗 Who is sponsoring this reward?</h3><p class="p2-muted">Optional. Elle can thank the person who made this special reward possible.</p><div class="field"><label for="p17-sponsor-choice">Sponsored by</label><select id="p17-sponsor-choice" name="sponsorChoice"><option value="family" ${choose==='family'?'selected':''}>Our Family / Not specified</option>${options}<option value="custom" ${choose==='custom'?'selected':''}>Someone else (custom name)</option></select></div><div class="field" id="p17-sponsor-custom-wrap" ${choose==='custom'?'':'hidden'}><label for="p17-sponsor-custom">Sponsor name</label><input id="p17-sponsor-custom" type="text" name="sponsorCustom" maxlength="80" placeholder="e.g. Lola, Ninang, Tito" value="${esc(s.type==='custom'?s.name||'':'')}"></div><p class="field-help">Sponsor is copied to each issued voucher, so old Thank You cards keep the original sponsor even if the reward changes.</p></section>`;
+ const footer=form.querySelector('.p2-actions:last-child');if(footer)footer.insertAdjacentHTML('beforebegin',block);else form.insertAdjacentHTML('beforeend',block);
+ return root.innerHTML;
+};
+const p17PreviousSaveReward=p4SaveReward;
+p4SaveReward=async function(form){const fd=new FormData(form),choice=String(fd.get('sponsorChoice')||'family');
+ let sponsor={type:'family'};
+ if(choice==='custom'){const name=String(fd.get('sponsorCustom')||'').trim().slice(0,80);if(!name)throw Error('Enter the custom sponsor name.');sponsor={type:'custom',name};}
+ else if(choice.startsWith('guardian:')){const id=choice.slice(9),profile=p10ProfileChoices().find(p=>p.id===id);
+  if(!profile)throw Error('Choose a Guardian profile from the list.');sponsor={type:'guardian',id:profile.id,name:profile.name};}
+ const before=new Set(state.p4Rewards.map(r=>r.id)),editId=String(fd.get('editId')||'');
+ await p17PreviousSaveReward(form);
+ const target=editId?p4Reward(editId):state.p4Rewards.find(r=>!before.has(r.id));
+ if(target){await put('rewards',{...target,sponsor});await refresh();render();}
+};
+const p17PreviousSnapshot=p4Snapshot;
+p4Snapshot=function(r){return {...p17PreviousSnapshot(r),sponsor:r.sponsor?structuredClone(r.sponsor):{type:'family'}};};
+const p17PreviousThankCard=p14ThankYouCard;
+p14ThankYouCard=function(v,guardianName,message){const c=p17PreviousThankCard(v,guardianName,message),ctx=c.getContext('2d');
+ if(v.sponsor&&v.sponsor.type!=='family'){ctx.textAlign='center';ctx.font='bold 20px system-ui';ctx.fillStyle='#956d87';
+  ctx.fillText(`Made possible by ${p17SponsorLabel(v.sponsor).slice(0,60)}`,800,606);}
+ return c;
+};
+// The sponsor is displayed in the redeemed voucher's gratitude editor too.
+const p17PriorThankModal=p14ThankModal;
+p14ThankModal=function(){const html=p17PriorThankModal(),v=p4Voucher(state.p14ThanksId);if(!v?.sponsor||v.sponsor.type==='family')return html;
+ const root=document.createElement('div');root.innerHTML=html;root.querySelector('.p14-thank-gift small')?.insertAdjacentText('beforeend',` · Sponsored by ${p17SponsorLabel(v.sponsor)}`);return root.innerHTML;
+};
+
+// --- First-time Guardian tour, entirely local and skippable. ---
+const p17TourPages=[
+ ['🌷','Welcome to the Family Garden','Here you can approve activities, help with rewards, and celebrate every little achievement.'],
+ ['⭐','Stars and Activities','Tasks and rules earn stars when you confirm them. Check the details before approving a reward.'],
+ ['☁️','Your progress is shared for you','While this page is open and your family email is connected, we’ll try syncing your updates automatically.'],
+ ['💌','If something needs review','Sometimes another device has a different version. Your changes stay safe, and the family owner will handle the disagreement.']
+];
+function p17TourKey(){const c=state.p8Cloud;return `mlsg-guardian-tour:${c.config?.projectId||'offline'}:${c.familyId||'local'}:${c.user?.uid||state.p64CurrentGuardian||'owner'}`;}
+function p17ShowTourIfNew(){try{if(!localStorage.getItem(p17TourKey())){state.p17.tour=true;state.p17.tourStep=0;render();}}catch{}}
+function p17TourHtml(){const i=state.p17.tourStep,[emoji,title,body]=p17TourPages[i];
+ return p17ModalShell('🌷 A Little Guardian Tour',`Step ${i+1} of ${p17TourPages.length}`,`<div class="p14-dialog-body p17-tour"><div class="p17-tour-emoji">${emoji}</div><h3>${esc(title)}</h3><p>${esc(body)}</p><div class="actions"><button type="button" class="btn btn-primary" data-p17-action="tour-next">${i===p17TourPages.length-1?'Finish Tour':'Next →'}</button><button type="button" class="btn btn-plain" data-p17-action="tour-skip">Skip Tour</button></div></div>`,'tour-skip');
+}
+const p17PreviousUnlock=p16UnlockGuardian;
+p16UnlockGuardian=async function(pin){const result=await p17PreviousUnlock(pin);if(state.view==='guardian'&&safeGuardian())p17ShowTourIfNew();return result;};
+const p17PriorGuardian2=guardian;
+guardian=function(){const html=p17PriorGuardian2();if(state.view!=='guardian'||!safeGuardian())return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ if(state.guardianTab==='settings'){
+  const main=root.querySelector('main .layout-stack');main?.insertAdjacentHTML('beforeend',`<section class="panel"><h3>🌷 Guardian Help</h3><p class="p2-muted">New to My Little Star Garden? Review the short family guide again.</p><button type="button" class="btn btn-soft" data-p17-action="tour-start">Show Guardian Tour</button></section>`);
+ }
+ if(state.p17.tour)root.querySelector('main')?.insertAdjacentHTML('beforeend',p17TourHtml());return root.innerHTML;
+};
+// Auto-sync after profile changes that aren't local data writes, such as a
+// new signed-in account becoming ready or a Guardian exiting their session.
+const p17BeforeP16Enter=p16EnterGuardian;
+p16EnterGuardian=async function(){if(p17IsReady())p17Schedule(1000);return p17BeforeP16Enter();};
+
+// Dashboard shortcuts must follow the same parent-friendly automatic path.
+// Owners can still choose the explicit advanced review button on Family Sync.
+p8CloudSyncNow=async function(){
+ await p17Attempt(true);
+ if(state.p17.status==='attention')throw Error(state.p17.message||'Family Sync needs attention.');
+};
+const p17PriorDashboard=guardianDashboard;
+guardianDashboard=function(){
+ const root=document.createElement('div');root.innerHTML=p17PriorDashboard();
+ root.querySelectorAll('p,small').forEach(x=>{
+  if(/Sync is manual|sync is manual|manual and conflict-aware|Keep full JSON backups and use Sync Now/i.test(x.textContent||''))
+   x.textContent='Progress is saved on this device. When the app is open and your family account is connected, updates are shared automatically. Keep regular JSON backups.';
+ });
+ root.querySelectorAll('.pc-sync-card').forEach(card=>{
+  const title=card.querySelector('.action-name'),note=card.querySelector('.action-note');
+  if(title)title.textContent='Check Family Sync';
+  if(note)note.textContent='Check sharing status or retry when needed';
+ });
+ const block=root.querySelector('.pc-dashboard-sync-notice');if(block){
+  const headline=block.querySelector('strong');if(headline)headline.textContent='☁️ '+(p17StatusMessages[state.p17.status]?.[1]||'Family Sync');
+  const all=block.querySelectorAll('p');if(all[0])all[0].textContent=state.p17.message||'Your local progress is preserved.';
+  if(all[1])all[1].textContent='Family changes sync while the app is open. If there is a conflict, the owner will review it. You can use Check Family Sync any time.';
+ }
+ return root.innerHTML;
+};
+// --- Event handling for new controls: capture and prevent double actions. ---
+app.addEventListener('change',event=>{
+ if(event.target.id==='p17-sponsor-choice')document.getElementById('p17-sponsor-custom-wrap')?.toggleAttribute('hidden',event.target.value!=='custom');
+ if(event.target.matches('[data-p17-decision]')){
+  const key=event.target.dataset.p17Decision,val=event.target.value;
+  if(!state.p17.review?.plan?.conflicts.some(x=>x.key===key))return;
+  if(val==='device'||val==='cloud')state.p17.decisions[key]=val;else delete state.p17.decisions[key];
+  state.p17.preview=null;render();
+ }
+},true);
+app.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-p17-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const action=button.dataset.p17Action,p=state.p17;
+ if((p.queueBusy||p.restoreBusy)&&!['load-close'].includes(action))return;
+ button.disabled=true;
+ try{
+  if(action==='retry'){await p17Attempt(true);render();}
+  else if(action==='submit'){const local=await getBackupData(),baseline=p8GetBaseline(),remote=await p8CloudFetchSnapshot();await p17ProposalSubmit(local,baseline,remote,await p8LocalHash(local));state.p14Review=null;render();}
+  else if(action==='queue-refresh')await p17RefreshQueue();
+  else if(action==='review-open')await p17OpenProposal(button.dataset.id);
+  else if(action==='review-close'){p.review=null;p.preview=null;render();}
+  else if(action==='review-preview'){try{await p17PreviewProposal();}catch(e){p.review.errors=e.message;render();}}
+  else if(action==='review-publish')await p17PublishProposal();
+  else if(action==='review-reject'){p.rejectConfirm=true;render();}
+  else if(action==='review-reject-cancel'){p.rejectConfirm=false;render();}
+  else if(action==='review-reject-confirm'){if(!p14OwnerVerified()||!p.review?.proposal)throw Error('Only the verified owner can decline a submission.');
+   await p.review.proposal.ref.update({status:'rejected',reviewedBy:state.p8Cloud.user.uid,reviewedAt:window.firebase.firestore.FieldValue.serverTimestamp()});p.rejectConfirm=false;p.review=null;p.queueLoaded=false;p.queue=[];render();}
+  else if(action==='proposal-download'){
+   const proposal=p.review?.proposal||await p17FetchProposal(p.review.id);
+   downloadText(`Star-Garden-Submitted-Changes-${proposal.id}.json`,JSON.stringify({app:APP_ID,schemaVersion:SCHEMA_VERSION,exportedAt:iso(),data:proposal.data},null,2),'application/json');
+  }
+  else if(action==='load-retry')await p17StartGardenLoad();
+  else if(action==='load-confirm')await p17ConfirmGardenLoad();
+  else if(action==='load-close'){if(p.restore?.phase!=='checking'&&p.restore?.phase!=='loading'){p.restore=null;render();}}
+  else if(action==='tour-start'){p.tour=true;p.tourStep=0;render();}
+  else if(action==='tour-next'||action==='tour-skip'){
+   if(action==='tour-skip'||p.tourStep===p17TourPages.length-1){p.tour=false;
+    try{localStorage.setItem(p17TourKey(),'1');}catch{}
+   }else p.tourStep++;
+   render();
+  }
+ }catch(error){if(p.review&&action.startsWith('review-'))p.review.errors=error.message;
+  else p17Status('attention',error.message||'Something needs attention. Your local progress is safe.');
+  render();
+ }finally{if(button.isConnected)button.disabled=false;}
+},true);
+const p17Css=`
+.p17-status-pill{border:1px solid #d5e7d8;border-radius:999px;padding:7px 12px;font:700 .74rem var(--font);background:#edf9f0;color:#426b51;white-space:normal;text-align:center;line-height:1.3;max-width:245px}
+.p17-status-pill[data-status="attention"],.p17-status-pill[data-status="pending"]{background:#fff4e8;border-color:#efd3b0;color:#885e44}
+.p17-status-pill[data-status="offline"],.p17-status-pill[data-status="waiting"]{background:#fff4f9;border-color:#ead1df;color:#875f78}
+.p17-cloud-state{background:#f5faf6;border:1px solid #d5e8da;border-radius:16px;padding:14px 16px;display:grid;gap:7px;margin-top:15px}
+.p17-cloud-state p{color:#725d6b;font-size:.86rem}.p17-cloud-state .btn{justify-self:start}
+.p17-owner-queue,.p17-sponsor{display:grid;gap:15px}.p17-submission{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;border:1px solid #eed6e3;border-radius:15px;background:#fff9fc}
+.p17-submission small{display:block;color:#957e8e;margin-top:6px}.p17-conflict{display:grid;gap:11px;border:1px solid #eed4e2;border-radius:17px;padding:14px;background:#fff9fc}.p17-conflict>small{color:#93758b;overflow-wrap:anywhere}
+.p17-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.p17-two>div{padding:11px;border:1px solid #f0dfeb;background:#fff;border-radius:12px;font-size:.8rem;overflow-wrap:anywhere}.p17-two>div>p{margin:5px 0}.p17-two>div>small{color:#9a7e90}.p17-two .p15-fields{margin-top:8px;border-top:1px solid #f3e3ec;padding-top:8px}
+.p17-conflict select,.p17-sponsor select,.p17-sponsor input{width:100%;min-height:46px;border:1px solid #e4c9da;border-radius:12px;padding:10px 12px;font:inherit;background:white;color:#684b61}
+.p17-preview{display:grid;gap:12px;border-top:1px solid #eedde7;padding-top:16px}.p17-loading{display:grid;justify-items:center;text-align:center;gap:12px;padding:20px}.p17-loading .p16-spinner{width:42px;height:42px}
+.p17-selected-profile{display:flex;align-items:center;gap:13px;background:#fff4f9;border:1px solid #efd5e4;border-radius:17px;padding:12px 15px}.p17-selected-profile>span{font-size:2rem}.p17-selected-profile div{display:grid;gap:2px;flex:1}.p17-selected-profile small{font-size:.74rem;color:#906e87}.p17-selected-profile strong{font-size:1.15rem}
+.p17-sponsor{background:#fff7fb;border:1px solid #efd9e5;border-radius:17px;padding:18px;margin:15px 0}.p17-sponsor .field{min-width:0}.p17-sponsor [hidden]{display:none!important}
+.p17-tour{text-align:center;justify-items:center}.p17-tour-emoji{font-size:4rem}.p17-tour p{max-width:450px;color:#80677a}.p17-tour .actions{justify-content:center}
+@media(max-width:620px){.p17-status-pill{font-size:.66rem;max-width:145px;padding:6px 8px}.p17-two{grid-template-columns:1fr}.p17-submission{align-items:flex-start;flex-direction:column}.p17-submission button{width:100%}.p17-selected-profile{flex-wrap:wrap}.p17-cloud-state .btn{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P17_BUILD}">${p17Css}</style>`);
+
 
 initialize();
 
