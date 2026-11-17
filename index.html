@@ -9817,6 +9817,215 @@ const P25_STYLE=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P25_BUILD}">${P25_STYLE}</style>`);
 
+
+/* ============================================================
+ Phase 6C.2B.2C · Family-facing polish and authentication clarity
+ Based on Phase 6C.2B.2B. All new preferences are presentation-only.
+ No IndexedDB or Firestore migration is required.
+ ============================================================ */
+const P26_BUILD='mlsg-6c2b2c-word-steps-auth-layout-20261117';
+state.p26={loginMethod:'',wordStep:0,revealFilipino:false,bookFlip:null};
+
+// Word study: one calm, focused activity at a time. Existing saved records
+// and the original award-free spelling handlers remain authoritative.
+const p26OldLearn=p22LearnPage;
+p22LearnPage=function(){
+ const root=document.createElement('div');root.innerHTML=p26OldLearn();
+ const practice=root.querySelector('.p22-practice');if(!practice)return root.innerHTML;
+ const sections=[...practice.querySelectorAll(':scope > section.panel')];
+ const date=state.p22.selectedDate||p22ManilaDate(),w=p22Word(date);
+ const labels=['📖 Discover','✏️ English Spelling','🇵🇭 Filipino Spelling','💌 My Sentence'];
+ const current=Math.max(0,Math.min(3,Number(state.p26.wordStep)||0));
+ const nav=document.createElement('nav');nav.className='p26-stepper';nav.setAttribute('aria-label','Word of the Day learning steps');
+ nav.innerHTML=labels.map((label,i)=>`<button type="button" data-p26-action="word-step" data-step="${i}" class="p26-step ${i===current?'active':''}" aria-current="${i===current?'step':'false'}"><span class="p26-step-circle">${i+1}</span><span>${label}</span></button>`).join('');
+ const head=root.querySelector('.p22-page-head');if(head)head.after(nav);else practice.prepend(nav);
+ sections.forEach((section,i)=>{section.hidden=i!==current;section.classList.toggle('p26-active-panel',i===current);});
+ const active=sections[current];
+ if(active){
+  const next=document.createElement('div');next.className='p26-step-actions';
+  if(current>0)next.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-plain" data-p26-action="word-step" data-step="${current-1}">← Previous</button>`);
+  if(current===0)next.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-soft" data-p26-action="word-step" data-step="1" ${!p22Has('discover',date,w.id)?'disabled':''}>Next: Spelling →</button>`);
+  if(current===1)next.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-soft" data-p26-action="word-step" data-step="2" ${!p22Has('spell',date,w.id)?'disabled':''}>Next: Filipino →</button>`);
+  if(current===2){
+    next.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-soft" data-p26-action="word-step" data-step="3">${p22Has('filipino',date,w.id)?'Continue →':'Skip optional challenge →'}</button>`);
+    if(!p22Has('filipino',date,w.id))active.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-plain btn-small" data-p26-action="reveal-filipino">${state.p26.revealFilipino?'Hide answer':'Reveal answer for practice'}</button>`);
+  }
+  if(current===3)next.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-soft" data-p26-action="word-finish">🌷 Return to My Word Garden</button>');
+  active.append(next);
+ }
+ // Conceal BOTH the Filipino word and example sentence until the child
+ // finishes practice or intentionally reveals them. Never conceal instructions.
+ if(current===2&&!p22Has('filipino',date,w.id)&&!state.p26.revealFilipino){
+  const fil=root.querySelector('.p22-filipino');if(fil){fil.querySelector('h3')?.replaceChildren(document.createTextNode('• '.repeat(Math.min(12,w.fil.length)).trim()));
+   const sample=fil.querySelector('p');if(sample)sample.textContent='The answer and sample sentence are hidden until you finish spelling.';
+   fil.classList.add('p26-masked');}
+  const wordHero=root.querySelector('.p22-word-hero h2'); // The English answer may remain visible for this Filipino challenge.
+  const form=active?.querySelector('#p22-fil-form');form?.insertAdjacentHTML('afterbegin','<p class="p26-spelling-help">Think of the Filipino counterpart for the English word. You can reveal it if you need help—this is practice, not a test.</p>');
+ }
+ return root.innerHTML;
+};
+const p26OldSaveWord=p22Save;
+p22Save=async function(kind,date,w,more={}){
+ await p26OldSaveWord(kind,date,w,more);
+ if(state.view==='child'&&state.childTab==='p22-word'){
+  if(kind==='discover'&&state.p26.wordStep===0){state.p26.wordStep=1;state.p22.hideWord=true;}
+  if(kind==='spell'&&state.p26.wordStep===1){state.p26.wordStep=2;state.p22.hideWord=false;}
+  if(kind==='filipino'&&state.p26.wordStep===2){state.p26.wordStep=3;state.p26.revealFilipino=false;}
+ }
+};
+const p26OldOpenDate=p22OpenDate;
+p22OpenDate=function(date){state.p26.wordStep=0;state.p26.revealFilipino=false;return p26OldOpenDate(date);};
+
+// Sign-in has two explicit first choices instead of a buried password form.
+// A failed password attempt must always have a visible, accessible error.
+const p26OldSendUI=p16SendUI;
+p16SendUI=function(opts={}){
+ const orig=p26OldSendUI(opts),sent=Boolean(state.p16EmailSent);
+ const shell=document.createElement('div');shell.innerHTML=orig;
+ const originalPassword=shell.querySelector('.p23-password-alternative');
+ const passwordForm=originalPassword?.querySelector('.p23-password-inner')?.innerHTML||'';
+ originalPassword?.remove();
+ const current=state.p26.loginMethod;
+ const tabs=`<div class="p26-login-choices" role="group" aria-label="Choose how to sign in"><button type="button" data-p26-action="method-password" class="btn ${current==='password'?'btn-primary':'btn-soft'}">🔑 Sign In with Password</button><button type="button" data-p26-action="method-link" class="btn ${current==='link'?'btn-primary':'btn-soft'}">💌 Send Sign-In Link</button></div>`;
+ const error=state.p23.authError?`<div class="p26-login-error" role="alert">${esc(state.p23.authError)}</div>`:'';
+ const info=state.p23.authInfo?`<div class="p26-login-info" role="status">${esc(state.p23.authInfo)}</div>`:'';
+ if(sent)return `${shell.innerHTML}<p class="p26-signin-help">Having trouble getting a link? If your account already has a password, choose <strong>Sign In with Password</strong> after selecting a different email.</p>${error}${info}`;
+ if(current==='password')return `${tabs}${error}${info}<div class="p26-login-panel">${passwordForm||'<p role="alert">Password form unavailable. Please check your Firebase configuration.</p>'}</div>`;
+ if(current==='link')return `${tabs}${error}${info}<div class="p26-login-panel">${shell.innerHTML}<p class="p26-signin-help">If sending a sign-in link fails, try <strong>Sign In with Password</strong> instead (if you have already set one up).</p></div>`;
+ return `${tabs}<p class="p26-signin-intro">Choose how you want to connect your Guardian account. Your six-digit PIN will be requested after sign-in.</p>${error}${info}`;
+};
+// Reset the tab only when another Guardian is selected, not on every render.
+document.addEventListener('click',event=>{
+ const chosen=event.target.closest('[data-p16-action="choose"], [data-p16-action="confirm-switch"]');
+ if(chosen){state.p26.loginMethod='';state.p23.authError='';state.p23.authInfo='';}
+},true);
+// The old flow showed a small offline link under the form. Keep both exit
+// actions on the same row and avoid verbose button labels.
+const p26OldProfiles=p16ProfileScreen;
+p16ProfileScreen=function(){const root=document.createElement('div');root.innerHTML=p26OldProfiles();const card=root.querySelector('.p16-card');if(!card)return root.innerHTML;
+ const offline=card.querySelector('.p16-offline'),exit=card.querySelector('.p16-exit');
+ if(offline&&exit){offline.textContent='🌷 Continue offline';const row=document.createElement('div');row.className='p26-exit-row';exit.before(row);row.append(offline,exit);}
+ if(state.p23.authError&&!card.querySelector('.p26-login-error')){const stage=card.querySelector('.p16-stage');stage?.insertAdjacentHTML('afterbegin',`<p class="p26-login-error" role="alert">${esc(state.p23.authError)}</p>`);}
+ return root.innerHTML;
+};
+
+// Place the snapshot-retention note WITH the snapshot history and make the
+// Firebase setup card visually consistent with the owner's other sections.
+const p26OldCloud=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p26OldCloud();
+ const config=root.querySelector('.p22-owner-config-card');
+ const queue=root.querySelector('.p17-owner-queue');
+ if(config){config.classList.add('p26-owner-card');if(queue){config.style.backgroundColor='var(--paper)';}}
+ root.querySelectorAll('.p19-owner-warning').forEach(note=>{
+  const history=root.querySelector('.p19-history-section');
+  if(history){note.classList.add('p26-snapshot-note');const heading=history.querySelector('h3,h2');heading?.closest('.p14-row,.panel-head')?.insertAdjacentElement('afterend',note)||history.prepend(note);}
+ });
+ return root.innerHTML;
+};
+
+// Global render layout adjustments: avoid changing the underlying state,
+// reward transactions, PIN records, or cloud synchronization.
+const p26OldRender=render;
+render=function(){p26OldRender();
+ if(state.view==='child'){
+  if(state.childTab==='home'){
+   const root=app.querySelector('main .layout-stack');
+   if(root){
+    const headline=root.querySelector(':scope > section:first-child');
+    const wallet=[...root.children].find(x=>x.classList.contains('grid2')&&x.querySelector('.big-number'));
+    const album=root.querySelector('.p5a-home-album');
+    const word=root.querySelector('.p22-home-teaser');
+    const adventures=root.querySelector('.p61-today-overview')||[...root.children].find(x=>/Today.s adventures|Today.s Adventures/i.test(x.textContent||'')&&x.querySelector('h3')&&x!==album&&x!==word&&x!==headline);
+    // Wallet and quests come before the large keepsake collection.
+    if(wallet&&headline)headline.after(wallet);
+    if(adventures&&wallet&&adventures!==wallet)wallet.after(adventures);
+    if(word){
+      const today=p22ManilaDate(),w=p22Word(today);
+      if(p22Has('spell',today,w.id)){
+       word.classList.add('p26-word-completed');word.querySelector('h3').textContent='🌸 Today’s Word Complete';
+       const p=word.querySelector('p:not(.eyebrow)');if(p)p.textContent=`${w.en} · ${w.fil} · You can review it anytime.`;
+       const b=word.querySelector('button');if(b)b.textContent='Review word →';
+      }
+    }
+    if(album){album.classList.add('p26-home-stickers');const after=adventures||wallet||word;
+      if(after&&after!==album)after.after(album);
+    }
+   }
+  }
+  if(state.childTab==='world'&&state.p41Album){
+   const spread=app.querySelector('.p62-book-spread');const flip=state.p26.bookFlip;
+   if(flip&&spread&&flip.theme===state.p41Album){
+    const oldPage=flip.html;const wrap=spread.closest('.p62-book-wrap');
+    if(oldPage&&wrap){
+      const sheet=document.createElement('div');sheet.className='p26-turning-sheet '+(flip.dir==='prev'?'p26-flip-prev':'p26-flip-next');
+      sheet.innerHTML=oldPage;sheet.setAttribute('aria-hidden','true');sheet.inert=true;wrap.append(sheet);
+      sheet.addEventListener('animationend',()=>sheet.remove(),{once:true});setTimeout(()=>sheet.remove(),850);
+    }
+   }
+   state.p26.bookFlip=null;
+  }
+ }
+};
+// Record the old visible page before the book navigation swaps its contents.
+document.addEventListener('click',e=>{const b=e.target.closest('[data-p62-action="book-next"],[data-p62-action="book-prev"]');if(!b||b.disabled)return;
+ const spread=app.querySelector('.p62-book-spread');if(!spread)return;
+ const dir=b.dataset.p62Action==='book-prev'?'prev':'next';
+ const old=spread.querySelector(dir==='prev'?'.p62-book-page:first-child':'.p62-book-page:last-child');
+ state.p26.bookFlip={dir,theme:state.p41Album,html:old?.outerHTML||''};
+},true);
+app.addEventListener('click',e=>{const b=e.target.closest('[data-p26-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();const a=b.dataset.p26Action;
+ if(a==='method-password'||a==='method-link'){state.p26.loginMethod=a==='method-password'?'password':'link';state.p23.authError='';state.p23.authInfo='';render();return;}
+ if(a==='word-step'){state.p26.wordStep=Math.max(0,Math.min(3,Number(b.dataset.step)||0));state.p26.revealFilipino=false;state.p22.hideWord=state.p26.wordStep===1;render();return;}
+ if(a==='reveal-filipino'){state.p26.revealFilipino=!state.p26.revealFilipino;render();return;}
+ if(a==='word-finish'){state.childTab='p22-garden';state.p26.wordStep=0;render();return;}
+},true);
+const P26_STYLES=`
+/* Keep content inside the viewport in Share Today's Progress. */
+.p68-share-overlay{padding:clamp(8px,3vw,25px)!important;overflow-x:hidden!important;overflow-y:auto!important}
+.p68-share-dialog,.p68-share-dialog form,.p68-share-dialog .p12-stat-grid{min-width:0!important;max-width:100%!important;box-sizing:border-box!important}
+.p68-share-dialog{width:min(680px,100%)!important;max-height:min(93dvh,900px)!important;overflow-x:hidden!important;overflow-y:auto!important;overflow-wrap:anywhere}
+.p68-share-dialog input,.p68-share-dialog textarea,.p68-share-dialog select{width:100%;min-width:0;max-width:100%}
+.p68-share-dialog .p2-actions{display:flex;flex-wrap:wrap;gap:9px}
+@media(max-width:600px){.p68-share-dialog{padding:clamp(13px,4vw,21px)!important;max-height:calc(100dvh - 30px)!important}.p68-share-dialog .p2-actions>button{flex:1 1 145px;min-width:0}.p12-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+/* Family settings align with the other owner tools. */
+.p22-owner-config-card.p26-owner-card,.p23-white-owner-config.p26-owner-card{background:var(--paper)!important;box-shadow:var(--shadow)!important;border:1px solid var(--line)!important}
+.p26-snapshot-note{display:block;font-size:.82rem;line-height:1.5;color:#816678;background:#fff7f9;border:1px solid #eddbe5;border-radius:12px;padding:10px 13px;margin:12px 0!important}
+/* Guide the child through one word activity at a time. */
+.p22-practice>section[hidden]{display:none!important}
+.p26-stepper{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:10px 0 16px}
+.p26-step{border:1px solid #ebd5e3;border-radius:12px;background:#fffdfc;color:#87677b;padding:9px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;font:inherit;font-size:.77rem;line-height:1.3;min-width:0}
+.p26-step.active{border-color:#b77b9e;background:#f9eaf2;color:#78425f;font-weight:800}
+.p26-step-circle{border-radius:50%;background:#f2dfec;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;font-weight:800}
+.p26-step.active .p26-step-circle{background:#af668f;color:white}
+.p26-step-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:16px}
+.p26-masked h3{letter-spacing:.14em;font-size:1.35rem!important;overflow-wrap:anywhere}
+.p26-spelling-help{background:#fff5f9;border-radius:10px;padding:10px;font-size:.9rem}
+.p26-word-completed{padding:13px 16px!important;gap:8px}.p26-word-completed .eyebrow{font-size:.68rem}.p26-word-completed h3{font-size:1.03rem}
+/* Prioritize the star wallet and daily adventures, keep the sticker book. */
+.p26-home-stickers{padding:14px 18px!important}.p26-home-stickers .p5a-collection-covers{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important;margin:10px 0!important}
+.p26-home-stickers .p5a-theme-cover{padding:8px 4px!important;min-height:0!important}.p26-home-stickers .p5a-theme-cover span{font-size:1.3rem!important}.p26-home-stickers .p5a-cover-head h2{font-size:1.2rem}
+.p26-home-stickers .p5a-achievement-teaser{font-size:.77rem}
+/* Less jarring storybook spread transitions with a turned sheet. */
+.p62-book-wrap{position:relative;isolation:isolate;overflow:hidden}
+.p26-turning-sheet{position:absolute;top:12px;bottom:12px;width:calc(50% - 12px);z-index:15;pointer-events:none;backface-visibility:hidden;transform-style:preserve-3d;filter:drop-shadow(0 5px 6px #784b5a33)}
+.p26-turning-sheet .p62-book-page{height:100%;width:100%}
+.p26-flip-next{right:12px;transform-origin:left center;animation:p26turnNext .67s ease-in-out both}
+.p26-flip-prev{left:12px;transform-origin:right center;animation:p26turnPrev .67s ease-in-out both}
+@keyframes p26turnNext{0%{opacity:1;transform:perspective(850px) rotateY(0)}82%{opacity:.7}100%{opacity:0;transform:perspective(850px) rotateY(-145deg)}}
+@keyframes p26turnPrev{0%{opacity:1;transform:perspective(850px) rotateY(0)}82%{opacity:.7}100%{opacity:0;transform:perspective(850px) rotateY(145deg)}}
+/* Clear equal-footing sign-in choices and responsive exit buttons. */
+.p26-login-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:13px 0}
+.p26-login-choices button{min-width:0;white-space:normal;line-height:1.25;min-height:55px}
+.p26-login-panel{background:#fff9fc;border:1px solid #efd8e5;border-radius:16px;padding:16px;min-width:0}
+.p26-signin-intro,.p26-signin-help{font-size:.85rem;color:#8c6b81;margin:12px 0}
+.p26-login-error{padding:12px 14px;background:#fff0ed;border:1px solid #dcb3b4;border-radius:12px;color:#803f4c;font-size:.9rem;margin:10px 0;overflow-wrap:anywhere}
+.p26-login-info{padding:12px 14px;background:#eff8f0;border-radius:12px;color:#476c54;font-size:.9rem;margin:10px 0}
+.p26-exit-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}.p26-exit-row>*{flex:1 1 150px;min-width:0;margin:0!important}
+@media(max-width:650px){.p26-home-stickers .p5a-collection-covers{grid-template-columns:repeat(2,minmax(0,1fr))!important}.p26-stepper{grid-template-columns:repeat(2,minmax(0,1fr))}.p26-turning-sheet{inset:7px 7px auto!important;width:calc(100% - 14px);height:45%;transform-origin:center center;animation:p26MobilePage .48s ease-out both}@keyframes p26MobilePage{from{opacity:.9;transform:translateX(0) scale(1)}to{opacity:0;transform:translateX(-10%) scale(.96)}}}
+@media(prefers-reduced-motion:reduce){.p26-turning-sheet{animation:none!important;display:none!important}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P26_BUILD}">${P26_STYLES}</style>`);
+
 initialize();
 
 </script>
