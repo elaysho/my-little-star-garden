@@ -7,7 +7,7 @@
   <meta name="description" content="A little world for growing routines, collecting stars, and celebrating progress.">
   <meta name="color-scheme" content="light">
   
-  <title>My Little Star Garden — Phase 6B.3 Standalone</title>
+  <title>My Little Star Garden — Child Polish & Sharing</title>
 <style>
 :root{
  --ink:#594459;--muted:#8a7186;--rose:#d88cad;--rose-dark:#914b73;--rose-light:#f9dfeb;
@@ -6605,6 +6605,420 @@ const p11Styles=`
 @media(max-width:420px){.p11-stat-grid{grid-template-columns:minmax(0,1fr)}.p11-stat{grid-template-columns:auto 1fr;align-items:center}.p11-voucher-panel .p2-actions.p11-voucher-actions{grid-template-columns:1fr}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="p11-history-refinement">${p11Styles}</style>`);
+
+/* My Little Star Garden — Child polish & daily-sharing layout refinement.
+   Presentation only: keeps the stored ledger, Firebase configuration, PIN
+   authorization, selected-day attribution, and offline Family-Ready Builder. */
+const p12BuildId='mlsg-child-polish-sharing-20261117';
+
+// Adventure Journal belongs to navigation, not the Child Home action row.
+const p12PreviousShell=shell;
+shell=function(content,guardian=false){
+ const root=document.createElement('div');root.innerHTML=p12PreviousShell(content,guardian);
+ if(!guardian){
+  const nav=root.querySelector('.sidebar > .nav');
+  if(nav&&!nav.querySelector('[data-child-tab="journal"]')){
+   const button=document.createElement('div');button.innerHTML=navItem('journal','Adventure Journal','📔','child',state.childTab);
+   const quests=nav.querySelector('[data-child-tab="quests"]');
+   if(quests)quests.after(button.firstElementChild);else nav.append(button.firstElementChild);
+  }
+ }
+ return root.innerHTML;
+};
+
+// Keep the existing quest detail/approval actions. Move daily award progress
+// out of the title column so icons sit next to titles, even on long cards.
+const p12PreviousTaskCard=p2TaskCard;
+p2TaskCard=function(task,guardian=false,date=p2Date()){
+ const root=document.createElement('div');root.innerHTML=p12PreviousTaskCard(task,guardian,date);
+ const card=root.querySelector('.p2-card');
+ if(!card||guardian)return root.innerHTML;
+ card.classList.add('p12-quest-card');
+ const hero=card.querySelector(':scope > .p2-hero');
+ if(!hero)return root.innerHTML;
+ // Routine/checklist cards already have a distinct progress-step structure.
+ if(task?.type==='checklist'){
+  card.classList.add('p12-routine-card');
+  return root.innerHTML;
+ }
+ card.classList.add('p12-quest-award-card');
+ card.querySelectorAll('.p8-award-state, .p2-complete').forEach(node=>node.remove());
+ const comps=p11SavedTaskCompletions(date).filter(c=>c.taskId===task.id&&Number(c.starsAwarded)>0);
+ const awardCount=comps.length,earned=comps.reduce((sum,c)=>sum+Number(c.starsAwarded||0),0);
+ const perDay=task.frequency==='multi'?Math.max(1,Number(task.maxPerDay)||1):1;
+ const isPerDay=task.frequency==='multi'||task.frequency==='daily';
+ const finished=p2TaskFinished(task,date);
+ const capped=isPerDay?Math.min(perDay,awardCount):finished?1:0;
+ const label=isPerDay?`${capped} of ${perDay} ${perDay===1?'award':'awards'} today`:finished?'Award recorded':'Star progress';
+ const value=isPerDay?`${earned} ${earned===1?'star':'stars'} earned`:
+  `${earned} ${earned===1?'star':'stars'} earned${finished?' · Completed':''}`;
+ const progress=document.createElement('div');progress.className='p12-award-progress';
+ progress.setAttribute('role','status');
+ progress.innerHTML=`<span class="p12-progress-icon" aria-hidden="true">⭐</span><span class="p12-progress-copy"><strong>${esc(label)}</strong><small>${esc(value)}</small></span>${isPerDay?`<span class="p12-progress-marks" aria-label="${capped} of ${perDay} awards recorded">${Array.from({length:Math.min(5,perDay)},(_,i)=>`<span class="${i<capped?'is-filled':''}" aria-hidden="true"></span>`).join('')}</span>`:''}`;
+ hero.after(progress);
+ return root.innerHTML;
+};
+
+// Daily share belongs alongside the bell, with a full accessible label.
+const p12PreviousChild=child;
+child=function(){
+ const root=document.createElement('div');root.innerHTML=p12PreviousChild();
+ if(state.view==='child'&&state.childTab==='home'){
+  root.querySelectorAll('.p8-daily-actions').forEach(el=>el.remove());
+  const header=root.querySelector('.p62-hello-row');
+  if(header&&!header.querySelector('[data-p8-action="daily-start"]')){
+   const group=document.createElement('div');group.className='p12-hello-actions';
+   const bell=header.querySelector('.p62-bell');
+   if(bell)group.append(bell);
+   group.insertAdjacentHTML('afterbegin',`<button type="button" class="p12-share-icon" data-p8-action="daily-start" title="Share My Day" aria-label="Share My Day as an approved PNG">💌</button>`);
+   header.append(group);
+  }
+ }
+ return root.innerHTML;
+};
+
+// Child and Guardian share dialogs get the SAME clear, left-aligned form.
+// Only the Child version requires a fresh Guardian PIN.
+function p12ShareSummary(snapshot){
+ return `<div class="p12-stat-grid" role="status" aria-live="polite">
+  <div class="p12-stat p12-stat-star"><span class="p12-stat-icon" aria-hidden="true">⭐</span><strong data-p12-stat="stars">${money(snapshot.stars)}</strong><small>Stars earned that day</small></div>
+  <div class="p12-stat"><span class="p12-stat-icon" aria-hidden="true">✨</span><strong data-p12-stat="lifetime">${money(snapshot.lifetime)}</strong><small>Current lifetime stars</small></div>
+  <div class="p12-stat"><span class="p12-stat-icon" aria-hidden="true">📖</span><strong data-p12-stat="quests">${money(snapshot.completedTasks)}</strong><small>Quests completed</small></div>
+  <div class="p12-stat"><span class="p12-stat-icon" aria-hidden="true">🌷</span><strong data-p12-stat="rules">${money(snapshot.followedRules)}</strong><small>Rules followed</small></div>
+ </div>`;
+}
+function p12UpdateShareSummary(snapshot){
+ const wrap=document.querySelector('.p12-stat-grid');if(!wrap)return;
+ const items={stars:snapshot.stars,lifetime:snapshot.lifetime,quests:snapshot.completedTasks,rules:snapshot.followedRules};
+ for(const [key,val] of Object.entries(items)){const el=wrap.querySelector(`[data-p12-stat="${key}"]`);if(el)el.textContent=money(val);}
+}
+p8DailyModal=function(){
+ if(!state.p8DailyShareOpen)return '';
+ const guardian=state.view==='guardian'&&safeGuardian();
+ const day=p11ShareDay(),snap=p11DayProgress(day);
+ const name=esc(state.profile?.nickname||'Little Star');
+ const title=guardian?"Share Today's Progress":"Share My Day!";
+ const heading=guardian?'Prepare a lovely progress card to share with family.':'Celebrate the little victories you want to show your family.';
+ const go=guardian?
+ `<button type="button" class="btn btn-primary" data-p9-action="guardian-daily-png">🌟 Create Share PNG</button>`:
+ `<button type="submit" class="btn btn-primary">🔐 Approve Share PNG</button>`;
+ const pin=guardian?'<div class="p12-guardian-ok">🔓 You are signed in as a Guardian. No extra PIN needed.</div>':
+  `<div class="p12-pin"><label for="p12-guardian-pin">Guardian PIN <span class="p12-label-note">(Guardian approval required)</span></label><input id="p12-guardian-pin" type="password" name="pin" pattern="[0-9]{6}" minlength="6" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="6-digit PIN" required></div>`;
+ const body=`<div class="p68-share-overlay" role="presentation"><div class="p68-share-dialog p12-share-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+  <div class="p12-dialog-heading"><div class="p12-dialog-title"><span class="p12-title-art" aria-hidden="true">${guardian?'🌸':'🌟'}</span><div><p class="eyebrow">Little victories · Big smiles</p><h2>${esc(title)}</h2><p class="p12-intro">${heading}</p></div></div><button type="button" class="p12-close-icon" data-p8-action="daily-close" aria-label="Close sharing dialog">✕</button></div>
+  <form ${guardian?'id="p12-guardian-daily-form"':'id="p8-daily-share-form"'} class="p12-share-form">
+   <section class="p12-dialog-section"><div class="p12-section-heading"><label for="p11-share-date">📅 Choose a day</label><span>Today or an earlier date</span></div><input type="date" id="p11-share-date" max="${p2Date()}" value="${day}" required><p class="p12-helper">Task and rule stars count toward the day they were completed, even when approved later.</p></section>
+   <section class="p12-dialog-section p12-progress-section"><div class="p12-section-heading"><strong>✨ ${name}'s little victories</strong><span>For your selected day</span></div>${p12ShareSummary(snap)}</section>
+   <section class="p12-dialog-section"><label class="p12-message-label" for="p12-share-message">💌 A message for your family <span>(optional)</span></label><textarea id="p12-share-message" name="p10DailyMessage" maxlength="150" rows="2" placeholder="A little note to make them smile..."></textarea><p class="p12-helper">This appears on the PNG. Leave blank for a cheerful message.</p></section>
+   ${pin}
+   <div class="p12-dialog-footer"><div class="p2-actions">${go}<button type="button" class="btn btn-plain" data-p8-action="daily-close">Cancel</button></div><p>🔒 Nothing is sent automatically. You can share or save the PNG after approval.</p></div>
+  </form>
+ </div></div>`;
+ return body;
+};
+// The earlier date change handler updates a legacy text summary. Refresh the
+// new four-column graphic without rerendering away a typed family message.
+document.addEventListener('change',event=>{
+ if(event.target.id!=='p11-share-date')return;
+ const date=event.target.value;if(p11Date(date))p12UpdateShareSummary(p11DayProgress(date));
+},true);
+
+// Redesigned, self-contained 16:9 picture: full-height star column and right
+// stack of Quests → Rules → family message. Actual awards come from snapshot.
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=900;
+ const ctx=canvas.getContext('2d');if(!ctx)throw Error('PNG images are not supported in this browser.');
+ const fillBg=ctx.createLinearGradient(0,0,1600,900);fillBg.addColorStop(0,'#fff8fb');fillBg.addColorStop(.6,'#fff0f7');fillBg.addColorStop(1,'#ecf1ff');ctx.fillStyle=fillBg;ctx.fillRect(0,0,1600,900);
+ p10RoundRect(ctx,42,38,1516,824,42,'#fffdfcf9','#e9c4d7');
+ ctx.textAlign='left';ctx.fillStyle='#a46188';ctx.font='800 26px system-ui';ctx.fillText('MY LITTLE STAR GARDEN  ✦  DAILY ADVENTURES',91,96);
+ const dateString=new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+ ctx.textAlign='right';ctx.fillStyle='#84667a';ctx.font='28px system-ui';ctx.fillText(dateString,1498,96);
+ ctx.textAlign='left';ctx.fillStyle='#643e59';ctx.font='800 49px system-ui';
+ p10TextLine(ctx,`${String(snapshot.nickname||'Little Star').slice(0,24)}'s Little Victories`,96,171,1375,54,1);
+ // Left summary: same baseline as the three stacked right panels.
+ const lx=96,ly=208,lw=419,lh=588;
+ p10RoundRect(ctx,lx,ly,lw,lh,31,'#f8deeb','#edc6d9');
+ ctx.textAlign='center';ctx.fillStyle='#a75d82';ctx.font='91px serif';ctx.fillText('⭐',lx+lw/2,ly+126);
+ ctx.font='800 122px system-ui';ctx.fillStyle='#7d4065';ctx.fillText(String(snapshot.stars||0),lx+lw/2,ly+258);
+ ctx.font='800 25px system-ui';ctx.fillText('STARS EARNED THAT DAY',lx+lw/2,ly+307);
+ ctx.font='24px system-ui';ctx.fillStyle='#90718a';ctx.fillText(`${snapshot.completedTasks||0} quests · ${snapshot.followedRules||0} rules`,lx+lw/2,ly+361);
+ ctx.beginPath();ctx.moveTo(lx+42,ly+393);ctx.lineTo(lx+lw-42,ly+393);ctx.strokeStyle='#dcb5ca';ctx.lineWidth=2;ctx.stroke();
+ ctx.fillStyle='#895176';ctx.font='800 56px system-ui';ctx.fillText(`✨ ${snapshot.lifetime||0}`,lx+lw/2,ly+473);
+ ctx.font='800 20px system-ui';ctx.fillText('CURRENT LIFETIME STARS',lx+lw/2,ly+516);
+ ctx.fillStyle='#a17d94';ctx.font='17px system-ui';ctx.fillText('Every little achievement counts',lx+lw/2,ly+550);
+ const rightX=547,rightW=951;
+ function awardSection(title,rows,y,empty){
+  const height=180;
+  p10RoundRect(ctx,rightX,y,rightW,height,25,'#fffafd','#eddae5');
+  ctx.textAlign='left';ctx.fillStyle='#935477';ctx.font='800 24px system-ui';ctx.fillText(title,rightX+25,y+39);
+  if(!(rows||[]).length){ctx.fillStyle='#927c8a';ctx.font='25px system-ui';ctx.fillText(empty,rightX+30,y+109);return;}
+  const left=rightX+25,colW=282,colGap=18;
+  rows.slice(0,3).forEach((item,index)=>{
+   const x=left+index*(colW+colGap),cardY=y+53;
+   p10RoundRect(ctx,x,cardY,colW,111,16,'#fff0f7');
+   ctx.fillStyle='#81516c';ctx.textAlign='left';ctx.font='31px serif';ctx.fillText(String(item.icon||'⭐'),x+13,cardY+39);
+   ctx.fillStyle='#6d455d';ctx.font='700 20px system-ui';
+   p10TextLine(ctx,String(item.name||'Little victory'),x+57,cardY+31,colW-68,23,2);
+   ctx.fillStyle='#a05d82';ctx.font='800 19px system-ui';
+   const awarded=Math.max(0,Number(item.stars)||0);
+   ctx.fillText(`+${awarded} ⭐ earned`,x+57,cardY+94);
+  });
+ }
+ awardSection('📖  TOP QUESTS COMPLETED',snapshot.topQuests,208,'The next quest adventure awaits!');
+ awardSection('🌼  RULES FOLLOWED',snapshot.topRules,404,'Little victories are worth celebrating!');
+ const messageY=600,messageH=196;
+ p10RoundRect(ctx,rightX,messageY,rightW,messageH,25,'#fff0f7','#f1d9e5');
+ ctx.textAlign='left';ctx.fillStyle='#965477';ctx.font='800 25px system-ui';ctx.fillText('💌  A MESSAGE FOR FAMILY',rightX+27,messageY+46);
+ const written=String(message||'').trim().slice(0,150)||'Every little star is a reason to celebrate!';
+ ctx.font='italic 700 27px system-ui';ctx.fillStyle='#774a68';
+ p10TextLine(ctx,written,rightX+31,messageY+97,rightW-70,35,3);
+ ctx.textAlign='right';ctx.fillStyle='#a17c92';ctx.font='19px system-ui';
+ ctx.fillText(`Shared with love · Approved by ${String(guardianName||'Guardian').slice(0,35)}`,1495,836);
+ return canvas;
+};
+
+const p12CSS=`
+/* Child Home header: share beside notifications. */
+.p12-hello-actions{display:flex;align-items:center;gap:9px;margin-left:auto;flex:none}
+.p12-share-icon,.p12-close-icon{display:grid;place-items:center;cursor:pointer;border:1px solid #efd0df;background:#fff5fa;color:#8a5172;border-radius:16px}
+.p12-share-icon{width:50px;height:50px;font-size:1.4rem;box-shadow:0 5px 14px #a25e8521}
+.p12-share-icon:hover{background:#fce4f0}.p12-hello-actions .p62-bell{flex:none}
+.p62-hello-row .grow{min-width:0}
+/* Uniform task header and one consistent award panel across daily frequencies. */
+.p12-quest-card{display:flex;flex-direction:column;gap:0;min-width:0}
+.p12-quest-card>.p2-hero{align-items:flex-start;min-width:0;gap:13px}
+.p12-quest-card>.p2-hero>.p2-symbol{flex:none;align-self:flex-start;margin:0}
+.p12-quest-card>.p2-hero>.grow{min-width:0;flex:1}
+.p12-quest-card>.p2-hero h3{margin:0 0 9px;line-height:1.3;overflow-wrap:anywhere}
+.p12-quest-card>.p2-hero .p2-muted{margin:0;line-height:1.45}
+.p12-quest-card>.p2-hero>.p2-pill{margin-top:2px;flex:none}
+.p12-award-progress{display:flex;align-items:center;gap:9px;margin-top:14px;border:1px solid #f2dce8;border-radius:14px;background:#fff5fa;padding:10px 12px;min-width:0;line-height:1.35;color:#81506f}
+.p12-progress-icon{font-size:1.2rem;line-height:1;flex:none}
+.p12-progress-copy{display:grid;gap:3px;flex:1;min-width:0}
+.p12-progress-copy strong{font-size:.8rem}.p12-progress-copy small{font-size:.73rem;color:#9a738a}
+.p12-progress-marks{display:flex;gap:4px;flex:none}
+.p12-progress-marks span{width:9px;height:9px;border-radius:50%;border:1.5px solid #dcb2c9;background:white}
+.p12-progress-marks span.is-filled{background:#c97da3;border-color:#c97da3}
+.p12-quest-card>.p2-task-actions{margin-top:auto;padding-top:13px}
+.p12-routine-card>.p2-task-actions{margin-top:auto}
+.p12-quest-card>.p2-hero .p5b-new-tag{display:inline-block;vertical-align:baseline;margin-right:4px}
+/* Star counter stays on left, sound + Guardian on the right at mobile widths. */
+@media(max-width:820px){
+ .topbar{display:flex;align-items:center;justify-content:flex-end;flex-wrap:nowrap;min-width:0}
+ .topbar>.mode-tag{display:none}
+ .topbar>.row{display:flex;align-items:center;width:100%;min-width:0;justify-content:flex-end;flex-wrap:nowrap;gap:6px}
+ .topbar>.row>.wallet{order:-1;margin-right:auto;font-size:.98rem;padding:7px 12px}
+ .topbar>.row>.p66-header-sound{flex:none}
+ .topbar>.row>.btn{flex:none;white-space:nowrap}
+}
+/* Shared left-aligned, accessible share modal for Child and Guardian. */
+.p68-share-dialog.p12-share-dialog{width:min(100%,690px);max-height:min(94dvh,1000px);padding:0!important;text-align:left!important;border-radius:26px;overflow-y:auto;background:#fffafd;box-shadow:0 28px 80px #422c4266}
+.p12-share-dialog *{box-sizing:border-box}
+.p12-dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:26px 30px 20px;border-bottom:1px solid #f1dce8}
+.p12-dialog-title{display:flex;align-items:flex-start;gap:13px;min-width:0}
+.p12-title-art{font-size:1.7rem;background:#ffe8f2;border-radius:15px;width:52px;height:52px;display:grid;place-items:center;flex:none}
+.p12-dialog-title .eyebrow{font-size:.71rem;margin:0 0 4px}
+.p12-dialog-title h2{font-size:clamp(1.4rem,3vw,1.9rem);margin:0;line-height:1.15}
+.p12-intro{margin:9px 0 0;color:#886f80;line-height:1.48;font-size:.88rem}
+.p12-close-icon{width:37px;height:37px;border-radius:12px;flex:none;font-size:1.03rem}
+.p12-share-form{padding:0 30px 26px;display:grid;gap:0;min-width:0}
+.p12-dialog-section{padding:18px 0;border-bottom:1px solid #f2e4eb;min-width:0}
+.p12-section-heading{display:flex;gap:10px;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap}
+.p12-section-heading label,.p12-section-heading strong,.p12-message-label{font-size:.95rem;color:#63435b;font-weight:900}
+.p12-section-heading>span{color:#997d90;font-size:.76rem}
+.p12-share-form #p11-share-date{display:block;width:100%;max-width:100%;min-height:48px;padding:10px 13px;border:1px solid #e6cddd;background:white;border-radius:13px;color:var(--ink);font-size:1rem}
+.p12-share-dialog .p12-helper{font-size:.75rem;color:#987c90;line-height:1.5;margin:7px 0 0}
+.p12-stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:0!important;text-align:left;min-width:0}
+.p12-stat{background:#fff4f9;border:1px solid #f2e2eb;border-radius:14px;padding:12px 10px;display:grid;align-content:start;gap:4px;min-width:0;color:#7b5070}
+.p12-stat-star{background:#fff0da;border-color:#fae5c3;color:#7d5b3c}
+.p12-stat-icon{font-size:1.2rem}.p12-stat strong{font-size:1.34rem;line-height:1.15;font-weight:900}
+.p12-stat small{font-size:.7rem;line-height:1.3;color:#987b90}
+.p12-message-label{display:block;margin-bottom:10px}.p12-message-label span{color:#9c8193;font-weight:500;font-size:.8rem}
+.p12-share-form textarea{min-height:82px;border:1px solid #e7cedd;border-radius:13px;padding:12px 14px;resize:vertical;display:block;width:100%;max-width:100%;background:#fff;line-height:1.5}
+.p12-pin{display:grid;gap:9px;padding:18px 0 0}
+.p12-pin label{font-weight:800;color:#62465d}.p12-label-note{font-size:.75rem;color:#96798d;font-weight:500}
+.p12-share-form .p12-pin input{height:47px;min-width:0;width:100%;max-width:100%;border:1px solid #e6cddd;background:#fff;border-radius:13px;padding:10px 13px;letter-spacing:.08em}
+.p12-guardian-ok{margin-top:15px;border-radius:12px;padding:13px 14px;background:#f1f6f0;color:#557b5f;font-size:.81rem;font-weight:700}
+.p12-dialog-footer{padding:20px 0 0;display:grid;gap:10px}
+.p12-dialog-footer .p2-actions{display:flex;justify-content:flex-start;gap:10px;margin:0}
+.p12-dialog-footer .btn{min-height:46px;line-height:1.3}
+.p12-dialog-footer p{font-size:.75rem;color:#9a8191;line-height:1.55;margin:0!important;text-align:left}
+@media(max-width:650px){
+ .p12-hello-actions{gap:6px}.p12-hello-actions .p62-bell,.p12-share-icon{width:44px;height:44px;font-size:1.23rem}
+ .p12-quest-card>.p2-hero{gap:10px}.p12-quest-card>.p2-hero>.p2-symbol{width:45px;height:45px;font-size:1.5rem}
+ .p12-quest-card>.p2-hero .p2-pill{font-size:.7rem;padding:5px 7px}
+ .p12-progress-marks span{width:7px;height:7px}
+ .p68-share-overlay{padding:9px;align-items:center}
+ .p12-dialog-heading{padding:20px 18px 16px}.p12-share-form{padding:0 18px 20px}
+ .p12-title-art{width:43px;height:43px;font-size:1.4rem}.p12-dialog-title{gap:10px}
+ .p12-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .p12-stat{grid-template-columns:30px auto;grid-template-rows:auto auto;gap:1px 6px;align-items:center;padding:10px}
+ .p12-stat-icon{grid-row:1/3}.p12-stat strong{font-size:1.15rem}.p12-stat small{font-size:.68rem}
+ .p12-dialog-footer .p2-actions{display:grid;grid-template-columns:minmax(0,1fr) auto}.p12-dialog-footer .btn{font-size:.84rem;padding:10px}
+}
+@media(max-width:360px){.p12-progress-marks{display:none}.topbar>.row>.btn{padding:7px 8px;font-size:.72rem}.p12-stat-grid{gap:6px}}
+@media(prefers-reduced-motion:reduce){.p12-share-icon,.p12-share-dialog *{transition:none!important;animation:none!important}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${p12BuildId}">${p12CSS}</style>`);
+
+/* My Little Star Garden — Guardian Entry: Family-Ready sign-in first.
+   UI-only auth routing, intentionally no IndexedDB mutations or automatic syncing.
+   Keep existing PIN verification, cloud conflict resolution, and fresh-device onboarding. */
+const P13_GUARDIAN_ENTRY_BUILD='mlsg-family-ready-guardian-entry-20261117';
+// Embedded family settings, not leftover localStorage from a different copy,
+// identify which workspace this Family-Ready HTML belongs to.
+let p13ValidEmbeddedFamily=false;
+const p13Bootstrap=document.getElementById('p9-cloud-bootstrap');
+if(p13Bootstrap){
+ try{
+  const embedded=JSON.parse(p13Bootstrap.textContent||'{}');
+  const config=p8ValidatedFirebaseConfig(embedded.config);
+  if(!/^[a-zA-Z0-9_-]{10,128}$/.test(embedded.familyId||''))throw Error('Invalid embedded family workspace ID.');
+  state.p8Cloud.config=config;state.p8Cloud.familyId=embedded.familyId;
+  p13ValidEmbeddedFamily=true;
+  try{localStorage.setItem(P8_FIREBASE_CONFIG_KEY,JSON.stringify(config));localStorage.setItem(P8_FIREBASE_FAMILY_KEY,embedded.familyId);}catch{}
+ }catch(err){console.warn('Family-Ready configuration could not be read:',err.message);}
+}
+const p13PreviousFamilyReady=pcFamilyReady;
+pcFamilyReady=function(){return p13ValidEmbeddedFamily&&p13PreviousFamilyReady();};
+state.p13GuardianEntryError='';
+state.p13GuardianEmailSent='';
+
+function p13GuardianEntryPage(checking=false){
+ const ready=pcFamilyReady(),hosted=location.protocol==='https:';
+ const msg=state.p13GuardianEntryError;
+ return `<main class="center-layout p13-guardian-entry-layout"><section class="welcome-card p13-guardian-entry" aria-label="Guardian sign-in choice">
+ <div class="p13-entry-heading"><div class="p13-entry-art" aria-hidden="true">☁️</div><div><p class="eyebrow">Guardian Mode · Family-Ready Garden</p><h1>Welcome, Guardian! 💌</h1><p class="p13-entry-lead">Keep your family's Star Garden connected across devices.</p></div></div>
+ ${checking?`<div class="p13-checking" role="status" aria-live="polite"><span class="p13-loading-dot" aria-hidden="true"></span><div><strong>Checking your family sign-in…</strong><p>Already signed in? We'll take you straight to your Guardian PIN.</p></div></div>`:
+ `<section class="p13-signin-primary" aria-labelledby="p13-signin-title"><div class="p13-choice-heading"><span class="p13-choice-icon" aria-hidden="true">✨</span><div><span class="p13-recommended">Recommended</span><h2 id="p13-signin-title">Sign In &amp; Sync</h2></div></div><p class="p13-choice-copy">Use your family account to connect this browser with your shared garden. Your existing stars and quests stay safely on this device until you review a sync.</p>
+ ${!hosted?`<p class="p13-entry-warning">📡 Family sign-in needs your hosted HTTPS garden link. You can continue offline here, or open the family's website.</p>`:''}
+ ${state.p13GuardianEmailSent?`<div class="p13-email-success" role="status"><strong>💌 Check your email!</strong><p>A private sign-in link was sent to <strong>${esc(state.p13GuardianEmailSent)}</strong>. Open the link in this browser. When you return, you can unlock Guardian Mode with your usual PIN.</p><button type="button" class="p13-change-email" data-p13-action="change-email">Use a different email</button></div>`:
+ `<form id="p13-guardian-email-form" class="p13-email-form"><label for="p13-guardian-email">Guardian email address</label><input id="p13-guardian-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="parent@example.com" required ${hosted?'':'disabled'}><button class="btn btn-primary btn-wide" type="submit" ${hosted?'':'disabled'}>💌 Send Me a Sign-in Link</button></form>`}
+ <p class="p13-signin-note">No password needed. Only family-authorized Firebase accounts can access the shared garden.</p></section>
+ <div class="p13-choice-separator"><span>or</span></div>
+ <section class="p13-offline-choice"><div class="p13-offline-text"><h3>🌷 Continue Offline</h3><p>Use your local Guardian PIN without connecting to family sync. Progress will stay on this browser until you sync it later.</p></div><button type="button" class="btn btn-soft" data-p13-action="offline">Continue Offline →</button></section>
+ ${msg?`<p class="p13-entry-warning" role="alert">${esc(msg)}</p>`:''}
+ <button type="button" class="p13-return" data-p13-action="cancel">← Back to Child Mode</button>`}
+ ${!ready?'<p class="p13-entry-warning">This copy has no Family-Ready configuration. Guardian Mode uses the local PIN instead.</p>':''}
+ </section></main>`;
+}
+const p13PriorRender=render;
+render=function(){
+ if(state.view==='p13-guardian-choice'||state.view==='p13-guardian-checking'){
+  app.innerHTML=p13GuardianEntryPage(state.view==='p13-guardian-checking');
+  return;
+ }
+ p13PriorRender();
+};
+
+async function p13AuthIsSignedIn(){
+ const c=await p8CloudInit();
+ // Firebase Auth restores persisted credentials asynchronously, particularly
+ // when its own IndexedDB is populated. currentUser alone is not sufficient.
+ return new Promise(resolve=>{
+  let finished=false,unsubscribe=null;
+  const finish=user=>{
+   if(finished)return;finished=true;
+   clearTimeout(timeout);
+   if(unsubscribe)unsubscribe();
+   c.user=user||null;
+   resolve(Boolean(user));
+  };
+  const timeout=setTimeout(()=>finish(c.auth.currentUser),9000);
+  unsubscribe=c.auth.onAuthStateChanged(user=>finish(user),err=>{
+   state.p13GuardianEntryError=`Could not check the saved sign-in: ${err.message||'Unknown error'}. You can try signing in or continue offline.`;
+   finish(null);
+  });
+  if(finished&&unsubscribe)unsubscribe();
+ });
+}
+async function p13EnterGuardian(){
+ if(!pcFamilyReady()){state.view='pin';render();return;}
+ state.p13GuardianEntryError='';state.p13GuardianEmailSent='';
+ state.view='p13-guardian-checking';state.notice='';render();
+ let signed=false;
+ try{signed=await p13AuthIsSignedIn();}
+ catch(err){state.p13GuardianEntryError=`Sign-in could not be checked: ${err.message||'Connection unavailable'}. You can retry by email or continue offline.`;}
+ if(state.view!=='p13-guardian-checking')return;
+ state.view=signed?'pin':'p13-guardian-choice';render();
+}
+const p13PriorHandleAction=handleAction;
+handleAction=async function(action){
+ // Only the Guardian Mode button entry is gated. Task/reward approvals that
+ // already request the PIN keep their existing protected workflow.
+ if(action==='open-pin'&&state.view==='child'&&pcFamilyReady())return p13EnterGuardian();
+ return p13PriorHandleAction(action);
+};
+
+app.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-p13-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(!['p13-guardian-choice','p13-guardian-checking'].includes(state.view))return;
+ const action=button.dataset.p13Action;
+ if(action==='cancel'){state.p13GuardianEntryError='';state.view='child';render();return;}
+ if(action==='offline'){state.p13GuardianEntryError='';state.view='pin';render();return;}
+ if(action==='change-email'){state.p13GuardianEmailSent='';state.p13GuardianEntryError='';render();return;}
+},true);
+app.addEventListener('submit',async event=>{
+ if(event.target.id!=='p13-guardian-email-form')return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(state.view!=='p13-guardian-choice')return;
+ const email=String(new FormData(event.target).get('email')||'').trim().toLowerCase();
+ const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+ try{
+  if(!pcFamilyReady())throw Error('Open the configured Family-Ready garden on its HTTPS website.');
+  if(location.protocol!=='https:')throw Error('Open your family garden using the HTTPS link to sign in.');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw Error('Enter a valid guardian email address.');
+  await p9SendEmailSignIn(email);
+  state.p13GuardianEmailSent=email;state.p13GuardianEntryError='';render();
+ }catch(err){state.p13GuardianEntryError=err.message||'Could not send the sign-in link.';render();}
+ finally{if(button?.isConnected)button.disabled=false;}
+},true);
+
+// Email-link redirects reload the app. A device with an existing local garden
+// should land on the usual PIN page, not back in Child Mode or a sync-settings page.
+const p13PreviousEmailLink=p9HandleEmailLink;
+p9HandleEmailLink=async function(){
+ const completing=location.protocol==='https:'&&/[?&]oobCode=/.test(location.search);
+ await p13PreviousEmailLink();
+ if(completing&&pcFamilyReady()&&state.p8Cloud?.user&&!state.unlocked){
+  if(!state.profile)await refresh();
+  if(!state.profile||!await hasPin())return;
+  state.p13GuardianEntryError='';state.p13GuardianEmailSent='';state.view='pin';state.notice='';render();
+ }
+};
+
+const p13EntryCSS=`
+.p13-guardian-entry-layout{padding:22px 15px;align-items:center}
+.p13-guardian-entry{width:min(100%,640px);max-width:640px;padding:28px 30px;text-align:left;display:grid;gap:15px}
+.p13-entry-heading{display:flex;align-items:center;gap:16px;margin-bottom:5px}
+.p13-entry-art{width:64px;height:64px;display:grid;place-items:center;background:#f5e5f2;border:1px solid #f0d5e6;border-radius:20px;font-size:2rem;flex:none}
+.p13-entry-heading .eyebrow{margin:0 0 5px}.p13-entry-heading h1{margin:0;font-size:clamp(1.55rem,4vw,2rem);line-height:1.2}
+.p13-entry-lead{color:#866c81;font-size:.91rem;line-height:1.48;margin:7px 0 0}
+.p13-signin-primary{border:2px solid #e1a4c5;background:linear-gradient(145deg,#fff2f9,#fffbff);border-radius:20px;padding:20px;box-shadow:0 7px 22px #ba7ca521}
+.p13-choice-heading{display:flex;align-items:center;gap:12px}.p13-choice-icon{display:grid;place-items:center;width:44px;height:44px;background:#f9dce9;border-radius:14px;font-size:1.35rem}
+.p13-choice-heading h2{font-size:1.35rem;margin:3px 0 0;color:#67465f}
+.p13-recommended{display:inline-block;background:#dfb5d1;color:#653858;border-radius:999px;padding:3px 11px;font-size:.67rem;letter-spacing:.03em;text-transform:uppercase;font-weight:900}
+.p13-choice-copy{font-size:.86rem;line-height:1.55;color:#806b79;margin:13px 0 15px}
+.p13-email-form{display:grid;gap:9px}.p13-email-form label{font-size:.86rem;font-weight:850;color:#68485e}
+.p13-email-form input{background:white;width:100%;max-width:none;min-width:0;min-height:48px;border:1.5px solid #dfc2d3;border-radius:12px;padding:12px 13px;font:inherit}
+.p13-email-form .btn{width:100%;min-height:49px;font-size:.99rem}
+.p13-signin-note{font-size:.75rem;line-height:1.45;color:#916e83;margin:11px 0 0}
+.p13-email-success{border:1px solid #b6d9c4;background:#eff9f1;padding:14px;border-radius:14px;color:#456a55;font-size:.88rem;line-height:1.5;overflow-wrap:anywhere}
+.p13-email-success p{margin:7px 0}.p13-change-email{background:transparent;border:none;text-decoration:underline;color:#476e56;padding:5px 0;cursor:pointer;font:inherit;font-weight:700}
+.p13-choice-separator{display:flex;align-items:center;gap:12px;color:#9a8091;font-size:.78rem;text-transform:uppercase;font-weight:800}.p13-choice-separator:before,.p13-choice-separator:after{content:'';height:1px;flex:1;background:#ebdbe5}
+.p13-offline-choice{display:flex;align-items:center;gap:14px;justify-content:space-between;background:#fcf8fb;border:1px solid #ecd9e5;padding:16px 18px;border-radius:17px}
+.p13-offline-choice h3{font-size:.98rem;margin:0;color:#684c61}.p13-offline-choice p{font-size:.78rem;line-height:1.48;color:#947b8e;margin:6px 0 0}
+.p13-offline-text{min-width:0;flex:1}.p13-offline-choice .btn{white-space:nowrap;font-size:.82rem;flex:none}
+.p13-entry-warning{font-size:.82rem;line-height:1.5;background:#fff6ee;border:1px solid #eed3b4;color:#8b603a;border-radius:12px;padding:10px 12px;margin:10px 0}
+.p13-return{background:transparent;border:0;color:#926e86;text-align:center;justify-self:center;cursor:pointer;text-decoration:underline;padding:7px;font:inherit;font-size:.83rem}
+.p13-checking{display:flex;align-items:center;gap:15px;background:#fff4fa;border:1px solid #eed3e2;padding:21px;border-radius:17px;color:#75536b}
+.p13-checking p{margin:5px 0 0;font-size:.84rem;color:#8b7182}.p13-loading-dot{width:25px;height:25px;flex:none;border-radius:100%;border:3px solid #e3b5d0;border-top-color:#ae638b;animation:p13-spin .9s linear infinite}
+@keyframes p13-spin{to{transform:rotate(360deg)}}
+@media(max-width:620px){.p13-guardian-entry-layout{padding:10px}.p13-guardian-entry{padding:20px 17px;gap:13px;border-radius:20px}.p13-entry-heading{gap:10px}.p13-entry-art{width:50px;height:50px;font-size:1.55rem;border-radius:15px}.p13-signin-primary{padding:16px}.p13-offline-choice{display:grid;gap:12px;padding:14px}.p13-offline-choice .btn{width:100%}}
+@media(prefers-reduced-motion:reduce){.p13-loading-dot{animation:none}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P13_GUARDIAN_ENTRY_BUILD}">${p13EntryCSS}</style>`);
 
 initialize();
 
