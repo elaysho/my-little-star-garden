@@ -7,7 +7,7 @@
   <meta name="description" content="A little world for growing routines, collecting stars, and celebrating progress.">
   <meta name="color-scheme" content="light">
   
-  <title>My Little Star Garden — Phase 6C.1.2 Family Sync</title>
+  <title>My Little Star Garden — Phase 6C.2A Navigation Polish</title>
 <style>
 :root{
  --ink:#594459;--muted:#8a7186;--rose:#d88cad;--rose-dark:#914b73;--rose-light:#f9dfeb;
@@ -4467,7 +4467,7 @@ state.p68PauseOpen=false;
 const p68GuardianNav=[['dashboard','🏡','Home'],['p61-review-center','💌','Review'],['manage','📝','Manage']];
 const p68ChildNav=[['home','🏡','Home'],['quests','📖','Quests'],['shop','🎁','Shop']];
 const p68ChildExtras=[['rules','🛡️','My Rules'],['world','🌷','Stickers'],['tickets','🎟️','Tickets'],['wishes','💌','My Wishes']];
-const p68GuardianExtras=[['history','📊','History & Reports'],['settings','⚙️','Settings'],['p64-guardians','👨‍👩‍👧','Guardian Profiles']];
+const p68GuardianExtras=[['p19-daily','📅','Daily Journey'],['history','📊','History & Reports'],['settings','⚙️','Settings & Backup'],['p64-guardians','👨‍👩‍👧','Guardian Profiles']];
 const p68OldShell=shell;
 shell=function(content,guardian=false){
  let html=p68OldShell(content,guardian);
@@ -8690,6 +8690,315 @@ const p17Css=`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P17_BUILD}">${p17Css}</style>`);
 
+
+/* ==============================================================
+   Phase 6C.1.4 A+B · Guardian Usability and Owner Administration
+   Built on 6C.1.3; preserves IndexedDB / snapshot schema.
+   Deliberately does not grant the browser permission to permanently
+   delete historical snapshots or perform server-trusted resets.
+   ============================================================== */
+const P19_BUILD='mlsg-6c1.4-guardian-ux-owner-settings-20261117';
+state.p19={syncFeedback:null,publishing:false,ownerFocus:false,showArchived:false,archiving:false,
+ pages:{},pageSize:10,dailyDate:p2Date(),previousGuardianTab:'dashboard',resume:null};
+const p19ResumptionKey='mlsg-guardian-last-page-v1';
+const p19IsOwner=()=>p14OwnerVerified()||p14OwnerBootstrap();
+const p19CacheRoute=()=>{if(state.view!=='guardian'||!safeGuardian())return;try{sessionStorage.setItem(p19ResumptionKey,JSON.stringify({page:state.guardianTab,profile:state.p64CurrentGuardian,at:Date.now()}));}catch{}};
+function p19ReviewRoute(){const t=state.guardianTab;return ['p8-cloud','p19-daily','history','p5b-reports','settings','dashboard','manage','p61-review-center'].includes(t)?t:'dashboard';}
+const p19OldLock=lockGuardian;
+lockGuardian=function(message){p19CacheRoute();return p19OldLock(message);};
+const p19OldUnlock=p16UnlockGuardian;
+p16UnlockGuardian=async function(pin){const result=await p19OldUnlock(pin);
+ if(state.view==='guardian'&&safeGuardian()&&state.p19.resume){
+  const target=state.p19.resume;state.p19.resume=null;
+  state.guardianTab=target;render();
+ }
+ return result;
+};
+// A reload does not silently re-enable privileged state: we restore the page
+// *after the selected Guardian re-enters their PIN*. Returning to a suspended
+// tab within the valid five-minute window does not unnecessarily log out.
+const p19OldInit=initialize;
+initialize=async function(){await p19OldInit();
+ try{const nav=performance.getEntriesByType('navigation')?.[0],reloading=nav?.type==='reload';
+  const saved=JSON.parse(sessionStorage.getItem(p19ResumptionKey)||'null');
+  if(reloading&&saved?.profile&&Date.now()-Number(saved.at||0)<5*60*1000&&state.view==='child'&&state.profile){
+   state.p19.resume=['dashboard','settings','history','p8-cloud','p19-daily','manage','p5b-reports','p61-review-center'].includes(saved.page)?saved.page:'dashboard';
+   await p16EnterGuardian();state.p16Notice='For safety, choose your Guardian profile and enter your PIN to return to your page.';
+   render();
+  }
+ }catch{}
+};
+const p19PreviousRender=render;
+render=function(){p19PreviousRender();p19CacheRoute();};
+let p19HiddenAt=0;
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden){p19HiddenAt=Date.now();return;}
+ if(safeGuardian()&&p19HiddenAt&&Date.now()-p19HiddenAt>5*60*1000)lockGuardian('Guardian Mode locked after inactivity.');
+},true);
+// Keep sync checks visible and parent-friendly. A successful no-op is still a
+// result, not an apparently broken button.
+const p19OldAttempt=p17Attempt;
+p17Attempt=async function(force=false){
+ const outcome=await p19OldAttempt(force);
+ if(force&&safeGuardian()&&state.view==='guardian'){
+  const st=state.p17.status;let title='Family Sync checked';let message=state.p17.message||'';
+  if(st==='shared'){title='🌷 Your garden is up to date!';message='Your progress matches the latest shared family version. No action is needed.';}
+  else if(st==='pending'){title='💌 Changes sent for review';message='Your changes are safe. The family owner can review them before they become shared progress.';}
+  else if(st==='waiting'){title='☁️ Progress saved here';message=message||'Your device will retry sharing while this app is open and connected.';}
+  else if(st==='offline'){title='📱 Your progress is safe';message='This device is offline or not connected to an authorized family account. Please reconnect to share changes.';}
+  else if(st==='attention'){title='⚠️ Sync needs a little help';message=message||'Nothing was erased. Ask the family owner if it keeps happening.';}
+  if(p14OwnerVerified()&&p17IsReady()){
+   try{await p17RefreshQueue();if(state.p17.queue.length){state.p14AdminOpen=true;state.guardianTab='p8-cloud';state.p19.ownerFocus=true;
+    title='🛡️ Guardian changes need review';message=`${state.p17.queue.length} guardian submission(s) are awaiting your decision. Open Owner Review Center below.`;}}
+   catch(e){message+=' Owner queue could not be checked: '+(e.message||'try again');}
+  }
+  state.p19.syncFeedback={title,message,status:st};render();
+ }
+ return outcome;
+};
+function p19SyncDialog(){const x=state.p19.syncFeedback;if(!x)return '';
+ return p14DialogShell(x.title,'The result of your latest Family Sync check',`<div class="p14-dialog-body"><div class="p19-feedback" role="status">${esc(x.message)}</div><div class="actions">${p19IsOwner()&&state.p17.queue.length?'<button type="button" class="btn btn-primary" data-p19-action="owner-center">🛡️ Review Guardian Changes</button>':''}<button type="button" class="btn btn-soft" data-p19-action="sync-close">Got It</button></div></div>`).replace('data-p14-action="close-dialog"','data-p19-action="sync-close"');
+}
+// Owner preview publish is non-reentrant, with an overlay that blocks the
+// whole screen until the cloud transaction and its post-publish work finish.
+const p19OldPublish=p17PublishProposal;
+p17PublishProposal=async function(){
+ if(state.p19.publishing)return;
+ if(!p14OwnerVerified())throw Error('Only the verified family owner can publish these changes.');
+ if(!document.getElementById('p17-owner-ack')?.checked||document.getElementById('p17-owner-word')?.value.trim().toUpperCase()!=='PUBLISH')throw Error('Review the changes and type PUBLISH before continuing.');
+ state.p19.publishing=true;const overlay=document.createElement('div');overlay.className='p19-publish-overlay';overlay.setAttribute('role','alertdialog');overlay.setAttribute('aria-modal','true');overlay.innerHTML=`<div class="p19-publish-card">${p16Spinner()}<h2>Sharing reviewed progress…</h2><p>We're checking the family cloud and saving a new revision. Please keep this page open.</p><small>You won't need to click Publish again.</small></div>`;document.body.appendChild(overlay);
+ try{return await p19OldPublish();}finally{state.p19.publishing=false;overlay.remove();}
+};
+// Owner-only reset, including direct calls by legacy button handlers.
+const p19OldReset=p40ResetProgress;
+p40ResetProgress=async function(){if(!p19IsOwner())throw Error('Only the verified family owner can reset progress.');return p19OldReset();};
+window.addEventListener('click',event=>{const b=event.target.closest?.('[data-p40-action]');
+ if(b&&['reset-open','reset-backup'].includes(b.dataset.p40Action)&&!p19IsOwner()){
+  event.preventDefault();event.stopImmediatePropagation();notice('Only the family owner can review or reset progress.',true);
+ }
+},true);
+window.addEventListener('submit',event=>{if(event.target?.id==='p40-reset-form'&&!p19IsOwner()){
+ event.preventDefault();event.stopImmediatePropagation();notice('Only the verified family owner can reset progress.',true);
+}},true);
+// Publish identities only when a guardian has a verified email, and only to
+// their own member document. Firestore rules independently enforce this.
+const p19OldFamilyCheck=p8FamilyCheck;
+p8FamilyCheck=async function(){const out=await p19OldFamilyCheck();const c=state.p8Cloud;
+ if(c?.user&&c?.family&&c.role!=='owner'&&c.user.email&&c.user.emailVerified){
+  try{const ref=p8FamilyRef().collection('members').doc(c.user.uid);const doc=await ref.get({source:'server'});
+   if(doc.exists&&doc.data()?.email!==c.user.email)await ref.update({email:c.user.email,emailUpdatedAt:window.firebase.firestore.FieldValue.serverTimestamp()});
+  }catch(e){/* Email labels are best-effort; never block authenticated sign-in or data sync. */}
+ }
+ return out;
+};
+// Archive *metadata only*. The actual immutable snapshot/chunks remain intact
+// for old devices, three-way merges and recovery. No permanent delete in UI.
+async function p19SetArchive(id,archived){
+ if(!p14OwnerVerified())throw Error('Only the verified family owner can archive snapshots.');
+ if(state.p19.archiving)throw Error('Another snapshot action is in progress.');
+ if(!/^[\w-]{8,100}$/.test(id))throw Error('Invalid snapshot identifier.');
+ const member=state.p14History.find(s=>s.id===id);if(!member)throw Error('Refresh Snapshot History first.');
+ const c=state.p8Cloud,head=await p8CloudSyncDoc().get({source:'server'});
+ if(head.data()?.snapshotId===id||Number(member.revision)===Number(head.data()?.revision))throw Error('The current cloud revision cannot be archived.');
+ const ref=p8FamilyRef().collection('snapshots').doc(id);state.p19.archiving=true;
+ try{const doc=await ref.get({source:'server'});if(!doc.exists)throw Error('This snapshot is no longer available.');
+  await ref.update({archived:archived,archivedAt:window.firebase.firestore.FieldValue.serverTimestamp(),archivedByUid:c.user.uid});
+  const item=state.p14History.find(x=>x.id===id);if(item)item.archived=archived;
+  render();notice(archived?'Snapshot archived. Its data remains available for recovery and device merging.':'Snapshot returned to active history.');
+ }finally{state.p19.archiving=false;}
+}
+function p19DailyPage(){const day=p2ValidDate(state.p19.dailyDate)?state.p19.dailyDate:p2Date(),s=p11DayProgress(day);
+ const fmt=new Date(day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+ const allTx=(state.summary.transactions||[]).filter(t=>!t.reversedAt&&((t.type==='rule-earned'&&t.ruleDate===day)||(t.type==='task'&&state.p2Completions.some(c=>c.id===t.completionId&&c.date===day))||(!['task','rule-earned'].includes(t.type)&&p64DateOfStamp(t.createdAt||'')===day)));
+ const requests=(state.p31Requests||[]).filter(r=>String(r.date||r.createdAt||'').slice(0,10)===day);
+ const vouchers=(state.p4Vouchers||[]).filter(v=>[v.redeemedAt,v.claimedAt,v.pcManualUsedDate].some(x=>String(x||'').slice(0,10)===day));
+ const renderRows=(items,none)=>items.length?items.map(r=>`<div class="p19-daily-item"><span>${esc(r.icon||'🌷')}</span><div><strong>${esc(r.name)}</strong><small>${r.count?`${r.count} completion${r.count===1?'':'s'} · `:''}${r.stars>0?'+'+money(r.stars)+' ⭐':'Recorded'}</small></div></div>`).join(''):`<p class="p2-muted">${none}</p>`;
+ return `<section class="p19-page-header"><div><p class="eyebrow">Guardian · History</p><h1 class="page-title">📖 Daily Journey</h1><p class="lead">See her accomplishments, rules and rewards for each day.</p></div></section>
+ <section class="panel"><div class="p2-row"><h2>${esc(fmt)}</h2><div class="p19-date-nav"><button type="button" class="btn btn-soft" data-p19-action="day-step" data-step="-1" aria-label="Previous day">‹</button><input type="date" id="p19-daily-date" value="${esc(day)}" max="${p2Date()}" aria-label="Choose journey date"><button type="button" class="btn btn-soft" data-p19-action="day-step" data-step="1" ${day>=p2Date()?'disabled':''} aria-label="Next day">›</button></div></div><div class="p11-stat-grid"><div class="p11-stat"><b>⭐ ${money(s.stars)}</b><small>Stars earned on this day</small></div><div class="p11-stat"><b>📖 ${s.completedTasks}</b><small>Quests</small></div><div class="p11-stat"><b>🌷 ${s.followedRules}</b><small>Rules followed</small></div></div><p class="p2-muted">Task and rule stars belong to their activity date, even when approved later.</p></section>
+ <div class="grid2"><section class="panel"><h3>📖 Completed Quests</h3><div class="p19-daily-list">${renderRows(s.quests,'No quests recorded for this date.')}</div></section><section class="panel"><h3>🌼 Rules Followed</h3><div class="p19-daily-list">${renderRows(s.rules,'No rule check-ins recorded for this date.')}</div></section></div>
+ <section class="panel"><h3>💌 Requests & Rewards</h3><div class="p19-daily-list">${requests.map(r=>`<div class="p19-daily-item"><span>💌</span><div><strong>${esc(r.title||r.taskName||r.kind||'Activity request')}</strong><small>${esc(r.status||'Pending')}</small></div></div>`).join('')}${vouchers.map(v=>`<div class="p19-daily-item"><span>${esc(v.icon||'🎁')}</span><div><strong>${esc(v.name||'Reward')}</strong><small>${esc(v.status||'Recorded')}</small></div></div>`).join('')||(!requests.length&&!vouchers.length?'<p class="p2-muted">No reward activity or requests recorded on this date.</p>':'')}</div></section>
+ <section class="panel"><h3>⭐ Transactions for this day (${allTx.length})</h3><div class="p2-list">${allTx.map(t=>`<div class="p19-daily-item"><span>⭐</span><div><strong>${esc(t.reason||t.type)}</strong><small>${t.amount>=0?'+':''}${money(t.amount)} stars · ${esc(t.type)}</small></div></div>`).join('')||'<p class="p2-muted">No other star transactions for this date.</p>'}</div></section>`;
+}
+function p19Pager(root){const blocks=[...root.querySelectorAll('main .layout-stack .p2-list,main .layout-stack .p9-compact-rows,main .layout-stack .p67-decision-list,main .layout-stack .p17-queue-list')];
+ let index=0;for(const list of blocks){const section=list.closest('section.panel');if(!section||section.classList.contains('p14-admin'))continue;
+  const all=[...list.children].filter(x=>x.matches('.p2-card,.p67-transaction,.p9-ledger-row,.p19-daily-item,.p67-decision,.p17-submission,.p2-row,.p9-compact-row'));
+  if(all.length<=10)continue;
+  const name=(section.querySelector('h3,h2')?.textContent||'Activity').trim().replace(/\s+/g,' ').slice(0,55),key=state.guardianTab+':'+name+':'+index++;
+  const size=state.p19.pageSize,pageCount=Math.ceil(all.length/size),current=Math.min(pageCount,Math.max(1,state.p19.pages[key]||1));
+  state.p19.pages[key]=current;
+  all.forEach((r,i)=>{r.hidden=i<(current-1)*size||i>=current*size;});
+  list.classList.add('p19-paged-list');list.insertAdjacentHTML('afterend',`<div class="p19-pager" data-page-key="${esc(key)}"><small>Showing ${(current-1)*size+1}–${Math.min(all.length,current*size)} of ${all.length}</small><div><button type="button" class="btn btn-soft btn-small" data-p19-action="paginate" data-list-key="${esc(key)}" data-page="${current-1}" ${current<=1?'disabled':''}>← Previous</button><span>Page ${current} / ${pageCount}</span><button type="button" class="btn btn-soft btn-small" data-p19-action="paginate" data-list-key="${esc(key)}" data-page="${current+1}" ${current>=pageCount?'disabled':''}>Next →</button></div></div>`);
+ }
+}
+const p19OldHistoryPage=p5bHistoryPage;
+p5bHistoryPage=function(){const root=document.createElement('div');root.innerHTML=p19OldHistoryPage();
+ // The old history truncation hid old records. Preserve filtering and render
+ // the complete filtered transaction list; paginate only what is visible.
+ const start=state.p5bHistoryStart,end=state.p5bHistoryEnd,type=state.p5bHistoryType,q=state.p5bHistorySearch.toLowerCase();
+ const all=state.summary.transactions.filter(t=>p5bInRange(p5bDateForStamp(t.createdAt),start,end)&&(type==='all'||t.type===type)&&(`${t.reason} ${t.type}`).toLowerCase().includes(q));
+ const section=[...root.querySelectorAll('section.panel')].find(e=>(e.querySelector('h3')?.textContent||'').startsWith('Star Transactions'));
+ const list=section?.querySelector('.p2-list');if(list){list.innerHTML=all.map(t=>`<div class="p2-card p2-row"><div><strong>${esc(t.reason||t.type)}</strong><p class="p2-muted">${esc(p5bDateForStamp(t.createdAt))} · ${esc(t.type==='earning-correction'?'Undo Star Award':t.type)}${t.reversedAt?' · Corrected':''}</p></div><span class="p2-pill">${t.amount>=0?'+':''}${money(t.amount)} ⭐</span></div>`).join('')||'<p class="p2-muted">No matching transactions.</p>';}
+ return root.innerHTML;
+};
+// Owner tools are consolidated in the same existing Advanced section, but
+// are not made accessible to non-owner Firebase accounts.
+const p19OldCloudPage=p8CloudPage;
+p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p19OldCloudPage();
+ const overview=root.querySelector('.p14-overview');if(overview){[...overview.querySelectorAll('p')].forEach(p=>{
+  if(/Independent changes share automatically while this site is open and connected/i.test(p.textContent||'')&&!p.closest('.p17-cloud-state'))p.remove();
+ });}
+ root.querySelectorAll('.p14-admin-closed,.p14-admin details summary').forEach(x=>x.innerHTML=x.innerHTML.replace(/Advanced Owner Setup/g,'Advanced Owner Settings'));
+ const owner=p14OwnerVerified(),admin=root.querySelector('.p14-admin details .p14-admin-inner');
+ if(owner&&admin){
+  const queue=root.querySelector('.p17-owner-queue');if(queue){queue.classList.add('p19-owner-queue');admin.prepend(queue);}
+  const history=root.querySelector('.p14-history');if(history){history.classList.add('p19-history-section');admin.append(history);}
+  if(state.p14HistoryLoaded&&history){history.querySelectorAll('.p14-snapshot').forEach(card=>{
+   const preview=card.querySelector('[data-p14-action="snapshot-preview"]');const id=preview?.dataset.id;
+   const record=state.p14History.find(x=>x.id===id);if(!record||!id)return;
+   const current=Number(record.revision)===Number(state.p8Cloud.revision),archived=Boolean(record.archived);
+   if(archived&&!state.p19.showArchived){card.hidden=true;return;}
+   if(archived)card.querySelector('strong')?.insertAdjacentText('afterbegin','📦 Archived · ');
+   if(!current){const b=document.createElement('button');b.type='button';b.className='btn btn-soft btn-small';b.dataset.p19Action='snapshot-archive';b.dataset.id=id;b.dataset.archived=archived?'1':'0';b.textContent=archived?'Unarchive':'Archive';card.append(b);}
+  });history.querySelector('.p14-snapshot-list')?.insertAdjacentHTML('beforebegin',`<label class="p19-show-archive"><input type="checkbox" id="p19-show-archived" ${state.p19.showArchived?'checked':''}> Show archived snapshots</label>`);}
+  const links=admin.querySelectorAll('.p10-account-link');links.forEach((card,i)=>{
+   const uid=card.querySelector('[data-p10-action="save-link"]')?.dataset.uid||state.p10MemberMappings[i]?.uid;
+   const item=state.p10MemberMappings.find(m=>m.uid===uid);const place=card.querySelector('.grow');
+   if(place){const h=document.createElement('div');h.className='p19-linked-email';h.innerHTML=`<strong>${item?.email?esc(item.email):'Email not yet verified on this account'}</strong><small>${item?.email?'Verified family account':'Email will appear after this guardian signs in again'} · UID: ${esc(uid||'')}</small>`;place.prepend(h);const old=place.querySelector(':scope > strong');if(old)old.remove();}
+  });
+  if(!admin.querySelector('.p19-owner-warning'))admin.insertAdjacentHTML('beforeend','<p class="p19-owner-warning">🔐 Snapshot archive only hides old revisions from the default list; it does not delete data. Permanent deletion is disabled until pending-device and recovery dependencies can be verified.</p>');
+  if(state.p19.ownerFocus){state.p14AdminOpen=true;const details=root.querySelector('#p14-admin-details');if(details)details.open=true;}
+ }
+ return root.innerHTML;
+};
+const p19OldSettings=guardianSettings;
+guardianSettings=function(){const root=document.createElement('div');root.innerHTML=p19OldSettings();
+ if(!p19IsOwner()){
+  for(const section of root.querySelectorAll('section.panel')){
+   if(/Reset progress, keep setup/i.test(section.textContent||'')&&section.querySelector('[data-p40-action="reset-open"]'))section.remove();
+  }
+ }else{
+  const reset=[...root.querySelectorAll('section.panel')].find(x=>x.querySelector('[data-p40-action="reset-open"]'));
+  if(reset)reset.insertAdjacentHTML('beforeend','<p class="p2-muted tiny">Owner only · requires a verified account, original owner PIN, safety backup and confirmation.</p>');
+ }
+ return root.innerHTML;
+};
+const p19OldGuardian=guardian;
+guardian=function(){if(safeGuardian()&&state.guardianTab==='p19-daily')return p19GuardianDecorate(shell(p19DailyPage(),true));
+ return p19GuardianDecorate(p19OldGuardian());};
+function p19GuardianDecorate(html){if(state.view!=='guardian'||!safeGuardian())return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ // The six everyday Guardian pages share one navigational hierarchy.
+ const sidebarNav=root.querySelector('.sidebar nav.nav');
+ if(sidebarNav){
+  const labels={dashboard:'Home',manage:'Manage Activities',history:'History & Reports',settings:'Settings & Backup'};
+  sidebarNav.querySelectorAll('button[data-guardian-tab]').forEach(button=>{
+   const label=labels[button.dataset.guardianTab];
+   if(label){const words=button.querySelector('span:last-child');if(words)words.textContent=label;}
+  });
+  if(!sidebarNav.querySelector('[data-guardian-tab="p19-daily"]')){
+   const daily=document.createElement('button');daily.type='button';
+   daily.className='nav-btn'+(state.guardianTab==='p19-daily'?' active':'');
+   daily.dataset.guardianTab='p19-daily';
+   daily.setAttribute('aria-current',state.guardianTab==='p19-daily'?'page':'false');
+   daily.innerHTML='<span class="nav-icon" aria-hidden="true">📅</span><span>Daily Journey</span>';
+   const historyButton=sidebarNav.querySelector('[data-guardian-tab="history"]');
+   if(historyButton)historyButton.before(daily);else sidebarNav.append(daily);
+  }
+ }
+ const top=root.querySelector('main header.topbar'),row=top?.querySelector('.row');
+ if(row){root.querySelectorAll('.p16-switch-top').forEach(x=>x.remove());
+  const pill=root.querySelector('[data-p17-status]');if(pill)row.prepend(pill);
+  const oldBadge=row.querySelector('.p65-guardian-indicator');if(oldBadge){const badge=document.createElement('button');badge.type='button';badge.className='p65-guardian-indicator p19-guardian-menu';badge.setAttribute('data-p16-action','switch');badge.title='Switch Guardian profile';badge.setAttribute('aria-label','Switch Guardian profile');badge.innerHTML=`<span class="p20-guardian-name">${oldBadge.innerHTML}</span><svg class="p20-guardian-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>`;oldBadge.replaceWith(badge);}
+ }
+ root.querySelectorAll('.sidefoot [data-p16-action="switch"]').forEach(x=>x.remove());
+ root.querySelectorAll('button, a').forEach(el=>{if(el.textContent?.trim().includes('Share Today’s Progress as PNG'))el.textContent=el.textContent.replace(' as PNG','');});
+ const section=root.querySelector('main .layout-stack > section:first-child');if(section&&section.querySelector('h1.page-title')){
+  section.classList.add('p19-page-header');
+  const eyebrow=section.querySelector(':scope > p.eyebrow');
+  const title=section.querySelector(':scope > h1.page-title');
+  const lead=section.querySelector(':scope > p.lead');
+  if(title&&eyebrow){
+   const heading=document.createElement('div');heading.className='p20-heading-text';
+   section.insertBefore(heading,eyebrow);
+   [eyebrow,title,lead].filter(Boolean).forEach(el=>heading.append(el));
+  }
+  if(state.guardianTab==='p5b-reports'||state.guardianTab==='p8-cloud'){
+   const selector=state.guardianTab==='p5b-reports'?'[data-p5b-action="report-back"]':'[data-p8cloud-action="go-settings"]';
+   const existing=root.querySelector('main .layout-stack '+selector);
+   if(existing&&!section.contains(existing)){existing.classList.add('p19-back');section.append(existing);}
+  }
+  const backExists=section.querySelector('button[data-p8cloud-action="go-settings"],button[data-p19-action="history-back"],button[data-p5b-action="report-back"]');
+  if(!backExists&&!['dashboard','p61-review-center','manage','p19-daily','history','settings'].includes(state.guardianTab)){
+   const back=document.createElement('button');back.type='button';back.className='btn btn-plain p19-back';back.dataset.p19Action='go-back';back.textContent='← Back';section.append(back);
+  }
+ }
+ if(state.guardianTab==='history'){
+  const transactionPanel=[...root.querySelectorAll('main .layout-stack > section.panel')].find(panel=>/^Star Transactions/.test(panel.querySelector(':scope > h3')?.textContent||''));
+  const title=transactionPanel?.querySelector(':scope > h3');
+  if(title){
+   const toolbar=document.createElement('div');toolbar.className='p20-list-toolbar';
+   title.replaceWith(toolbar);toolbar.append(title);
+   toolbar.insertAdjacentHTML('beforeend',`<label class="p20-page-size">Rows per page <select id="p19-page-size" aria-label="Star transactions rows per page"><option value="10" ${state.p19.pageSize===10?'selected':''}>10</option><option value="25" ${state.p19.pageSize===25?'selected':''}>25</option><option value="50" ${state.p19.pageSize===50?'selected':''}>50</option></select></label>`);
+  }
+ }
+ if(state.guardianTab==='reset-progress'&&!p19IsOwner()){root.querySelector('main .layout-stack').innerHTML='<section class="panel"><h2>Owner access required</h2><p>Only the verified family owner can reset progress.</p><button class="btn btn-soft" data-p19-action="go-back">Back to Settings</button></section>';}
+ p19Pager(root);
+ if(state.p19.syncFeedback)root.querySelector('main')?.insertAdjacentHTML('beforeend',p19SyncDialog());
+ return root.innerHTML;
+}
+// Paged lists and dated journey are local UI state; they do not change the
+// snapshot, IndexedDB or star transactions.
+app.addEventListener('change',event=>{
+ if(event.target.id==='p19-daily-date'){
+  const date=event.target.value;if(p2ValidDate(date)&&date<=p2Date()){state.p19.dailyDate=date;render();}
+ }
+ if(event.target.id==='p19-page-size'){
+  const n=Number(event.target.value);if([10,25,50].includes(n)){state.p19.pageSize=n;state.p19.pages={};render();}
+ }
+ if(event.target.id==='p19-show-archived'){state.p19.showArchived=Boolean(event.target.checked);render();}
+},true);
+app.addEventListener('click',async event=>{const button=event.target.closest('[data-p19-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();const action=button.dataset.p19Action;
+ try{
+  if(action==='daily-open'){state.guardianTab='p19-daily';state.p19.dailyDate=p2Date();render();}
+  else if(action==='history-back'){state.guardianTab='history';render();}
+  else if(action==='go-back'){state.guardianTab=state.guardianTab==='p8-cloud'?'settings':state.guardianTab==='p5b-reports'||state.guardianTab==='p19-daily'?'history':state.guardianTab==='reset-progress'?'settings':'dashboard';render();}
+  else if(action==='day-step'){const day=state.p19.dailyDate,d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+Number(button.dataset.step||0));const next=d.toISOString().slice(0,10);if(p2ValidDate(next)&&next<=p2Date()){state.p19.dailyDate=next;render();}}
+  else if(action==='paginate'){const key=button.dataset.listKey,page=Number(button.dataset.page);if(key&&Number.isInteger(page)&&page>=1){state.p19.pages[key]=page;render();}}
+  else if(action==='sync-close'){state.p19.syncFeedback=null;render();}
+  else if(action==='owner-center'){state.p19.syncFeedback=null;state.guardianTab='p8-cloud';state.p14AdminOpen=true;state.p19.ownerFocus=true;render();}
+  else if(action==='snapshot-archive'){await p19SetArchive(button.dataset.id,button.dataset.archived!=='1');}
+ }catch(e){notice(e.message||'Could not complete this action.',true);}
+},true);
+const p19Css=`
+.topbar .row{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;min-width:0}
+.p19-guardian-menu{cursor:pointer;font:inherit;border:1px solid #e9c9dc;background:#fff5fb;padding:9px 13px;border-radius:999px;color:#7d5070;white-space:nowrap}
+.p19-guardian-menu:hover,.p19-guardian-menu:focus-visible{outline:2px solid #c999b4;outline-offset:2px}
+.p19-page-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px}
+.p19-page-header>.btn{flex:none;align-self:flex-start}
+.p19-history-shortcut{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.p19-history-shortcut label{display:flex;align-items:center;gap:8px;color:#876b7d;font-size:.83rem;font-weight:750}
+.p19-history-shortcut select{border-radius:10px;border:1px solid #e9cbdc;background:#fff;padding:8px;color:#704d64}
+.p19-paged-list{max-height:550px;overflow:auto;overscroll-behavior:contain}
+.p19-paged-list>[hidden]{display:none!important}
+.p19-pager{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 0;padding:10px 2px;border-top:1px solid #eddae4}
+.p19-pager small{color:#907587}.p19-pager>div{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.79rem;color:#83677b}
+.p19-feedback{background:#f2f8f2;border:1px solid #cde4d3;border-radius:16px;padding:17px;line-height:1.6;color:#466a52}
+.p19-daily-list{display:grid;gap:12px;margin-top:15px}.p19-daily-item{display:flex;gap:13px;align-items:flex-start;padding:12px;border-radius:15px;border:1px solid #efdae6;background:#fff9fc}
+.p19-daily-item>span{font-size:1.6rem}.p19-daily-item div{display:grid;gap:4px;min-width:0}.p19-daily-item small{color:#90748a}
+.p19-date-nav{display:flex;align-items:center;gap:9px}.p19-date-nav input{min-width:0;max-width:190px;width:100%;min-height:41px;background:#fff;border:1px solid #e7cad9;border-radius:11px;padding:7px;color:#77516b;font:inherit}
+.p19-show-archive{display:flex;gap:8px;align-items:center;font-size:.85rem;color:#835d75;font-weight:700}.p19-show-archive input{width:18px;height:18px;accent-color:#a9638c}
+.p19-linked-email{display:grid;gap:4px}.p19-linked-email strong{font-size:.86rem!important;color:#80536f}.p19-linked-email small{font-size:.72rem;color:#9b8092;overflow-wrap:anywhere}
+.p19-owner-warning{border:1px solid #e6d6e9;background:#faf3fc;border-radius:13px;padding:13px;color:#745a7c;font-size:.85rem;line-height:1.55}
+.p19-publish-overlay{position:fixed;inset:0;z-index:9999;background:rgba(61,43,60,.76);display:grid;place-items:center;padding:20px}
+.p19-publish-card{width:min(100%,470px);background:#fffafc;border:2px solid #e7c1d6;border-radius:28px;box-shadow:0 15px 90px #200b21aa;padding:36px 28px;text-align:center;display:grid;justify-items:center;gap:14px}
+.p19-publish-card .p16-spinner{width:46px;height:46px;border-width:5px}.p19-publish-card h2{font-size:1.5rem;color:#6c4560}.p19-publish-card p{line-height:1.5;color:#876b7f}.p19-publish-card small{color:#9b8394}
+#p17-owner-ack{width:18px!important;height:18px!important;min-height:18px!important;min-width:18px!important;flex:none!important;accent-color:#a45c88}
+.p17-preview label.inline-check{display:flex!important;align-items:center!important;gap:12px;line-height:1.45;padding:8px 0;font-size:.88rem}
+@media(max-width:670px){.topbar .row{gap:6px}.p17-status-pill{max-width:115px}.p19-guardian-menu{padding:7px 9px;font-size:.78rem}.p19-page-header>.btn{width:100%}.p19-date-nav{width:100%}.p19-date-nav input{max-width:unset;flex:1}.p19-paged-list{max-height:none}.p19-pager{align-items:stretch}.p19-pager>div{width:100%;justify-content:space-between}.p19-pager .btn{padding:8px 10px}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P19_BUILD}">${p19Css}</style>`);
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6c2a-navigation">${'\n/* Phase 6C.2A — main Guardian navigation, headings, and control hierarchy */\n.p20-guardian-name{display:inline-flex;align-items:center;gap:5px;min-width:0;line-height:1.25}\n.p20-guardian-chevron{width:16px;height:16px;flex:none;display:block;transition:transform .16s ease;color:#9a6786}\n.p65-guardian-indicator.p19-guardian-menu{max-width:min(230px,100%);overflow:visible;text-overflow:clip}\n.p19-guardian-menu .p20-guardian-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.p19-guardian-menu{display:inline-flex;align-items:center;justify-content:center;gap:10px;vertical-align:middle;min-height:42px;line-height:1.25}\n.p19-guardian-menu:hover .p20-guardian-chevron,.p19-guardian-menu:focus-visible .p20-guardian-chevron{transform:translateY(2px)}\n.p19-page-header{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 10px;min-width:0}\n.p19-page-header>div:first-child{flex:1 1 270px;min-width:0}\n.p19-page-header .page-title{margin-top:0;overflow-wrap:anywhere}\n.p19-page-header .lead{max-width:70ch}\n.p19-page-header>.btn{flex:0 0 auto}\n.p20-list-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}\n.p20-list-toolbar h3{margin:0}\n.p20-page-size{display:flex;align-items:center;gap:8px;font-size:.84rem;font-weight:700;color:#876b7d}\n.p20-page-size select{border-radius:10px;border:1px solid #e9cbdc;background:#fff;padding:7px 10px;min-height:38px;min-width:63px;color:#704d64;font:inherit}\n.p20-page-size select:focus-visible{outline:2px solid #a9638c;outline-offset:2px}\n@media(max-width:670px){.p19-page-header{align-items:flex-start}.p19-page-header>.btn{width:100%;flex:auto}.p65-guardian-indicator.p19-guardian-menu{max-width:145px}.p19-guardian-menu{gap:6px;min-height:40px}.p20-guardian-chevron{width:14px;height:14px}.p20-list-toolbar{align-items:flex-start}.p20-page-size{flex:0 0 auto}}\n'}</style>`);
 
 initialize();
 
