@@ -12214,6 +12214,315 @@ const P36_CSS=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-6c2b2e14-refinements">${P36_CSS}</style>`);
 /* End Phase 6C.2B.2E.14 */
 
+/* Phase 6D.1 — Guest confirmations and unified Guardian Approval Workflow.
+   Static-hosted; requests and audit records reside in the existing records store.
+   No anonymous Firebase writes. Guest answers are unverified claims, NEVER approvals. */
+const P37_VERSION=1;
+const P37_REQ='p37-request:',P37_RES='p37-response:',P37_AUDIT='p37-audit:';
+state.p37={requests:[],responses:[],inbound:null,importDraft:'',filter:'all',selected:null,issued:null,busy:false,guestNotice:'',guestError:false};
+const p37Now=()=>new Date().toISOString();
+const p37Actor=()=>state.p64CurrentGuardian||'owner';
+const p37ActorName=(id=p37Actor())=>id==='owner'?(state.settings?.ownerGuardianName||'Guardian'):state.p64Profiles?.find(x=>x.id===id)?.name||'Guardian';
+function p37Bytes(n=16){const b=new Uint8Array(n);if(!globalThis.crypto?.getRandomValues)throw Error('Secure random generation is unavailable in this browser.');crypto.getRandomValues(b);return [...b].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function p37B64(input){let data=new TextEncoder().encode(JSON.stringify(input)),out='';for(let i=0;i<data.length;i+=4096)out+=String.fromCharCode(...data.slice(i,i+4096));return btoa(out).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function p37Unb64(s){if(typeof s!=='string'||s.length>16000||!/^[A-Za-z0-9_-]+$/.test(s))throw Error('This confirmation link has an invalid format.');const raw=atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4));return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(raw,c=>c.charCodeAt(0))));}
+function p37Link(type,payload){return location.href.split('#')[0]+'#mlsg-'+type+'='+p37B64(payload);}
+function p37Extract(value,kind){const raw=String(value||'').trim();if(raw.length>24000)throw Error('The link is too long.');let fragment=raw.startsWith('#')?raw.slice(1):raw.includes('#')?raw.slice(raw.indexOf('#')+1):raw;
+ const prefix='mlsg-'+kind+'=';if(!fragment.startsWith(prefix))throw Error('Paste the '+(kind==='response'?'guest response':'guest checklist')+' link.');
+ return p37Unb64(fragment.slice(prefix.length));}
+function p37ValidName(v,max=90){return typeof v==='string'&&v.length<=max&&!/[\u0000-\u001f\u007f]/.test(v);}
+function p37ValidInvite(inv){
+ if(!inv||inv.v!==1||inv.type!=='guest-request'||typeof inv.rid!=='string'||!/^[-a-f0-9]{24,64}$/.test(inv.rid)||typeof inv.nonce!=='string'||!/^[a-f0-9]{32}$/.test(inv.nonce))throw Error('This is not a valid guest checklist.');
+ if(!p2ValidDate(inv.date)||!Number.isFinite(Date.parse(inv.expiresAt))||!p37ValidName(inv.childName,36)||!p37ValidName(inv.recipient,45)||!p37ValidName(inv.from,45))throw Error('The checklist details are incomplete.');
+ if(!Array.isArray(inv.items)||inv.items.length<1||inv.items.length>24)throw Error('The checklist has an invalid number of items.');
+ const seen=new Set();for(const item of inv.items){if(!item||!['task','rule'].includes(item.kind)||typeof item.key!=='string'||item.key.length>180||seen.has(item.key)||!p37ValidName(item.name,120)||!p37ValidName(item.icon,12)||!p37ValidName(item.detail||'',450))throw Error('The checklist contains an invalid item.');seen.add(item.key);}
+ return inv;
+}
+function p37ValidResponse(r){
+ if(!r||r.v!==1||r.type!=='guest-response'||typeof r.rid!=='string'||!/^[-a-f0-9]{24,64}$/.test(r.rid)||typeof r.nonce!=='string'||!/^[a-f0-9]{32}$/.test(r.nonce)||!p2ValidDate(r.date)||!p37ValidName(r.childName,36)||!p37ValidName(r.submittedAs,45)||!p37ValidName(r.recipient,45)||!Number.isFinite(Date.parse(r.submittedAt)))throw Error('This guest response has invalid details.');
+ if(!Array.isArray(r.items)||r.items.length<1||r.items.length>24)throw Error('This guest response has an invalid checklist.');const seen=new Set();
+ for(const x of r.items){if(!x||!['done','notdone','unsure'].includes(x.answer)||!['rule','task'].includes(x.kind)||typeof x.key!=='string'||x.key.length>180||seen.has(x.key)||!p37ValidName(x.name,120))throw Error('This guest response has invalid answers.');seen.add(x.key);}
+ return r;
+}
+function p37Request(id){return state.p37.requests.find(x=>x.id===id);}
+function p37Response(id){return state.p37.responses.find(x=>x.id===id);}
+function p37Matches(req,res){if(!req)return {ok:false,reason:'The original request has not arrived on this device yet.'};
+ if(req.nonce!==res.nonce||req.date!==res.date||req.childName!==res.childName||req.items.length!==res.items.length)return {ok:false,reason:'The response does not match the original request.'};
+ const keys=new Set(req.items.map(x=>x.key));if(res.items.some(x=>!keys.has(x.key)||req.items.find(q=>q.key===x.key)?.kind!==x.kind))return {ok:false,reason:'The response contains unexpected activities.'};
+ if(req.status==='cancelled')return {ok:false,reason:'The original request has been canceled.'};
+ // This is only a local clock check; there is no remote or authoritative enforcement.
+ if(Date.parse(res.submittedAt)>Date.parse(req.expiresAt))return {ok:false,reason:'The guest response says it was submitted after the invitation expired.'};
+ return {ok:true,reason:''};
+}
+function p37ItemKey(type,id,slot='',step=null){return `${type}:${id}${slot?':'+slot:''}${step!==null?':step'+step:''}`;}
+function p37TaskRows(date){return state.p2Tasks.filter(t=>!t.archived&&!t.draft&&p2Due(t,date)).flatMap(t=>{
+  if(t.type==='checklist'&&t.stepMode==='per-step')return (t.steps||[]).map((step,i)=>({key:p37ItemKey('task',t.id,'',i),kind:'task',id:t.id,stepIndex:i,slot:'',name:`${t.name} · ${step}`,icon:t.icon||'📖',detail:String(t.description||'').replace(/\s+/g,' ').trim(),value:Number(t.stepStars??t.stars??0),frequency:t.frequency,updatedAt:t.updatedAt||'',type:t.type}));
+  if(t.frequency==='checkin')return (t.checkins||[]).map(slot=>({key:p37ItemKey('task',t.id,slot),kind:'task',id:t.id,slot,stepIndex:null,name:`${t.name} · ${slot}`,icon:t.icon||'📖',detail:String(t.description||'').replace(/\s+/g,' ').trim(),value:Number(t.stars||0),frequency:t.frequency,updatedAt:t.updatedAt||'',type:t.type}));
+  return [{key:p37ItemKey('task',t.id),kind:'task',id:t.id,slot:'',stepIndex:null,name:t.name,icon:t.icon||'📖',detail:String(t.description||'').replace(/\s+/g,' ').trim(),value:Number(t.stars||0),frequency:t.frequency,updatedAt:t.updatedAt||'',type:t.type}];
+ });}
+function p37RuleRows(){return state.p2Rules.filter(r=>!r.archived).map(r=>({key:p37ItemKey('rule',r.id),kind:'rule',id:r.id,slot:'',stepIndex:null,name:r.name,icon:r.icon||'🛡️',detail:String(r.childFriendly||r.expected||'').replace(/\s+/g,' ').trim(),value:Number(r.earnStars||0),updatedAt:r.updatedAt||''}));}
+function p37Changed(item){if(item.kind==='rule'){
+ const r=p2Rule(item.id);return !r||r.archived||r.name!==item.name||Number(r.earnStars||0)!==item.value||String(r.childFriendly||r.expected||'').replace(/\s+/g,' ').trim()!==item.detail;
+ }
+ const t=p2Task(item.id);if(!t||t.archived||t.draft)return true;
+ const current=p37TaskRows(item.date||p2Date()).find(x=>x.key===item.key);
+ return !current||current.name!==item.name||current.detail!==item.detail||current.value!==item.value||current.frequency!==item.frequency||current.type!==item.type;
+}
+function p37Awarded(item,date){
+ if(item.kind==='rule')return p41RuleFollowed(item.id,date);
+ const t=p2Task(item.id);if(!t)return false;
+ const rows=state.p2Completions.filter(c=>c.taskId===item.id&&!c.correctedAt&&(t.frequency==='weekly'?p2WeekStart(c.date)===p2WeekStart(date):t.frequency==='once'?true:c.date===date));
+ return rows.some(c=>(item.slot?c.slot===item.slot:true)&&(item.stepIndex!==null&&item.stepIndex!==undefined?c.stepIndex===item.stepIndex:true));
+}
+function p37ItemState(request,answer){const item=request?.items.find(x=>x.key===answer.key);if(!item)return {blocked:true,reason:'Original item missing',awarded:false,changed:true};
+ const awarded=p37Awarded(item,request.date),changed=!awarded&&p37Changed({...item,date:request.date});
+ return {blocked:changed||awarded,changed,awarded,item,reason:changed?'Activity Changed':awarded?'Already Awarded':''};
+}
+const p37PreviousRefresh=refresh;
+refresh=async function(){await p37PreviousRefresh();const rows=(await getAll('records'));state.p37.requests=rows.filter(r=>r.key?.startsWith(P37_REQ)).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+ state.p37.responses=rows.filter(r=>r.key?.startsWith(P37_RES)).sort((a,b)=>String(b.receivedAt).localeCompare(String(a.receivedAt)));
+ // Reconcile child approval requests with existing, already-verified task completions.
+ // This closes stale pending requests after a separate Guardian approves the same quest.
+ if(state.unlocked){
+  const resolved=state.p31Requests.filter(r=>r.status==='pending'&&r.kind==='task').map(req=>{
+   const completed=state.p2Completions.find(c=>c.taskId===req.targetId&&c.date===req.date&&!c.correctedAt&&(!req.slot||req.slot===c.slot));
+   return completed?{req,completed}:null;
+  }).filter(Boolean);
+  if(resolved.length){
+   const stamp=p37Now();await atomic(['records'],tx=>{for(const {req,completed} of resolved){
+    tx.objectStore('records').put({...req,status:'approved',resolvedAt:stamp,autoResolved:true,resolutionPath:'existing-guardian-completion',completionId:completed.id});
+    tx.objectStore('records').put({key:`p37-child-request-resolution:${req.id}`,requestId:req.id,completionId:completed.id,reason:'Completed through a separate Guardian-approved action',resolvedAt:stamp});
+   }});
+   const ids=new Set(resolved.map(x=>x.req.id));state.p31Requests=state.p31Requests.map(r=>ids.has(r.id)?{...r,status:'approved',resolvedAt:stamp,autoResolved:true}:r);
+  }
+ }
+};
+// Existing child-request approval may already have triggered reconciliation during its
+// completion refresh. In that case, do not overwrite the resolved audit metadata.
+const p37PreviousUpdateRequest=p31UpdateRequest;
+p31UpdateRequest=async function(req,status,note=''){
+ if(!req?.key)throw Error('The approval request is missing.');
+ const current=await get('records',req.key);
+ if(current?.status!=='pending'){
+  if(current?.status===status){await refresh();return;}
+  throw Error('This request has already been resolved.');
+ }
+ return p37PreviousUpdateRequest(current,status,note);
+};
+function p37SyncLabel(req){
+ const baseline=typeof p8GetBaseline==='function'?p8GetBaseline():null;
+ return !baseline?.savedAt||Date.parse(req.createdAt)>Number(baseline.savedAt)?'Not Yet Synced':'Included in last recorded Family Sync snapshot';
+}
+function p37Conflict(req,itemKey,answer,responseId){
+ return Boolean(req&&state.p37.responses.some(other=>other.id!==responseId&&p37Request(other.id)?.date===req.date&&p37Request(other.id)?.childName===req.childName&&other.items.some(x=>x.key===itemKey&&x.answer!==answer)));
+}
+function p37RequestStatus(req){if(req.status==='cancelled')return 'Canceled';const r=p37Response(req.id);if(r)return r.items.every(i=>i.status!=='pending')?'Reviewed':'Response received';return Date.now()>Date.parse(req.expiresAt)?'Expired':'Awaiting response';}
+function p37CreatePage(){const date=state.p37.date||p2Date(),tasks=p37TaskRows(date),rules=p37RuleRows(),draft=state.p37.formDraft||{};
+ return `<section class="p37-header"><div><p class="eyebrow">Guardian · Guest confirmation</p><h1 class="page-title">Ask Someone to Confirm 🌷</h1><p class="lead">Send a small checklist to Grandma, a teacher, or anyone helping with today's little adventures. No guest login needed.</p></div>${btn('← Review Center','not-used','btn-plain',`data-p37-action="back"`)}</section><section class="panel"><form id="p37-create" class="form-grid">
+ <div class="grid2">${p2Field('Activity date',`<input name="date" type="date" value="${esc(date)}" max="${p2Date()}" required>`)}${p2Field('Address to (optional)',`<input name="recipient" value="${esc(draft.recipient||'')}" maxlength="45" placeholder="Grandma, Auntie, Teacher…">`)}</div>
+ ${p2Field('Link expires after',`<select name="expiry">${[[1,'24 hours'],[3,'3 days'],[7,'7 days (default)'],[14,'14 days']].map(([d,label])=>`<option value="${d}" ${d===Number(draft.expiry||7)?'selected':''}>${label}</option>`).join('')}</select>`)}
+ <fieldset class="p2-fieldset"><legend>01 · Choose quests</legend><p class="p2-muted">Select only the activities this guest should confirm. Timed, scheduled and routine-step quests are listed where applicable.</p><div class="p37-items">${tasks.length?tasks.map(x=>`<label class="p37-check"><input type="checkbox" name="item" value="${esc(x.key)}"><span class="p37-emoji">${esc(x.icon)}</span><span class="grow"><strong>${esc(x.name)}</strong>${x.detail?`<small>${esc(x.detail)}</small>`:''}</span></label>`).join(''):'<p class="p2-muted">No available quests on this date.</p>'}</div></fieldset>
+ <fieldset class="p2-fieldset"><legend>02 · Choose rules</legend><div class="p37-items">${rules.length?rules.map(x=>`<label class="p37-check"><input type="checkbox" name="item" value="${esc(x.key)}"><span class="p37-emoji">${esc(x.icon)}</span><span class="grow"><strong>${esc(x.name)}</strong>${x.detail?`<small>${esc(x.detail)}</small>`:''}</span></label>`).join(''):'<p class="p2-muted">No active rules yet.</p>'}</div></fieldset>
+ <p class="p37-help">Only the child's display name and selected activities are included in the public link. Anyone with the link can read those details. Guest answers are always unverified until a Guardian reviews them.</p>
+ <div class="p2-actions"><button class="btn btn-primary" type="submit">💌 Generate Guest Link</button>${btn('Cancel','not-used','btn-plain',`data-p37-action="back"`)}</div></form></section>`;
+}
+async function p37Generate(form){if(!safeGuardian())throw Error('Unlock Guardian Mode first.');const fd=new FormData(form),date=String(fd.get('date')||''),recipient=String(fd.get('recipient')||'').trim().slice(0,45),expiry=Number(fd.get('expiry'));
+ if(!p2ValidDate(date)||date>p2Date())throw Error('Choose today or a past activity date.');if(![1,3,7,14].includes(expiry))throw Error('Choose a valid expiration.');
+ const picked=[...new Set(fd.getAll('item'))];if(!picked.length||picked.length>24)throw Error('Choose between 1 and 24 quests or rules.');
+ const available=[...p37TaskRows(date),...p37RuleRows()],items=picked.map(k=>available.find(x=>x.key===k));if(items.some(x=>!x))throw Error('One selected activity is no longer available.');
+ const id=p37Bytes(16),nonce=p37Bytes(16),createdAt=p37Now(),expiresAt=new Date(Date.now()+expiry*864e5).toISOString(),childName=String(state.profile?.nickname||'Little Star').slice(0,32),guardian=p37Actor(),from=p37ActorName(guardian);
+ const request={key:P37_REQ+id,id,nonce,status:'active',createdAt,expiresAt,date,childName,recipient,createdBy:guardian,createdByName:from,items,sharedAt:null};
+ const invite={v:1,type:'guest-request',rid:id,nonce,date,expiresAt,childName,recipient,from,items:items.map(({key,kind,name,icon,detail})=>({key,kind,name,icon,detail}))};
+ p37ValidInvite(invite);const link=p37Link('guest',invite);if(link.length>14500)throw Error('This guest link is too long. Select fewer activities.');
+ await put('records',request);await refresh();state.p37.issued={requestId:id,link};state.p37.formDraft={};state.guardianTab='p37-issued';render();
+}
+function p37IssuedPage(){const req=p37Request(state.p37.issued?.requestId);if(!req)return `<section class="panel">The original invitation is not available. ${btn('← Review Center','not-used','btn-plain','data-p37-action="back"')}</section>`;
+ const link=state.p37.issued.link;
+ return `<section class="p37-header"><div><p class="eyebrow">Guardian · Guest confirmation</p><h1 class="page-title">Your Invitation Is Ready 💌</h1><p class="lead">${esc(req.items.length)} selected item${req.items.length===1?'':'s'} for ${esc(req.childName)} · ${esc(req.date)}</p></div>${btn('← Review Center','not-used','btn-plain','data-p37-action="back"')}</section><section class="panel form-grid"><div class="p37-confirm"><strong>🌷 ${esc(req.recipient||'Your guest')}</strong><span>Expires ${esc(fmtDate(req.expiresAt))} · ${esc(p37RequestStatus(req))} · ${esc(p37SyncLabel(req))}</span><span class="p2-muted">${esc(req.items.map(x=>x.name).join(' · '))}</span></div><p>Share this link with the guest. They can answer without logging in and send their response back using their device's share sheet.</p><div class="p2-actions"><button class="btn btn-primary" type="button" data-p37-action="share-link">↗ Share Guest Checklist</button><button class="btn btn-soft" type="button" data-p37-action="copy-link">📋 Copy Link</button></div>${location.protocol==='file:'?'<p class="p37-help">⚠️ This app was opened as a local file. Guests need a GitHub Pages HTTPS address to open a shared link on their devices.</p>':''}${btn('Back to Review Center','not-used','btn-plain','data-p37-action="back"')}</section>`;
+}
+function p37GuestPage(){let invite;try{invite=p37ValidInvite(p37Extract(location.hash,'guest'));}catch(e){return p37Standalone('That link needs a little help','This guest checklist is invalid or incomplete. Please ask your Guardian for a new link.');}
+ if(Date.now()>Date.parse(invite.expiresAt))return p37Standalone('This invitation has expired','Please ask your Guardian for a fresh checklist link. No answers have been submitted.');
+ const old=state.p37.guestDraft;if(!old||old.rid!==invite.rid){state.p37.guestDraft={rid:invite.rid,name:invite.recipient||'',answers:{}};}
+ const draft=state.p37.guestDraft;
+ return `<div class="p37-guest-shell"><main class="p37-guest-card"><div class="p37-guest-flower">🌷</div><p class="eyebrow">My Little Star Garden · Guest Checklist</p><h1>${esc(invite.childName)}'s Little Adventures</h1><p class="p37-guest-lead">A little help confirming ${esc(invite.childName)}'s achievements!</p>
+ <div class="p37-guest-meta"><span>📅 ${esc(invite.date)}</span><span>💌 Requested by ${esc(invite.from)}</span></div>
+ <label class="field"><span>What should we call you? <small>(Optional)</small></span><input id="p37-guest-name" value="${esc(draft.name)}" maxlength="45" placeholder="Name or nickname"></label>
+ <div class="p37-guest-items">${invite.items.map((item,i)=>`<fieldset class="p37-guest-item"><legend><span class="p37-guest-icon">${esc(item.icon||'🌷')}</span> ${esc(item.name)}</legend>${item.detail?`<p>${esc(item.detail)}</p>`:''}<div class="p37-guest-options">${[['done','✓ Done'],['notdone','Not Done'],['unsure','Not Sure']].map(([val,label])=>`<label class="${draft.answers[item.key]===val?'active':''}"><input type="radio" name="p37-answer-${i}" value="${val}" data-key="${esc(item.key)}" ${draft.answers[item.key]===val?'checked':''}><span>${label}</span></label>`).join('')}</div></fieldset>`).join('')}</div>
+ <div class="p37-guest-footer"><p class="p37-guest-progress" id="p37-guest-count">${Object.keys(draft.answers).length} of ${invite.items.length} answered</p><button type="button" class="btn btn-primary btn-wide" data-p37-action="share-response" ${Object.keys(draft.answers).length===invite.items.length?'':'disabled'}>↗ Send Confirmation</button><button type="button" class="btn btn-soft btn-wide" data-p37-action="copy-response" ${Object.keys(draft.answers).length===invite.items.length?'':'disabled'}>📋 Copy Response Link</button><p class="p37-help">No account needed. Your report will be reviewed by an authorized Guardian before stars are awarded. A shared link is not proof of identity.</p>${state.p37.guestNotice?`<div class="p37-inline-msg" role="status">${esc(state.p37.guestNotice)}</div>`:''}</div></main></div>`;
+}
+function p37Standalone(title,description){return `<div class="p37-guest-shell"><main class="p37-guest-card"><div class="p37-guest-flower">🌷</div><p class="eyebrow">My Little Star Garden</p><h1>${esc(title)}</h1><p>${esc(description)}</p></main></div>`;}
+function p37GuestResponsePayload(){const inv=p37ValidInvite(p37Extract(location.hash,'guest')),draft=state.p37.guestDraft;
+ if(Date.now()>Date.parse(inv.expiresAt))throw Error('This guest checklist has expired.');if(!draft||inv.items.some(x=>!['done','notdone','unsure'].includes(draft.answers[x.key])))throw Error('Please answer every item first.');
+ const payload={v:1,type:'guest-response',rid:inv.rid,nonce:inv.nonce,date:inv.date,childName:inv.childName,recipient:inv.recipient,submittedAs:String(draft.name||'').trim().slice(0,45),submittedAt:p37Now(),items:inv.items.map(x=>({key:x.key,kind:x.kind,name:x.name,answer:draft.answers[x.key]}))};p37ValidResponse(payload);return payload;
+}
+async function p37Share(url,title,text){if(navigator.share){try{await navigator.share({title,text,url});return 'Opened your share sheet.';}catch(e){if(e.name==='AbortError')return 'Sharing canceled. Your answers are still here.';}}
+ await p37Copy(url);return 'Share sheet is unavailable; the link has been copied instead.';}
+async function p37Copy(value){if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(value);return;}const input=document.createElement('textarea');input.value=value;input.style.cssText='position:fixed;top:0;left:-9999px';document.body.append(input);input.select();const ok=document.execCommand?.('copy');input.remove();if(!ok)throw Error('Clipboard unavailable. Please try sharing from a browser with clipboard access.');}
+function p37RequestList(){return state.p37.requests.slice(0,40).map(req=>`<div class="p37-request-row"><div class="grow"><strong>${esc(req.recipient||'Guest')} · ${esc(req.date)}</strong><p class="p2-muted">${req.items.length} activities · ${esc(p37RequestStatus(req))} · ${esc(p37SyncLabel(req))}${req.createdBy===p37Actor()?' · Yours':''}</p></div><div class="p2-actions">${req.status==='active'&&!p37Response(req.id)?btn('Reshare','not-used','btn-soft p2-mini',`data-p37-action="reshare" data-id="${esc(req.id)}"`):''}${req.status==='active'&&!p37Response(req.id)?.items.some(i=>i.status==='approved')?btn('Cancel','not-used','btn-plain p2-mini',`data-p37-action="cancel-request" data-id="${esc(req.id)}"`):''}</div></div>`).join('');}
+function p37ReviewCenter(){const child=p31Pending(),guests=state.p37.responses,guestWaiting=guests.filter(r=>r.items.some(i=>i.status==='pending')),f=state.p37.filter||'all';
+ const childHistory=state.p31Requests.filter(r=>r.status!=='pending');const guestHistory=guests.filter(r=>r.items.every(i=>i.status!=='pending'));const unmatched=guests.filter(r=>!p37Request(r.id));
+ const currentRequests=state.p37.requests.filter(r=>r.createdBy===p37Actor()&&p37Response(r.id));
+ const myNotices=currentRequests.slice(0,5).map(req=>{const response=p37Response(req.id),pending=response.items.filter(i=>i.status==='pending').length;
+  const otherReviewers=[...new Set(response.items.filter(i=>i.reviewedBy&&i.reviewedBy!==p37Actor()).map(i=>i.reviewedByName||'another Guardian'))];
+  return {req,response,text:otherReviewers.length?`${otherReviewers.join(' and ')} reviewed part of ${req.recipient||'your guest'}'s response.`:`${req.recipient||'Your guest'}'s confirmation is ${pending?'awaiting review':'reviewed'}.`};
+ });
+ return `<section class="p37-header"><div><p class="eyebrow">Guardian · Review</p><h1 class="page-title">Guardian Review Center 💌</h1><p class="lead">Child requests and guest confirmations in one place. Guests never award stars directly.</p></div><div class="p2-actions">${btn('＋ Guest Confirmation','not-used','btn-rose',`data-p37-action="new"`)}${btn('↳ Import Guest Link','not-used','btn-soft',`data-p37-action="import-open"`)}</div></section>
+ ${myNotices.length?`<section class="panel p37-notifications"><h3>🔔 Updates on Your Guest Requests</h3>${myNotices.map(n=>`<div class="p37-inbox-item"><span>🌷</span><div class="grow"><strong>${esc(n.text)}</strong><p class="p2-muted">${esc(n.req.date)} · ${esc(n.response.items.filter(i=>i.status==='pending').length)} responses still need review</p></div>${btn('View','not-used','btn-plain p2-mini',`data-p37-action="open-response" data-id="${esc(n.req.id)}"`)}</div>`).join('')}</section>`:''}
+ <section class="panel"><div class="p37-tabs">${[['all',`All (${child.length+guestWaiting.length})`],['child',`Child Requests (${child.length})`],['guest',`Guest Confirmations (${guestWaiting.length})`],['history','Review History']].map(([id,label])=>`<button type="button" class="btn ${f===id?'btn-rose':'btn-plain'} btn-small" data-p37-action="filter" data-filter="${id}" aria-pressed="${f===id}">${label}</button>`).join('')}</div>
+ ${(f==='all'||f==='child')?`<div class="p37-section-title"><h3>📬 Child Requests</h3>${btn('Open Request Queue','not-used','btn-soft p2-mini','data-p37-action="child-queue"')}</div>${child.length?child.slice(0,8).map(r=>`<div class="p37-inbox-item"><span>💌</span><div class="grow"><strong>${esc(r.targetName||'Approval Request')}</strong><p class="p2-muted">${esc(r.kind)} · ${esc(r.date)}</p></div>${btn('Review','not-used','btn-soft p2-mini','data-p37-action="child-queue"')}</div>`).join(''):'<p class="p2-muted">No pending child requests.</p>'}`:''}
+ ${(f==='all'||f==='guest')?`<div class="p37-section-title"><h3>🌷 Guest Confirmations</h3><span class="chip">${guestWaiting.length} pending</span></div>${guestWaiting.length?guestWaiting.map(r=>{const req=p37Request(r.id),match=p37Matches(req,r),count=r.items.filter(x=>x.status==='pending').length;return `<div class="p37-inbox-item"><span>✉️</span><div class="grow"><strong>${esc(r.submittedAs||'Unnamed guest')}'s Confirmation</strong><p class="p2-muted">${esc(r.date)} · ${count} to review · ${match.ok?'Ready for review':req?match.reason:'Awaiting request match'}</p></div>${btn('Open','not-used','btn-soft p2-mini',`data-p37-action="open-response" data-id="${esc(r.id)}"`)}</div>`;}).join(''):'<p class="p2-muted">No pending guest confirmations.</p>'}`:''}
+ ${f==='history'?`<h3>📖 Recent Review History</h3>${[...guestHistory.map(r=>({type:'guest',at:r.receivedAt||'',text:`${r.submittedAs||'Unnamed guest'} · ${r.date}`,id:r.id,details:`${r.items.filter(x=>x.status==='approved').length} approved · ${r.items.filter(x=>x.status==='reviewed').length} acknowledged · ${r.items.filter(x=>x.status==='declined').length} declined`})),...childHistory.map(r=>({type:'child',at:r.resolvedAt||'',text:r.targetName||r.kind,details:r.status}))].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,30).map(row=>`<div class="p37-inbox-item"><span>${row.type==='guest'?'🌷':'💌'}</span><div class="grow"><strong>${esc(row.text)}</strong><p class="p2-muted">${esc(row.details)}</p></div>${row.type==='guest'?btn('Details','not-used','btn-plain p2-mini',`data-p37-action="open-response" data-id="${esc(row.id)}"`):''}</div>`).join('')||'<p class="p2-muted">There are no completed reviews yet.</p>'}`:''}</section>
+ <section class="panel"><div class="p37-section-title"><h3>🔗 Guest Requests You've Created</h3>${btn('＋ New Request','not-used','btn-soft p2-mini','data-p37-action="new"')}</div>${state.p37.requests.length?p37RequestList():'<p class="p2-muted">No guest confirmation links yet.</p>'}</section>
+ 
+ <section class="panel"><h3>More Guardian Reviews</h3><div class="p61-review-grid"><article class="p2-card"><h3>✏️ Quest Notes</h3><p class="p2-muted">Encourage little reflections</p>${btn('Review Notes','not-used','btn-soft',`data-p61-action="review-page" data-id="quest-notes"`)}</article><article class="p2-card"><h3>📖 Daily Star Review</h3><p class="p2-muted">Confirm individual tasks</p>${btn('Open Daily Review','not-used','btn-soft',`data-p61-action="review-page" data-id="daily-review"`)}</article><article class="p2-card"><h3>🌟 Daily Rules Check-in</h3><p class="p2-muted">Celebrate successful practice</p>${btn('Check Rules','not-used','btn-soft',`data-p61-action="review-page" data-id="rule-checkin"`)}</article></div></section>`;
+}
+function p37ImportPage(){const inbound=state.p37.inbound;
+ return `<section class="p37-header"><div><p class="eyebrow">Guardian · Guest confirmation</p><h1 class="page-title">Import Guest Confirmation</h1><p class="lead">Open a response link or paste one here. We won't award stars until you review each item.</p></div>${btn('← Review Center','not-used','btn-plain','data-p37-action="back"')}</section><section class="panel"><form id="p37-import" class="form-grid"><label class="field"><span>Guest response link</span><textarea name="link" rows="4" placeholder="Paste the complete link from Messenger or another app" required>${esc(inbound||state.p37.importDraft||'')}</textarea></label><div class="p2-actions"><button class="btn btn-primary" type="submit">📥 Import for Review</button>${btn('Cancel','not-used','btn-plain','data-p37-action="back"')}</div></form><p class="p37-help">The original request must be available locally or through Family Sync. Unmatched responses are held with stars locked. Guest links are not proof of identity.</p></section>`;
+}
+async function p37Import(link){if(!safeGuardian())throw Error('Guardian authentication required.');const data=p37ValidResponse(p37Extract(link,'response'));
+ const existing=p37Response(data.rid);if(existing){state.p37.selected=data.rid;state.guardianTab='p37-guest-review';render();notice('This response was already imported. No duplicate record was created.');return;}
+ const req=p37Request(data.rid),match=p37Matches(req,data);
+ // Invalid known requests cannot be accepted. Unknown requests are kept on hold for later sync.
+ if(req&&!match.ok)throw Error(match.reason);
+ const stamp=p37Now(),row={key:P37_RES+data.rid,id:data.rid,nonce:data.nonce,date:data.date,childName:data.childName,recipient:data.recipient,submittedAs:data.submittedAs,submittedAt:data.submittedAt,receivedAt:stamp,receivedBy:p37Actor(),items:data.items.map(x=>({...x,status:'pending',reason:'',reviewedBy:null,reviewedAt:null})),status:match.ok?'pending':'on-hold'};
+ await put('records',row);await refresh();state.p37.selected=data.rid;state.p37.inbound=null;state.p37.importDraft='';state.guardianTab='p37-guest-review';render();notice(match.ok?'Guest confirmation imported for Guardian review.':'Response saved on hold. It cannot earn stars until the original request is available.');
+}
+function p37DetailPage(){const response=p37Response(state.p37.selected),req=p37Request(response?.id);if(!response)return `<section class="panel">This response is not available. ${btn('← Review Center','not-used','btn-plain','data-p37-action="back"')}</section>`;
+ const match=p37Matches(req,response),already=response.items.every(i=>i.status!=='pending');
+ return `<section class="p37-header"><div><p class="eyebrow">Guardian · Guest confirmation</p><h1 class="page-title">${esc(response.submittedAs||'Unnamed Guest')}'s Confirmation 🌷</h1><p class="lead">${esc(response.childName)} · ${esc(response.date)} · Originally addressed to ${esc(req?.recipient||response.recipient||'Guest')}</p></div>${btn('← Review Center','not-used','btn-plain','data-p37-action="back"')}</section>
+ <section class="panel"><div class="p37-confirm"><strong>${match.ok?'Ready for Guardian review':req?'Cannot approve this response':'Awaiting Request Match'}</strong><p>${esc(match.ok?'This is an unverified guest report. Only authenticated Guardians can award stars.':match.reason)}</p><p class="p2-muted">${esc(req?.createdByName||'Requesting Guardian')} requested · Submitted as ${esc(response.submittedAs||'unnamed guest')} · ${esc(fmtDate(response.submittedAt))}</p></div>
+ ${response.items.map((x,i)=>{const original=req?.items.find(t=>t.key===x.key),status=match.ok?p37ItemState(req,x):null;const done=x.answer==='done',blocked=!!status?.blocked,closed=x.status!=='pending';const label=({done:'Done',notdone:'Not Done',unsure:'Not Sure'})[x.answer];
+ return `<article class="p37-review-item"><div class="p37-review-head"><span class="p37-emoji">${esc(original?.icon||'🌷')}</span><div class="grow"><strong>${esc(original?.name||x.name)}</strong><p class="p2-muted">Guest: ${esc(label)} · ${esc(x.status==='pending'?'Needs review':x.status==='approved'?'Guardian approved':x.status==='declined'?'Declined':'Acknowledged')}</p></div><span class="p2-tag">${esc(status?.reason||'')}</span></div>
+ ${match.ok&&p37Conflict(req,x.key,x.answer,response.id)?`<p class="p37-conflict">🌷 Different Reports: another guest gave a different answer for this activity. Both reports remain unchanged, and you may review independently.</p>`:''}
+ ${blocked&&match.ok?`<p class="p37-help">${status.changed?'Activity settings changed since sharing. Review independently in the usual Quest/Rule workflow.':'Stars or the daily rule check-in were already recorded. This guest report can only be acknowledged.'}</p>`:''}
+ ${!match.ok?'<p class="p2-muted">Approval disabled until a valid matching request is available.</p>':closed?`<p class="p2-muted">Reviewed by ${esc(x.reviewedByName||'Guardian')} ${esc(x.reviewedAt?fmtDate(x.reviewedAt):'')}${x.reason?` · Reason: ${esc(x.reason)}`:''}</p>`:(!done||blocked)?btn('✓ Mark Reviewed','not-used','btn-soft',`data-p37-action="resolve" data-id="${esc(response.id)}" data-key="${esc(x.key)}" data-decision="reviewed"`):`<div class="p37-review-actions"><label class="grow">Optional Guardian reason<input maxlength="240" type="text" data-p37-reason="${esc(x.key)}" placeholder="Only Guardians see this reason"></label><div class="p2-actions">${btn('⭐ Approve','not-used','btn-rose',`data-p37-action="resolve" data-id="${esc(response.id)}" data-key="${esc(x.key)}" data-decision="approved"`)}${btn('Decline','not-used','btn-plain',`data-p37-action="resolve" data-id="${esc(response.id)}" data-key="${esc(x.key)}" data-decision="declined"`)}</div></div>`}
+ </article>`;}).join('')}
+ ${already?'<p class="p37-help">All responses reviewed. Guest reports remain in Review History; they do not appear in Child Mode.</p>':''}</section>`;
+}
+async function p37Resolve(responseId,itemKey,decision,reason=''){
+ if(!safeGuardian())throw Error('Unlock Guardian Mode first.');const response=p37Response(responseId),req=p37Request(responseId),match=p37Matches(req,response||{});if(!response||!match.ok)throw Error(match.reason||'The original request is unavailable.');
+ const x=response.items.find(x=>x.key===itemKey);if(!x||x.status!=='pending')throw Error('That item has already been reviewed.');
+ const status=p37ItemState(req,x),item=status.item;if(!item)throw Error('The original activity is unavailable.');
+ if(x.answer!=='done'&&decision!=='reviewed')throw Error('Not Done / Not Sure reports only require acknowledgment.');
+ if(x.answer==='done'&&status.blocked&&decision!=='reviewed')throw Error(status.reason+'. This report can only be acknowledged.');
+ if(!['reviewed','approved','declined'].includes(decision))throw Error('Choose a valid review action.');
+ if(x.answer==='done'&&!status.blocked&&decision==='reviewed')throw Error('Choose Approve or Decline for this Done response.');
+ const stamp=p37Now(),guardianId=p37Actor(),guardianName=p37ActorName(),audit={key:P37_AUDIT+responseId+':'+item.key,requestId:responseId,itemKey:item.key,guestAnswer:x.answer,decision,guardianId,guardianName,reason:String(reason||'').trim().slice(0,240),createdAt:stamp};
+ // Quests reuse the established completion award/eligibility path, not a separate ledger.
+ if(decision==='approved'&&item.kind==='task'){
+  const t=p2Task(item.id);if(!t||t.archived||t.draft||!p2Due(t,req.date))throw Error('This quest is no longer eligible.');
+  const elig=p2CompletionEligibility(t,req.date,item.slot||'',item.stepIndex??null);if(!elig.ok)throw Error(elig.reason+' Review the normal Quest workflow instead.');
+  const completed=await p2SaveCompletion(t,req.date,item.slot||'',item.stepIndex??null,'unrecorded','');audit.completionId=completed.id;
+ }
+ // A rule's actual daily check-in and guest decision are committed together.
+ if(decision==='approved'&&item.kind==='rule'){
+  const r=p2Rule(item.id);if(!r||r.archived||p41RuleFollowed(r.id,req.date))throw Error('Rule already confirmed or no longer available.');
+  const earned=Number(r.earnStars||0);if(!Number.isSafeInteger(earned)||earned<0||earned>40)throw Error('Invalid rule star amount.');
+  const updated={...response,items:response.items.map(y=>y.key===itemKey?{...y,status:decision,reason:audit.reason,reviewedAt:stamp,reviewedBy:guardianId,reviewedByName:guardianName}:y)};
+  updated.status=updated.items.every(y=>y.status!=='pending')?'resolved':'pending';
+  await atomic(earned?['records','transactions']:['records'],tx=>{
+   tx.objectStore('records').put(updated);tx.objectStore('records').put(audit);
+   if(earned){const prev=state.summary.transactions.find(t=>t.type==='rule-earned'&&t.ruleId===r.id&&t.ruleDate===req.date);const id=prev?`rule-earned:${r.id}:${req.date}:redo:${p37Bytes(8)}`:`rule-earned:${r.id}:${req.date}`;
+    tx.objectStore('transactions').add({id,type:'rule-earned',ruleId:r.id,ruleDate:req.date,amount:earned,reason:`Followed rule: ${r.name} (${req.date})`,createdAt:stamp,source:'guardian-guest-confirmation',guardianId,requestId:req.id});}
+   else tx.objectStore('records').add({key:`p41-follow-rule:${r.id}:${req.date}`,ruleId:r.id,date:req.date,confirmedAt:stamp,guardianId,requestId:req.id});
+  });
+ }else{
+  const updated={...response,items:response.items.map(y=>y.key===itemKey?{...y,status:decision,reason:audit.reason,reviewedAt:stamp,reviewedBy:guardianId,reviewedByName:guardianName}:y)};
+  updated.status=updated.items.every(y=>y.status!=='pending')?'resolved':'pending';
+  await atomic(['records'],tx=>{tx.objectStore('records').put(updated);tx.objectStore('records').put(audit);});
+ }
+ await refresh();state.p37.selected=responseId;state.guardianTab='p37-guest-review';render();notice(decision==='approved'?'🌟 Achievement approved using the existing quest or rule award system.':decision==='declined'?'Guest report declined. No stars changed.':'Guest report acknowledged. No stars changed.');
+}
+function p37InboundPage(){const data=state.p37.inbound;
+ if(!state.profile)return `<div class="p37-guest-shell"><main class="p37-guest-card"><div class="p37-guest-flower">💌</div><p class="eyebrow">My Little Star Garden · Guardian Only</p><h1>Open on Your Guardian Device</h1><p>This response belongs in the family's existing Star Garden. Copy the response link and import it on the Guardian's usual browser or device.</p><button class="btn btn-primary btn-wide" type="button" data-p37-action="copy-inbound">📋 Copy Response Link</button><p class="p37-help">No information has been imported or awarded on this browser.</p></main></div>`;
+ return `<div class="p37-guest-shell"><main class="p37-guest-card"><div class="p37-guest-flower">💌</div><p class="eyebrow">My Little Star Garden · Guardian Only</p><h1>Guest Confirmation Received</h1><p>Open Guardian Mode to import this response, or copy the link for the browser where your family's garden is saved.</p><div class="p2-actions"><button class="btn btn-primary" data-p37-action="unlock-import">🔐 Unlock Guardian</button><button class="btn btn-soft" data-p37-action="copy-inbound">📋 Copy Link</button></div><p class="p37-help">Nothing has been imported or awarded yet. Guest identity is not authenticated.</p></main></div>`;
+}
+function p37HandleHash(){const h=location.hash;if(!h||!/^#mlsg-(guest|response)=/.test(h))return;
+ if(h.startsWith('#mlsg-response=')){
+  const href=location.href;try{p37ValidResponse(p37Extract(h,'response'));state.p37.inbound=href;}catch(e){state.p37.inbound=href;state.p37.guestNotice=e.message;}
+  history.replaceState(null,'',location.href.split('#')[0]);
+ }
+}
+p37HandleHash();
+window.addEventListener('hashchange',()=>{p37HandleHash();render();});
+const p37PreviousGuardian=guardian;
+guardian=function(){if(safeGuardian()){
+ if(state.guardianTab==='p61-review-center')return shell(p37ReviewCenter(),true);
+ if(state.guardianTab==='p37-create')return shell(p37CreatePage(),true);
+ if(state.guardianTab==='p37-issued')return shell(p37IssuedPage(),true);
+ if(state.guardianTab==='p37-import')return shell(p37ImportPage(),true);
+ if(state.guardianTab==='p37-guest-review')return shell(p37DetailPage(),true);
+ }return p37PreviousGuardian();};
+const p37PreviousRender=render;
+render=function(){
+ if(location.hash.startsWith('#mlsg-guest=')){app.innerHTML=p37GuestPage();return;}
+ if(state.p37.inbound&&!state.unlocked&&state.view!=='pin'&&state.view!=='recover'&&state.view!=='show-recovery'&&state.view!=='restore-pin'){
+  app.innerHTML=p37InboundPage();return;
+ }
+ if(state.unlocked&&state.p37.inbound){state.p37.importDraft=state.p37.inbound;state.p37.inbound=null;state.view='guardian';state.guardianTab='p37-import';}
+ p37PreviousRender();
+};
+// Use capture handlers so the guest view never invokes underlying child/Guardian actions.
+app.addEventListener('change',e=>{
+ const input=e.target.closest('.p37-guest-item input[type="radio"]');if(input){const d=state.p37.guestDraft;if(d){d.answers[input.dataset.key]=input.value;
+  const total=document.querySelectorAll('.p37-guest-item').length;document.querySelectorAll('.p37-guest-item input').forEach(n=>n.closest('label').classList.toggle('active',n.checked));
+  const count=Object.keys(d.answers).length,el=document.querySelector('#p37-guest-count');if(el)el.textContent=`${count} of ${total} answered`;
+  document.querySelectorAll('[data-p37-action="share-response"],[data-p37-action="copy-response"]').forEach(b=>b.disabled=count!==total);
+ }}return;
+ if(e.target.matches('#p37-create [name="date"]')){state.p37.formDraft={recipient:app.querySelector('#p37-create [name="recipient"]')?.value||'',expiry:app.querySelector('#p37-create [name="expiry"]')?.value||'7'};state.p37.date=e.target.value;render();}
+},true);
+app.addEventListener('input',e=>{if(e.target.id==='p37-guest-name'&&state.p37.guestDraft)state.p37.guestDraft.name=e.target.value;},true);
+app.addEventListener('submit',async e=>{
+ const form=e.target;if(!['p37-create','p37-import'].includes(form.id))return;
+ e.preventDefault();e.stopImmediatePropagation();if(state.p37.busy)return;state.p37.busy=true;
+ try{if(form.id==='p37-create')await p37Generate(form);else await p37Import(new FormData(form).get('link'));
+ }catch(err){notice(err.message||'Unable to complete the confirmation.',true);}finally{state.p37.busy=false;}
+},true);
+app.addEventListener('click',async e=>{
+ const button=e.target.closest('[data-p37-action]');if(!button)return;e.preventDefault();e.stopImmediatePropagation();
+ const action=button.dataset.p37Action;if(state.p37.busy)return;
+ try{
+  if(['share-response','copy-response'].includes(action)){
+   const payload=p37GuestResponsePayload(),url=p37Link('response',payload);if(url.length>14500)throw Error('The response link is too long; ask your Guardian to send a smaller checklist.');
+   const msg=action==='share-response'?await p37Share(url,`${payload.childName}'s guest confirmation`,'Please open this confirmation in Guardian Mode for review.'): (await p37Copy(url),'Response link copied. Send it to the Guardian who requested it.');
+   state.p37.guestNotice=msg;const el=app.querySelector('.p37-inline-msg');if(el)el.textContent=msg;else{const holder=app.querySelector('.p37-guest-footer');if(holder)holder.insertAdjacentHTML('beforeend',`<div class="p37-inline-msg" role="status">${esc(msg)}</div>`);}return;
+  }
+  if(action==='copy-inbound'){await p37Copy(state.p37.inbound);notice('Response link copied. Open it on your usual Guardian device.');return;}
+  if(action==='unlock-import'){await handleAction('open-pin');return;}
+  if(!safeGuardian())throw Error('Guardian Mode must be unlocked first.');touchSession();
+  if(action==='back'){state.guardianTab='p61-review-center';state.p37.selected=null;render();return;}
+  if(action==='new'){state.guardianTab='p37-create';state.p37.date=p2Date();state.p37.formDraft={};render();return;}
+  if(action==='filter'){state.p37.filter=button.dataset.filter;render();return;}
+  if(action==='import-open'){state.guardianTab='p37-import';render();return;}
+  if(action==='child-queue'){state.guardianTab='requests';render();return;}
+  if(action==='open-response'){state.p37.selected=button.dataset.id;state.guardianTab='p37-guest-review';render();return;}
+  if(action==='reshare'){const req=p37Request(button.dataset.id);if(!req||req.status!=='active')throw Error('Request cannot be shared.');
+   const invite={v:1,type:'guest-request',rid:req.id,nonce:req.nonce,date:req.date,expiresAt:req.expiresAt,childName:req.childName,recipient:req.recipient,from:req.createdByName,items:req.items.map(({key,kind,name,icon,detail})=>({key,kind,name,icon,detail}))};
+   const url=p37Link('guest',invite);await p37Share(url,`${req.childName}'s little adventures`,'Please help confirm these activities.');return;
+  }
+  if(action==='cancel-request'){const req=p37Request(button.dataset.id);if(!req||req.status!=='active')throw Error('This request cannot be canceled.');if(p37Response(req.id)?.items.some(i=>i.status==='approved'))throw Error('This request already has an approved award. Use the existing correction workflow for awards; completed approvals cannot be canceled retroactively.');if(!confirm('Cancel this guest confirmation request? Pending responses will become ineligible for approval, and you can create a corrected link.'))return;
+   await put('records',{...req,status:'cancelled',canceledAt:p37Now(),canceledBy:p37Actor()});await refresh();notice('Request canceled. Existing shared copies cannot be remotely erased.');return;
+  }
+  if(action==='copy-link'||action==='share-link'){const link=state.p37.issued?.link;if(!link)throw Error('Generate a guest checklist link first.');
+   if(action==='copy-link'){await p37Copy(link);notice('Guest checklist link copied.');}else{const msg=await p37Share(link,'My Little Star Garden guest checklist','Please help confirm these little adventures.');notice(msg);}return;
+  }
+  if(action==='resolve'){
+   if(state.p37.busy)return;state.p37.busy=true;try{const responseId=button.dataset.id,key=button.dataset.key,decision=button.dataset.decision;
+    const scope=button.closest('.p37-review-item'),reason=scope?.querySelector('[data-p37-reason]')?.value||'';
+    await p37Resolve(responseId,key,decision,reason);
+   }finally{state.p37.busy=false;}return;
+  }
+ }catch(err){if(location.hash.startsWith('#mlsg-guest=')){state.p37.guestNotice=err.message;render();}else notice(err.message||'Could not complete the action.',true);}
+},true);
+const P37_STYLE=String.raw`
+.p37-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}.p37-header .p2-actions{margin-top:5px}.p37-items{display:grid;gap:9px;max-height:510px;overflow:auto;padding:5px}
+.p37-check{display:flex;align-items:center;gap:13px;padding:12px;border:1px solid #ecdce8;background:#fffdfd;border-radius:15px;cursor:pointer}.p37-check input{width:20px;height:20px;accent-color:#b87da0;flex-shrink:0}.p37-check small{display:block;color:#8d798c;font-weight:400;margin-top:4px}.p37-emoji{font-size:1.5rem;flex:none}.p37-help{color:#806b7f;background:#f8eff5;border:1px solid #f0dfeb;border-radius:14px;padding:13px;line-height:1.55;font-size:.87rem}.p37-confirm{background:#f8f2fa;border:1px solid #e7d8eb;padding:16px;border-radius:16px;display:grid;gap:5px}.p37-confirm span{font-size:.9rem;color:#7d6886}.p37-confirm p{margin:0}.p37-request-row,.p37-inbox-item{display:flex;align-items:center;gap:12px;border-bottom:1px solid #eee0ea;padding:14px 2px}.p37-request-row:last-child,.p37-inbox-item:last-child{border-bottom:none}.p37-request-row .p2-actions{flex-wrap:wrap}.p37-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}.p37-section-title{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:15px 0}.p37-review-item{border:1px solid #ebdce9;border-radius:16px;padding:16px;margin:13px 0;background:#fffefd}.p37-review-head{display:flex;align-items:center;gap:13px}.p37-review-head .p2-tag{white-space:normal}.p37-review-actions{margin-top:12px;display:grid;gap:10px}.p37-review-actions label{display:grid;gap:6px;font-size:.88rem}.p37-review-actions input{width:100%;box-sizing:border-box}.p37-conflict{border-radius:13px;background:#f6f1fa;border:1px solid #e5d9ed;padding:11px 13px;font-size:.87rem;color:#806a8e;margin:12px 0}.p37-inline-msg{padding:12px 15px;border:1px solid #d8c8e6;background:#f3edfa;color:#65567c;border-radius:14px;font-size:.9rem}
+.p37-guest-shell{min-height:100vh;background:linear-gradient(135deg,#fff6fa,#f4f1fb);padding:28px 16px;display:flex;justify-content:center;align-items:flex-start}.p37-guest-card{background:#fffefe;border:1px solid #eadbe9;box-shadow:0 15px 60px rgba(98,60,97,.07);border-radius:28px;padding:32px;width:min(700px,100%);box-sizing:border-box;display:grid;gap:15px;color:#705d77}.p37-guest-card h1{font-family:Georgia,serif;color:#6f587a;font-size:clamp(1.65rem,3.5vw,2.25rem);text-align:center;margin:0}.p37-guest-card>.eyebrow{text-align:center;margin:0}.p37-guest-card>p{text-align:center}.p37-guest-flower{text-align:center;font-size:3rem}.p37-guest-lead{color:#87758d;margin:0}.p37-guest-meta{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;color:#8b7b97;font-size:.87rem}.p37-guest-meta span{border-radius:99px;padding:7px 12px;background:#f6f0fb}.p37-guest-card .field{display:grid;gap:7px}.p37-guest-card .field small{color:#9a8397}.p37-guest-items{display:grid;gap:15px}.p37-guest-item{border:1px solid #e9dcec;border-radius:18px;padding:14px 16px;min-width:0}.p37-guest-item legend{font-weight:700;color:#6f587a;padding:0 8px;font-size:1rem}.p37-guest-icon{font-size:1.25rem}.p37-guest-item>p{color:#917f95;margin:1px 0 13px;font-size:.9rem}.p37-guest-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.p37-guest-options label{position:relative;border-radius:12px;border:1px solid #e7dbe9;padding:10px 6px;text-align:center;cursor:pointer;font-size:.88rem}.p37-guest-options label.active{background:#f5eaf5;border-color:#bb97c0;color:#67476c;font-weight:700}.p37-guest-options input{position:absolute;opacity:0;pointer-events:none}.p37-guest-options label:focus-within{outline:2px solid #b47aad;outline-offset:2px}.p37-guest-footer{display:grid;gap:10px}.p37-guest-progress{text-align:center;font-size:.86rem;color:#8a738e}.p37-guest-card .p37-help{text-align:left;font-size:.8rem}
+@media(max-width:600px){.p37-guest-shell{padding:12px}.p37-guest-card{padding:21px 16px;border-radius:20px}.p37-guest-options{gap:4px}.p37-guest-options label{font-size:.78rem}.p37-header .p2-actions{width:100%}.p37-request-row{align-items:flex-start;flex-wrap:wrap}.p37-inbox-item{align-items:flex-start}.p37-review-head{align-items:flex-start;flex-wrap:wrap}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d1-guest">${P37_STYLE}</style>`);
+/* End Phase 6D.1 */
+
 </script>
 </body>
 </html>
