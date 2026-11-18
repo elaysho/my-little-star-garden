@@ -11673,7 +11673,306 @@ const P35_STYLE=String.raw`
 @media(max-width:600px){#app .p35-theme-options{grid-template-columns:repeat(3,minmax(0,1fr))}#app .p35-theme{font-size:.7rem;padding:9px 3px}#app #p4-reward-form .p35-flat-claims{grid-template-columns:1fr}}
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="p35-style">${P35_STYLE}</style>`);
+/* Phase 6C.2B.2E.8 – reward requirements visual refinement only.
+   The Achievement Card exporter remains intentionally unchanged pending layout approval. */
+const p36PreviousRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){
+  const root=document.createElement('div');root.innerHTML=p36PreviousRewardEditor();
+  const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+  const req=form.querySelector('.p27-requirements');
+  const flow=req?.querySelector('.p34-req-flow');
+  if(req&&flow){
+    req.classList.add('p36-refined-req');
+    const first=flow.querySelector('.p34-flow-head');
+    const selected=flow.querySelector('.p5a-selected');
+    const tabs=flow.querySelector('.p5a-req-tabs');
+    // Keep selected items visible while scrolling available tasks/rules.
+    if(selected&&tabs){
+      selected.classList.add('p36-selected-summary');
+      const count=selected.querySelector('#p5a-req-count');
+      const chips=selected.querySelector('#p5a-req-chips');
+      if(count&&chips){
+        const details=document.createElement('details');details.className='p36-selected-details';details.open=true;
+        const summary=document.createElement('summary');
+        summary.innerHTML='Selected requirements (<span id="p5a-req-count">'+count.textContent+'</span>)';
+        count.removeAttribute('id');details.append(summary,chips);selected.replaceChildren(details);
+        selected.hidden=!(Number(summary.querySelector('#p5a-req-count')?.textContent)||0);
+      }
+      tabs.before(selected);
+    }
+    if(first)first.textContent='1 · Choose Tasks and Rules';
+    const period=flow.querySelector('.p34-period');
+    const periodHead=flow.querySelector('.p34-period-heading');
+    if(periodHead)periodHead.textContent='2 · When should the tasks be completed?';
+    const periodLabel=period?.querySelector('label');if(periodLabel)periodLabel.classList.add('p36-sr-only');
+    const match=flow.querySelector('.p34-match-field');
+    const matchHead=match?.previousElementSibling;
+    if(matchHead?.classList.contains('p34-flow-head'))matchHead.textContent='3 · What must be completed?';
+    const matchLabel=match?.querySelector(':scope > label');if(matchLabel)matchLabel.classList.add('p36-sr-only');
+    const periodHint=period?.querySelector('.field-help');
+    if(periodHint)periodHint.textContent='Same day: before using the reward. Every scheduled day: each assigned day that week; a valid excuse counts without awarding stars.';
+    const chips=selected?.querySelector('.p5a-chips');if(chips)chips.setAttribute('aria-live','polite');
+    const panels=flow.querySelectorAll('.p5a-req-panel');
+    for(const panel of panels){panel.classList.add('p36-compact-panel');}
+  }
+  return root.innerHTML;
+};
+const p36PreviousRequirementUI=p5aRequirementUI;
+p5aRequirementUI=function(){
+ const box=document.querySelector('.p36-selected-summary');const wasHidden=!!box?.hidden;
+ p36PreviousRequirementUI();
+ if(box){const n=Number(box.querySelector('#p5a-req-count')?.textContent)||0;
+ box.hidden=n===0;if(n>0&&wasHidden){const details=box.querySelector('details');if(details)details.open=true;}
+ }
+};
+const P36_REQUIREMENT_STYLE=String.raw`
+#app #p4-reward-form .p27-requirements.p36-refined-req{
+ background:transparent!important;min-width:0;gap:12px;padding-top:13px;padding-bottom:17px;
+}
+#app #p4-reward-form .p36-refined-req > .p2-muted{
+ margin:0 0 8px!important;background:transparent!important;padding:0!important;line-height:1.5;
+}
+#app #p4-reward-form .p36-refined-req .p34-req-flow{display:block!important;min-width:0}
+#app #p4-reward-form .p36-refined-req .p34-flow-head{
+ font-size:.96rem!important;margin:22px 0 12px!important;padding:18px 0 0!important;
+ border-top:1px solid #eddce5!important;line-height:1.35;
+}
+#app #p4-reward-form .p36-refined-req .p34-flow-head:first-child{
+ border-top:0!important;margin:0 0 10px!important;padding:0!important;
+}
+#app #p4-reward-form .p36-refined-req .p5a-req-tabs{
+ display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:9px;margin:0 0 12px!important;min-width:0;
+}
+#app #p4-reward-form .p36-refined-req .p5a-tab{
+ min-height:46px;line-height:1.22;padding:10px 7px!important;white-space:normal;
+}
+#app #p4-reward-form .p36-refined-req .p36-selected-summary{
+ margin:0 0 15px!important;padding:9px 12px!important;border-radius:12px!important;
+ background:#f9eaf2!important;border:1px solid #eed7e3!important;
+}
+#app #p4-reward-form .p36-refined-req .p36-selected-summary[hidden]{display:none!important}
+#app #p4-reward-form .p36-refined-req .p36-selected-details{display:block}
+#app #p4-reward-form .p36-refined-req .p36-selected-details>summary{cursor:pointer;font-size:.84rem;font-weight:800;color:#7f4d69;padding:2px 0;list-style:revert}
+#app #p4-reward-form .p36-refined-req .p36-selected-details:not([open]) .p5a-chips{display:none!important}
+#app #p4-reward-form .p36-refined-req .p36-selected-summary strong{font-size:.9rem}
+#app #p4-reward-form .p36-refined-req .p36-selected-summary .p5a-chips{
+ display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0!important;
+}
+#app #p4-reward-form .p36-refined-req .p36-selected-summary .p5a-chip{
+ max-width:100%;font-size:.77rem;white-space:normal;line-height:1.35;
+ overflow-wrap:anywhere;padding:7px 10px;align-items:center;
+}
+#app #p4-reward-form .p36-refined-req .p36-compact-panel{margin:0!important;padding:0!important;min-width:0}
+#app #p4-reward-form .p36-refined-req .p36-compact-panel>label{display:block;margin:0 0 6px!important;font-size:.87rem}
+#app #p4-reward-form .p36-refined-req .p5a-search{
+ width:100%!important;min-width:0!important;max-width:100%!important;
+ box-sizing:border-box!important;margin:0 0 10px!important;min-height:42px;
+}
+#app #p4-reward-form .p36-refined-req .p5a-req-scroll{max-height:242px!important;gap:5px!important;margin:0!important;padding:1px 1px 3px!important}
+#app #p4-reward-form .p36-refined-req .p5a-check-item{
+ border-radius:11px!important;background:#fffefd!important;padding:9px 11px!important;min-height:48px;
+}
+#app #p4-reward-form .p36-refined-req .p34-period{margin:0!important;padding:0!important}
+#app #p4-reward-form .p36-refined-req .p34-period .field-help{margin:8px 0 0!important;line-height:1.5}
+#app #p4-reward-form .p36-refined-req .p34-match-field{margin:0!important;padding:0!important}
+#app #p4-reward-form .p36-refined-req .p5a-modes{display:grid;gap:9px;margin:0!important}
+#app #p4-reward-form .p36-refined-req .p5a-modes label{padding:11px 13px;min-height:45px}
+#app #p4-reward-form .p36-sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+#app #p4-reward-form .p36-refined-req .p34-flow-head[hidden],
+#app #p4-reward-form .p36-refined-req .p34-period[hidden],
+#app #p4-reward-form .p36-refined-req .p34-match-field[hidden],
+#app #p4-reward-form .p36-refined-req .p36-compact-panel[hidden]{display:none!important}
+@media(max-width:430px){#app #p4-reward-form .p36-refined-req .p5a-req-tabs{gap:7px}
+ #app #p4-reward-form .p36-refined-req .p5a-check-item{padding:9px!important}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p36-reward-visual">${P36_REQUIREMENT_STYLE}</style>`);
+/* End Phase 6C.2B.2E.8 reward UI prep */
+
 /* ===== End Phase 6C.2B.2E.7 ===== */
+
+
+/* Phase 6C.2B.2E.9 — approved Achievement Card implementation.
+   Export-only replacement; no changes to reward forms, storage, approvals or sync. */
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ if(!snapshot)throw Error('No daily progress available for this card.');
+ const t=p35Themes[state.p35CardTheme]||p35Themes.blossom;
+ const c=document.createElement('canvas');c.width=2400;c.height=1800;
+ const g=c.getContext('2d');if(!g)throw Error('PNG export is unavailable in this browser.');
+ const rect=(x,y,w,h,r,fill,stroke)=>p10RoundRect(g,x,y,w,h,r,fill,stroke);
+ const txt=(str,x,y,size=30,color=t.ink,weight='500',width=2000)=>{
+  g.textAlign='left';g.textBaseline='alphabetic';g.font=`${weight} ${size}px system-ui`;
+  g.fillStyle=color;p10TextLine(g,String(str??''),x,y,width,Math.round(size*1.35),1);
+ };
+ const safeNumber=n=>Math.max(0,Number(n)||0);
+ const quests=Array.isArray(snapshot.quests)?snapshot.quests:Array.isArray(snapshot.topQuests)?snapshot.topQuests:[];
+ const rules=Array.isArray(snapshot.rules)?snapshot.rules:Array.isArray(snapshot.topRules)?snapshot.topRules:[];
+ const incidents=typeof p33Incidents==='function'?p33Incidents(snapshot.day):[];
+ const date=p2ValidDate(snapshot.day)?new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'}):String(snapshot.day||'');
+ const bg=g.createLinearGradient(0,0,2400,1800);bg.addColorStop(0,t.bg1);bg.addColorStop(1,t.bg2);g.fillStyle=bg;g.fillRect(0,0,2400,1800);
+ rect(62,56,2276,1688,46,t.panel,t.line);
+ // Restrained garden accents: nothing competes with the main star.
+ g.strokeStyle=t.line;g.lineWidth=4;
+ for(let i=0;i<5;i++){const x=105+i*33;g.beginPath();g.moveTo(x,1650);g.quadraticCurveTo(x+30,1595,x+18,1540);g.stroke();}
+ for(let i=0;i<7;i++){g.fillStyle=i%2?t.mint:t.highlight;g.beginPath();g.ellipse(2220+i%3*24,145+i*39,11,22,.45,0,Math.PI*2);g.fill();}
+ txt('MY LITTLE STAR GARDEN  ·  A DAY TO CELEBRATE',136,151,29,t.accent,'800');
+ txt(`${String(snapshot.nickname||'Little Star').slice(0,28)}'s Little Victories`,134,247,75,t.ink,'800',2030);
+ txt(date,138,302,30,t.accent,'500');
+ // Main award panel, intentionally one star only.
+ rect(132,350,695,1175,40,t.soft,t.line);
+ g.textAlign='center';g.font='170px serif';g.fillText('⭐',480,605);
+ g.fillStyle=t.ink;g.font='800 170px system-ui';g.fillText(String(safeNumber(snapshot.stars)),480,825);
+ g.font='800 33px system-ui';g.fillText('STARS EARNED',480,900);
+ g.font='28px system-ui';g.fillStyle=t.accent;g.fillText('on this special day',480,947);
+ g.strokeStyle=t.line;g.lineWidth=3;g.beginPath();g.moveTo(230,1020);g.lineTo(730,1020);g.stroke();
+ // Distinct inset, not merely another line of text.
+ rect(208,1070,545,276,30,t.panel,t.line);
+ g.textAlign='center';g.fillStyle=t.ink;g.font='800 65px system-ui';g.fillText(`✦ ${safeNumber(snapshot.lifetime)}`,480,1188);
+ g.font='800 26px system-ui';g.fillText('LIFETIME STARS',480,1250);
+ g.font='22px system-ui';g.fillStyle=t.accent;g.fillText('Every little victory adds up',480,1293);
+ g.fillStyle=t.ink;g.font='600 27px system-ui';g.fillText(`${safeNumber(snapshot.completedTasks)} quests  ·  ${safeNumber(snapshot.followedRules)} rules`,480,1433);
+ const rightX=872,rightW=1394;
+ function rowsPanel(y,h,title,items,empty,showStars){
+  rect(rightX,y,rightW,h,30,'#fffefd',t.line);
+  txt(title,rightX+40,y+65,35,t.ink,'800',rightW-80);
+  const rowH=76,start=y+112,available=Math.max(1,Math.floor((h-145)/rowH));
+  if(!items.length){txt(empty,rightX+44,start+25,27,t.accent,'500',rightW-90);return;}
+  items.slice(0,available).forEach((item,i)=>{
+   const yy=start+i*rowH;
+   rect(rightX+30,yy-35,rightW-60,65,15,i%2?t.panel:t.bg1);
+   txt(String(item.icon||'✿'),rightX+51,yy+9,30,t.accent,'600',55);
+   const starText=showStars?`+${safeNumber(item.stars)} ⭐`:'';
+   const reserved=showStars?230:30;
+   txt(item.name||'Little victory',rightX+107,yy+9,27,t.ink,'650',rightW-170-reserved);
+   if(showStars){g.textAlign='right';g.fillStyle=t.accent;g.font='800 27px system-ui';g.fillText(starText,rightX+rightW-55,yy+9);}
+  });
+  if(items.length>available)txt(`+ ${items.length-available} more celebrated in the Adventure Journal`,rightX+42,y+h-22,21,t.accent,'500');
+ }
+ rowsPanel(350,490,'Today’s Completed Quests',quests,'Your next adventure is waiting!',true);
+ rowsPanel(865,380,'Rules Followed',rules,'Tomorrow is another chance to grow.',true);
+ // Only child-facing incident data; p33Incidents deliberately strips Guardian notes.
+ rect(rightX,1270,rightW,255,30,t.mint,t.line);
+ if(incidents.length){
+  txt('What to Improve',rightX+39,1325,34,t.ink,'800');
+  incidents.slice(0,2).forEach((item,i)=>{
+   const yy=1380+i*65;
+   txt(item.name||'Rule to practice',rightX+43,yy,26,t.ink,'750',rightW-85);
+   txt(item.detail||'Keep practicing, little star!',rightX+48,yy+28,20,t.accent,'500',rightW-95);
+  });
+  if(incidents.length>2)txt(`+ ${incidents.length-2} more in your Adventure Journal`,rightX+45,1510,19,t.accent);
+ }else{
+  txt('A Little Note of Encouragement',rightX+40,1330,34,t.ink,'800');
+  txt(String(message||'Every little effort helps your garden grow!').slice(0,150),rightX+45,1400,27,t.ink,'500',rightW-90);
+ }
+ // Note remains visible even on days with rule incidents.
+ if(incidents.length&&message)txt('With love: '+String(message).slice(0,120),140,1597,24,t.accent,'500',2100);
+ txt(`Approved for sharing by ${String(guardianName||'Guardian').slice(0,45)}`,141,1682,25,t.accent,'600');
+ txt('Made with love  ·  My Little Star Garden',1470,1682,23,t.accent,'500',760);
+ return c;
+};
+/* End Phase 6C.2B.2E.9 */
+
+
+/* Phase 6C.2B.2E.10 — faithful approved postcard layout.
+   Canvas-only change. Guardian approvals, rewards, sync and data remain intact. */
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ const theme=p35Themes[state.p35CardTheme]||p35Themes.blossom;
+ const c=document.createElement('canvas');c.width=2400;c.height=1800;
+ const ctx=c.getContext('2d');if(!ctx)throw Error('This browser cannot generate the card.');
+ const pal=state.p35CardTheme==='stars'?
+  {bg:'#f0eef9',paper:'#fffefd',ink:'#605477',accent:'#8877a5',soft:'#eeebfa',soft2:'#f3f0fc',line:'#ded5eb',gold:'#b8a17a',leaf:'#b6c2d6'}:
+  state.p35CardTheme==='meadow'?
+  {bg:'#f9f5e9',paper:'#fffefa',ink:'#74634d',accent:'#a08368',soft:'#fbf0dc',soft2:'#f7f5e9',line:'#e7d9bf',gold:'#a58b50',leaf:'#a4b69a'}:
+  {bg:'#fdf0f5',paper:'#fffdfa',ink:'#81516d',accent:'#ae8199',soft:'#f9e5ee',soft2:'#f8f6ea',line:'#efd0dc',gold:'#a29267',leaf:'#b3c4a4'};
+ const rr=(x,y,w,h,r,fill,stroke=pal.line,lw=2)=>{
+  ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.stroke();}
+ };
+ const write=(str,x,y,size,color=pal.ink,weight=400,opts={})=>{
+  ctx.save();ctx.textAlign=opts.align||'left';ctx.textBaseline='alphabetic';
+  ctx.font=`${opts.italic?'italic ':''}${weight} ${size}px ${opts.serif?'Georgia, Times New Roman, serif':'system-ui, sans-serif'}`;
+  ctx.fillStyle=color;p10TextLine(ctx,String(str??''),x,y,opts.width||2000,opts.lineHeight||size*1.35,opts.lines||1);ctx.restore();
+ };
+ const amount=n=>Math.max(0,Number(n)||0);
+ const quests=snapshot.quests||snapshot.topQuests||[];
+ const rules=snapshot.rules||snapshot.topRules||[];
+ const incidents=typeof p33Incidents==='function'?p33Incidents(snapshot.day):[];
+ const day=p2ValidDate(snapshot.day)?new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'}):snapshot.day||'';
+ ctx.fillStyle=pal.bg;ctx.fillRect(0,0,2400,1800);
+ rr(42,40,2316,1720,50,pal.paper,pal.line,4);
+ rr(67,64,2266,1672,36,pal.paper,pal.line,2);
+ // Watercolor-like botanical corner sprig, kept away from content.
+ function sprig(x,y,scale=1){
+  ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);
+  ctx.strokeStyle=pal.leaf;ctx.lineWidth=5;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(0,300);ctx.bezierCurveTo(85,220,65,70,190,-20);ctx.stroke();
+  [[48,238,-.5],[84,158,.6],[116,98,-.5],[162,24,.6]].forEach(([xx,yy,rot],i)=>{
+   ctx.save();ctx.translate(xx,yy);ctx.rotate(rot);ctx.beginPath();ctx.ellipse(0,0,24+i%2*5,48,.1,0,Math.PI*2);ctx.fillStyle=i%2?pal.leaf:pal.line;ctx.globalAlpha=.75;ctx.fill();ctx.restore();
+  });ctx.restore();
+ }
+ sprig(70,75,1.15);
+ write('M Y  L I T T L E  S T A R  G A R D E N',1200,147,22,pal.accent,750,{align:'center'});
+ write("Today's Little Victories",1200,242,79,pal.ink,400,{align:'center',serif:true});
+ write(`${day} · Little Star's Keepsake`,1200,292,26,pal.accent,400,{align:'center'});
+ ctx.strokeStyle='#eee4e7';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(140,330);ctx.lineTo(2260,330);ctx.stroke();
+ // Two horizontal hero tiles, matching the approved image.
+ rr(156,381,1222,405,42,pal.soft,pal.line,2);
+ rr(1418,381,826,405,42,pal.soft2,'#e6d8b9',2);
+ // Single prominent star, with subtle shadow and no extra competing ornaments.
+ ctx.save();ctx.shadowColor='#b28e66';ctx.shadowBlur=15;ctx.shadowOffsetY=8;
+ ctx.fillStyle='#e7b850';ctx.strokeStyle='#cf9b42';ctx.lineWidth=5;
+ ctx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?48:102,x=330+Math.cos(a)*r,y=574+Math.sin(a)*r;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+ write(String(amount(snapshot.stars)),530,596,126,pal.ink,700);
+ write('Stars earned today',535,649,30,pal.ink,650);
+ write('From completed quests and followed rules',535,693,24,pal.accent,400);
+ write('L I F E T I M E  S T A R S',1470,475,23,pal.gold,800);
+ write(String(amount(snapshot.lifetime)),1470,635,124,pal.gold,500,{serif:true});
+ write('Little stars collected so far',1470,688,27,pal.gold,650);
+ // Approved asymmetrical content layout.
+ const leftX=156,leftW=1190,rightX=1398,rightW=846;
+ rr(leftX,830,leftW,745,38,'#fffefe',pal.line,2);
+ rr(rightX,830,rightW,285,38,'#fffefe',pal.line,2);
+ rr(rightX,1145,rightW,430,38,pal.soft2,'#e8ddc4',2);
+ write('A Day Full of Little Wins',leftX+47,900,47,pal.ink,650,{serif:true});
+ write('Each quest is recognized for what she accomplished.',leftX+49,950,25,pal.accent);
+ function questRow(item,i){
+  const y=1042+i*145;
+  rr(leftX+45,y-42,67,67,16,pal.soft);
+  write(String(i+1).padStart(2,'0'),leftX+60,y+2,28,pal.accent,750);
+  write(item.name||'A little victory',leftX+137,y-4,29,pal.ink,700,{width:780});
+  write(item.count>1?`${item.count} completions · Completed`:'Completed',leftX+137,y+36,22,pal.accent);
+  write(`+${amount(item.stars)} ★`,leftX+leftW-60,y+5,29,pal.accent,800,{align:'right'});
+  if(i<3){ctx.strokeStyle='#f0e7eb';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(leftX+48,y+64);ctx.lineTo(leftX+leftW-45,y+64);ctx.stroke();}
+ }
+ if(!quests.length)write('Your next adventure is waiting!',leftX+50,1070,30,pal.accent);
+ else quests.slice(0,3).forEach(questRow);
+ if(quests.length>3)write(`+ ${quests.length-3} more quests in your Adventure Journal`,leftX+48,1510,23,pal.accent);
+ write('Rules Followed',rightX+42,905,43,pal.ink,650,{serif:true});
+ if(!rules.length)write('Tomorrow brings another chance to grow.',rightX+43,973,25,pal.accent);
+ else rules.slice(0,2).forEach((item,i)=>{
+  const y=982+i*57;
+  write(item.name,rightX+43,y,27,pal.ink,500,{width:590});
+  write(`+${amount(item.stars)} ★`,rightX+rightW-42,y,27,pal.accent,800,{align:'right'});
+ });
+ write(incidents.length?'Something to Keep Practicing':'A Little Note of Encouragement',rightX+42,1215,40,pal.gold,650,{serif:true});
+ if(incidents.length){
+  incidents.slice(0,2).forEach((item,i)=>{
+   const y=1282+i*125;
+   ctx.fillStyle='#c7ad79';ctx.fillRect(rightX+42,y-30,6,105);
+   write(item.name,rightX+65,y,27,pal.ink,700,{width:650});
+   write(item.detail,rightX+65,y+42,23,pal.gold,400,{width:680,lines:2,lineHeight:30});
+  });
+  if(incidents.length>2)write(`+ ${incidents.length-2} more in the Journal`,rightX+65,1535,21,pal.gold);
+ }else{
+  write(message||'Every little effort helps your garden grow!',rightX+44,1304,27,pal.gold,400,{width:745,lines:3,lineHeight:40});
+ }
+ ctx.strokeStyle='#eee4e7';ctx.beginPath();ctx.moveTo(140,1590);ctx.lineTo(2260,1590);ctx.stroke();
+ write(`“${String(message||"I'm proud of your little efforts. Keep growing!").slice(0,100)}”`,165,1663,27,pal.accent,400,{italic:true,width:1450});
+ write(`With love, ${String(guardianName||'Guardian').slice(0,35)}`,2230,1652,22,pal.accent,400,{align:'right'});
+ write('A little keepsake from your garden',2230,1684,19,pal.accent,400,{align:'right'});
+ return c;
+};
+/* End approved postcard exporter */
 
 </script>
 </body>
