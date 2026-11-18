@@ -421,7 +421,7 @@ async function handleAction(action){
  if(action==='open-bonus'&&safeGuardian()){state.bonusOperationId=bonusOperationId();state.guardianTab='bonus';render();return;}
  if(action==='cancel-bonus'&&safeGuardian()){state.guardianTab='dashboard';render();return;}
  if(action==='export-backup'&&safeGuardian()){await doExport();return;}
- if(action==='new-recovery'&&safeGuardian()){const ok=confirm('Generating a new code makes your old recovery code stop working. Continue?');if(!ok)return;state.recoveryCode=await regenerateRecovery();state.afterRecovery='guardian';state.view='show-recovery';state.notice='';render();return;}
+ if(action==='new-recovery'&&safeGuardian()){const ok=await p38Confirm('Generating a new code makes your old recovery code stop working. Continue?');if(!ok)return;state.recoveryCode=await regenerateRecovery();state.afterRecovery='guardian';state.view='show-recovery';state.notice='';render();return;}
  if(action==='copy-recovery'&&state.view==='show-recovery'){if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(state.recoveryCode);else throw new Error('Clipboard unavailable here. Please save or write down the recovery code.');notice('Recovery code copied. Keep it private.');return;}
  if(action==='download-recovery'&&state.view==='show-recovery'){downloadText('star-garden-guardian-recovery.txt',`My Little Star Garden Guardian Recovery Code\n${state.recoveryCode}\n\nKeep this code private. This is NOT a progress backup.\n`);notice('Recovery code file downloaded.');return;}
  if(action==='finish-recovery'&&state.view==='show-recovery'){const check=document.querySelector('#savedRecovery');if(!check?.checked){notice('Please save the recovery code and tick the checkbox before continuing.',true);return;}state.recoveryCode='';state.view=state.afterRecovery;state.notice='';render();return;}
@@ -489,7 +489,7 @@ app.addEventListener('submit',async e=>{
    state.recoveryCode=await createPinForRestore(values.pin);state.afterRecovery='child';state.view='show-recovery';state.notice='';render();return;
   }
   if(form.id==='bonus-form'&&safeGuardian()){
-   const amount=Number(values.amount);if(amount>=100&&!confirm(`Award ${amount} bonus stars?`))return;
+   const amount=Number(values.amount);if(amount>=100&&!await p38Confirm(`Award ${amount} bonus stars?`))return;
    const row=await grantBonus({amount,category:values.category,reason:values.reason,operationId:values.operationId});await refresh();state.bonusOperationId='';state.guardianTab='dashboard';notice(`✨ ${row.amount} bonus stars awarded!`);return;
   }
   if(form.id==='profile-form'&&safeGuardian()){
@@ -702,7 +702,7 @@ async function p2UndoTransaction(id){
  const original=state.summary.transactions.find(t=>t.id===id);
  if(!original||original.reversedAt||!['welcome','bonus','task','challenge','deduction','rule-earned'].includes(original.type))throw new Error('This transaction cannot be undone.');
  if(original.amount>0&&state.summary.wallet<original.amount)throw new Error('There are not enough available stars to undo this award. Review any spending first.');
- if(!confirm(`Undo ${original.amount>0?'+':''}${original.amount} stars from “${original.reason}”? This will leave a separate correction record.`))return;
+ if(!await p38Confirm(`Undo ${original.amount>0?'+':''}${original.amount} stars from “${original.reason}”? This will leave a separate correction record.`))return;
  const stamp=new Date().toISOString(),correctionId=`correction:${original.id}`;
  const adjust={id:correctionId,type:original.amount>0?'earning-correction':'correction',amount:-original.amount,reason:`Correction of: ${original.reason}`,originalTransactionId:original.id,createdAt:stamp,source:'guardian'};
  const stores=['transactions'];
@@ -722,7 +722,7 @@ async function p2TimerAction(id,kind){const task=p2Task(id);if(!task||task.archi
  if(old.status==='ended'||p2Remaining(old)<=0)next={...next,remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000)};
  next={...next,status:'running',startedAt:new Date().toISOString()};
  } else if(kind==='pause'){next={...next,status:'paused',remainingMs:p2Remaining(old),startedAt:null};}
- else if(kind==='reset'){if(!confirm('Restart this countdown? This will not change any stars.'))return;next={id:task.id,status:'idle',remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000),startedAt:null};}
+ else if(kind==='reset'){if(!await p38Confirm('Restart this countdown? This will not change any stars.'))return;next={id:task.id,status:'idle',remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000),startedAt:null};}
  await put('timers',next);await refresh();render();}
 async function p2Click(action,node){
  if(action==='manage-tab'){state.p2ManageTab=node.dataset.value;state.guardianTab='manage';render();return;}
@@ -735,15 +735,15 @@ async function p2Click(action,node){
  if(action==='task-new'){p2NewEditTask(null);return;}
  if(action==='task-edit'){p2NewEditTask(node.dataset.id);return;}
  if(action==='task-duplicate'){const original=p2Task(node.dataset.id);if(!original)return;const copy={...original,id:uniqueId(),name:original.name+' (copy)',archived:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};await put('tasks',copy);await refresh();notice('Task duplicated.');return;}
- if(action==='task-archive'){const task=p2Task(node.dataset.id);if(!task)return;if(!confirm(`${task.archived?'Reactivate':'Archive'} “${task.name}”? Previous records are preserved.`))return;await put('tasks',{...task,archived:!task.archived,updatedAt:new Date().toISOString()});await refresh();notice('Task updated.');return;}
+ if(action==='task-archive'){const task=p2Task(node.dataset.id);if(!task)return;if(!await p38Confirm(`${task.archived?'Reactivate':'Archive'} “${task.name}”? Previous records are preserved.`))return;await put('tasks',{...task,archived:!task.archived,updatedAt:new Date().toISOString()});await refresh();notice('Task updated.');return;}
  if(action==='rule-new'){p2NewEditRule(null);return;}
  if(action==='rule-edit'){p2NewEditRule(node.dataset.id);return;}
- if(action==='rule-archive'){const r=p2Rule(node.dataset.id);if(!r)return;if(!confirm(`${r.archived?'Reactivate':'Archive'} rule “${r.name}”?`))return;await put('rules',{...r,archived:!r.archived});await refresh();notice('Rule updated.');return;}
+ if(action==='rule-archive'){const r=p2Rule(node.dataset.id);if(!r)return;if(!await p38Confirm(`${r.archived?'Reactivate':'Archive'} rule “${r.name}”?`))return;await put('rules',{...r,archived:!r.archived});await refresh();notice('Rule updated.');return;}
  if(action==='challenge-new'){state.p2ChallengeId=null;state.guardianTab='challenge-editor';render();return;}
  if(action==='challenge-edit'){state.p2ChallengeId=node.dataset.id;state.guardianTab='challenge-editor';render();return;}
  if(action==='challenge-archive'){const ch=state.p2Challenges.find(c=>c.id===node.dataset.id);if(!ch)return;await put('challenges',{...ch,archived:!ch.archived});await refresh();notice('Challenge updated.');return;}
  if(action==='transaction-undo'){await p2UndoTransaction(node.dataset.id);return;}
- if(action==='challenge-award'){if(!confirm('Award this completed challenge now?'))return;await p2AwardChallenge(node.dataset.id);await refresh();notice('🏆 Challenge stars awarded!');return;}
+ if(action==='challenge-award'){if(!await p38Confirm('Award this completed challenge now?'))return;await p2AwardChallenge(node.dataset.id);await refresh();notice('🏆 Challenge stars awarded!');return;}
  if(action==='manage-back'){state.guardianTab='manage';render();return;}
  if(action==='dashboard-back'){state.guardianTab='dashboard';render();return;}
  if(action==='quick-complete'){const available=state.p2Tasks.filter(t=>p2Due(t,p2Date()));if(!available.length){state.guardianTab='manage';state.p2ManageTab='tasks';notice('Create a task before recording a completion.');return;}state.guardianTab='choose-completion';render();return;}
@@ -935,7 +935,7 @@ p2CompletePage=function(){const task=p2Task(state.p2CompleteId);if(task?.type!==
 p2ChooseCompletion=function(){const available=state.p2Tasks.filter(t=>p2Due(t,p2Date()));return `<section><p class="eyebrow">Guardian · Quick Complete</p><h1 class="page-title">Choose a Task ⭐</h1><p class="lead">A routine groups tasks; each individual task gives its own stars.</p></section><section class="panel"><div class="p2-list">${available.length?available.map(t=>p2TaskCard(t,true)).join(''):empty('🌷','No scheduled tasks today','Create a task under Manage.')}</div><div class="p2-actions">${btn('Back','not-used','btn-plain','data-p2-action="dashboard-back"')}</div></section>`;};
 // Hide routine entries from batch review by filtering the scheduled collection in a dedicated rendering function.
 p2ReviewPage=function(){const date=state.p2ReviewDate||p2Date();const tasks=state.p2Tasks.filter(t=>t.type!=='checklist'&&p2Due(t,date));return `<section><p class="eyebrow">Guardian · Batch Review</p><h1 class="page-title">Daily Star Review 📅</h1><p class="lead">Select individual tasks completed on the chosen day. Shared tasks appear only once.</p></section><section class="panel"><form id="p2-review-form" class="form-grid">${p2Field('Review date',`<input id="p2ReviewDate" type="date" name="date" value="${p2Text(date)}" required>`)}<p class="p2-note">Routine containers do not earn stars. Check-in tasks should be recorded individually.</p><div class="p2-spaced">${tasks.filter(t=>t.frequency!=='checkin').map(t=>{const e=p2CompletionEligibility(t,date,'',null),done=p2TaskFinished(t,date);return `<label class="p2-card p2-row"><span><input type="checkbox" name="taskIds" value="${p2Text(t.id)}" ${!e.ok?'disabled':''}> ${p2Text(t.icon)} <strong>${p2Text(t.name)}</strong><br><small class="p2-muted">${e.ok?`+${t.stars} stars`:`${p2Text(e.reason)}`} ${done?'· Previously recorded':''}</small></span></label>`;}).join('')||empty('📖','No batch-eligible tasks','Choose another day or create tasks.')}</div>${p2Field('Optional note',`<textarea maxlength="320" name="note" placeholder="Daily accomplishments"></textarea>`)}<div class="p2-actions"><button class="btn btn-primary" type="submit">✓ Save Selected Completions</button>${btn('Cancel','not-used','btn-plain','data-p2-action="manage-back"')}</div></form></section>`;};
-p2TimerAction=async function(id,kind){const task=p2Task(id);if(!p3HasTimer(task))throw new Error('This task has no countdown. Enable one in the Task Editor.');if(task.type==='timed')return p3OldTimerAction(id,kind);const old=p2Timer(task);let next={...old,id};if(kind==='start'){if(old.status==='running')return;if(old.status==='ended'||p2Remaining(old)<=0)next={...next,remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000)};next={...next,status:'running',startedAt:new Date().toISOString()};}else if(kind==='pause'){next={...next,status:'paused',remainingMs:p2Remaining(old),startedAt:null};}else if(kind==='reset'){if(!confirm('Restart this countdown? Stars will not change.'))return;next={id:task.id,status:'idle',remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000),startedAt:null};}await put('timers',next);await refresh();render();};
+p2TimerAction=async function(id,kind){const task=p2Task(id);if(!p3HasTimer(task))throw new Error('This task has no countdown. Enable one in the Task Editor.');if(task.type==='timed')return p3OldTimerAction(id,kind);const old=p2Timer(task);let next={...old,id};if(kind==='start'){if(old.status==='running')return;if(old.status==='ended'||p2Remaining(old)<=0)next={...next,remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000)};next={...next,status:'running',startedAt:new Date().toISOString()};}else if(kind==='pause'){next={...next,status:'paused',remainingMs:p2Remaining(old),startedAt:null};}else if(kind==='reset'){if(!await p38Confirm('Restart this countdown? Stars will not change.'))return;next={id:task.id,status:'idle',remainingMs:Math.round(task.durationMin*60000),durationMs:Math.round(task.durationMin*60000),startedAt:null};}await put('timers',next);await refresh();render();};
 function p3ChildTaskDetail(t,date){
  if(t.type==='checklist'){
   const legacy=!Array.isArray(t.routineItems),members=p3Members(t,date),p=p3RoutineProgress(t,date);
@@ -1040,7 +1040,7 @@ const p4LiveSession = id => state.p4Sessions.find(s=>s.voucherId===id && s.statu
 const p4UsageToday = (day=p2Date())=>state.p4Sessions.filter(s=>s.group==='screen' && s.usageDate===day && s.status==='confirmed').reduce((total,s)=>total+(s.usedSeconds||0),0);
 const p4UsageAvailable = () => state.p4Policy.dailyScreenMinutes>0?Math.max(0,state.p4Policy.dailyScreenMinutes*60-p4UsageToday()):Infinity;
 const p4Duration = s=>{const val=Math.max(0,Math.round(Number(s||0)));return `${Math.floor(val/3600)>0?Math.floor(val/3600)+'h ':''}${Math.floor((val%3600)/60)}m${val%60?` ${val%60}s`:''}`;};
-const p4ClaimEnabled = reward => reward && !reward.archived && !reward.draft && reward.claimDays?.includes(p4Day()) && p64ClaimLimitOk(reward) && p64StickerAvailable(reward) && state.summary.wallet>=reward.price;
+const p4ClaimEnabled = reward => reward && !reward.archived && !reward.draft && !reward.hidden && !reward.paused && reward.claimDays?.includes(p4Day()) && p64ClaimLimitOk(reward) && p64StickerAvailable(reward) && state.summary.wallet>=p38Price(reward);
 const p4Eligible = voucher => voucher && ['claimed','paused'].includes(voucher.status) && voucher.usageDays.includes(p4Day()) && (voucher.group!=='screen'||p4UsageAvailable()>0) && p31RequirementsMet(voucher);
 const p4Status = voucher => {
  if(voucher.status==='cancelled')return ['Cancelled',''];
@@ -1071,8 +1071,8 @@ function p4RewardCard(r){const count=state.p4Vouchers.filter(v=>v.rewardId===r.i
 function p4ChildRewardDetails(r){const count=state.p4Vouchers.filter(v=>v.rewardId===r.id&&v.status!=='cancelled').length,can=p4ClaimEnabled(r);
  return `<section><p class="eyebrow">Star Boutique · Reward Details</p><h1 class="page-title">${esc(r.icon)} ${esc(r.name)}</h1><p class="lead">${esc(r.description||'A special little treat you can earn with your stars!')}</p></section><section class="panel p4-ticket-preview"><div class="p4-reward-icon" style="margin:auto">${esc(r.icon)}</div><div class="p4-metric-grid" style="margin:18px 0"><div class="p2-card"><p class="p2-muted">Cost</p><strong>⭐ ${money(r.price)}</strong></div><div class="p2-card"><p class="p2-muted">Reward</p><strong>${esc(p4RewardContent(r))}</strong></div></div><p class="p2-muted">🎀 Claim days: <strong>${esc(p4Days(r.claimDays))}</strong></p><p class="p2-muted" style="margin-top:8px">🗓️ Usage days: <strong>${esc(p4Days(r.usageDays))}</strong></p>${r.maxClaims?`<p class="p2-muted" style="margin-top:8px">${Math.max(0,r.maxClaims-count)} claims remaining</p>`:''}<p class="info" style="margin:14px 0">You can collect a voucher now and save it for an allowed usage day. A guardian approves the claim.</p><div class="p4-voucher-actions">${btn(can?'🔐 Ask Guardian to Claim':state.summary.wallet<r.price?`Save ${r.price-state.summary.wallet} more stars`:'Claim not available','not-used','btn-primary',`data-p4-action="claim-request" data-id="${esc(r.id)}" ${can?'':'disabled'}`)}${btn('← Back to Shop','not-used','btn-plain','data-p4-action="reward-back"')}</div></section>`;
 }
-childShop=function(){const list=state.p4Rewards.filter(r=>!r.archived&&!r.draft),selected=p4Reward(state.p4SelectedRewardId);
- if(selected&&!selected.archived&&!selected.draft)return p4ChildRewardDetails(selected);
+childShop=function(){const list=state.p4Rewards.filter(r=>!r.archived&&!r.draft&&!r.hidden),selected=p4Reward(state.p4SelectedRewardId);
+ if(selected&&!selected.archived&&!selected.draft&&!selected.hidden)return p4ChildRewardDetails(selected);
  return `<section><p class="eyebrow">A boutique full of little surprises</p><h1 class="page-title">The Star Shop 🛍️</h1><p class="lead">Collect a reward whenever you have enough stars. Save it until the right day to use it.</p></section><section class="panel"><div class="panel-head"><h3>My Star Wallet</h3><span class="chip">⭐ ${money(state.summary.wallet)} available</span></div>${list.length?`<div class="p4-shop-grid" style="margin-top:15px">${list.map(p4RewardCard).join('')}</div>`:empty('🎀','The boutique is getting ready','Your guardian can add rewards for you to save up for.')}</section>`;
 };
 function p4VoucherHtml(v,details=false,guardianInline=false){const status=p4Status(v);const timed=v.type==='timed';const remain=timed?p4Duration(v.remainingSeconds):p4RewardContent(v);
@@ -1142,12 +1142,12 @@ async function p4PauseSession(voucherId,sessionId,seconds,note){const v=p4Vouche
  await p4MutateVoucher(voucherId,['usageSessions'],(fresh,tx)=>{if(!['active','review'].includes(fresh.status))throw new Error('Voucher already finalized.');const left=Math.max(0,fresh.remainingSeconds-seconds);const done=left===0;tx.objectStore('usageSessions').put({...session,status:'confirmed',usedSeconds:seconds,endedAt:iso(),note:String(note||'').trim().slice(0,240)});tx.objectStore('vouchers').put({...fresh,remainingSeconds:left,usedSeconds:(fresh.usedSeconds||0)+seconds,status:done?'redeemed':'paused',redeemedAt:done?iso():null});});
  await refresh();state.guardianTab='voucher-detail';notice(`${p4Duration(seconds)} of usage recorded. ${p4Duration(Math.max(0,v.remainingSeconds-seconds))} remains on the ticket.`);
 }
-async function p4Fulfill(id){const v=p4Voucher(id);if(!v||v.type==='timed'||!p4Eligible(v))throw new Error('This reward is not eligible to be fulfilled now.');if(!confirm(`Mark “${v.name}” as fulfilled? This cannot be redeemed again.`))return;
+async function p4Fulfill(id){const v=p4Voucher(id);if(!v||v.type==='timed'||!p4Eligible(v))throw new Error('This reward is not eligible to be fulfilled now.');if(!await p38Confirm(`Mark “${v.name}” as fulfilled? This cannot be redeemed again.`))return;
  await p4MutateVoucher(id,[],(fresh,tx)=>{if(!['claimed','paused'].includes(fresh.status))throw new Error('Already fulfilled.');tx.objectStore('vouchers').put({...fresh,status:'redeemed',redeemedAt:iso()});});await refresh();notice('🎁 Reward marked as fulfilled!');
 }
 async function p4CancelVoucher(id){const v=p4Voucher(id);if(!v||!['claimed','paused'].includes(v.status))throw new Error('Only inactive unused or paused vouchers can be cancelled.');const unused=v.type==='timed'&&v.originalSeconds>0?Math.floor(v.pricePaid*v.remainingSeconds/v.originalSeconds):v.pricePaid;
  const message=unused===v.pricePaid?`Cancel “${v.name}” and refund ${unused} stars?`:`This ticket was partially used. Cancel it and refund ${unused} stars for the unused portion?`;
- if(!confirm(message))return;
+ if(!await p38Confirm(message))return;
  const entry={id:`refund:${id}`,type:'refund',amount:unused,reason:`Refund for cancelled ${v.name} (${v.ticketNumber})`,voucherId:id,createdAt:iso(),source:'guardian'};
  await p4MutateVoucher(id,['transactions'],(fresh,tx)=>{if(!['claimed','paused'].includes(fresh.status))throw new Error('This voucher cannot be cancelled.');tx.objectStore('vouchers').put({...fresh,status:'cancelled',cancelledAt:iso(),refundStars:unused});tx.objectStore('transactions').add(entry);});await refresh();notice(`Cancelled ticket; refunded ${unused} stars.`);
 }
@@ -1176,13 +1176,13 @@ async function p4HandleAction(action,node){const id=node.dataset.id;
  if(!safeGuardian())throw new Error('Enter your guardian PIN to continue.');touchSession();
  if(action==='reward-new'){state.p4SelectedRewardId=null;state.guardianTab='reward-editor';render();return;}
  if(action==='reward-edit'){state.p4SelectedRewardId=id;state.guardianTab='reward-editor';render();return;}
- if(action==='reward-archive'){const r=p4Reward(id);if(!r)return;if(!confirm(`${r.archived?'Reactivate':'Archive'} reward “${r.name}”? Existing vouchers will remain valid.`))return;await put('rewards',{...r,archived:!r.archived,updatedAt:iso()});await refresh();notice('Reward availability updated.');return;}
+ if(action==='reward-archive'){const r=p4Reward(id);if(!r)return;if(!await p38Confirm(`${r.archived?'Reactivate':'Archive'} reward “${r.name}”? Existing vouchers will remain valid.`))return;await put('rewards',{...r,archived:!r.archived,updatedAt:iso()});await refresh();notice('Reward availability updated.');return;}
  if(action==='reward-manage-back'){state.p2ManageTab='upcoming';state.guardianTab='manage';render();return;}
  if(action==='vouchers-manage'){state.guardianTab='vouchers';state.p4SelectedVoucherId=null;render();return;}
  if(action==='policy-open'){state.guardianTab='reward-policy';render();return;}
  if(action==='reward-claim-direct'){state.p4SelectedRewardId=id;state.guardianTab='claim-reward';render();return;}
  if(action==='claim-cancel'){state.p4PendingRewardId=null;state.p4SelectedRewardId=null;state.p2ManageTab='upcoming';state.guardianTab='manage';render();return;}
- if(action==='claim-confirm'){if(state.guardianTab!=='claim-reward')throw new Error('Open the Claim Approval screen first.');if(!p4ClaimEnabled(p4Reward(id)))throw new Error('This reward is no longer claimable.');if(!confirm(`Spend ${p4Reward(id).price} stars and issue one voucher for “${p4Reward(id).name}”?`))return;const v=await p4ClaimReward(id);await refresh();state.p4SelectedRewardId=null;state.p4SelectedVoucherId=v.id;state.p4TicketTab='waiting';state.childTab='tickets';lockGuardian('🎟️ Voucher claimed! Your new ticket is in the Treasure Box.');return;}
+ if(action==='claim-confirm'){if(state.guardianTab!=='claim-reward')throw new Error('Open the Claim Approval screen first.');if(!p4ClaimEnabled(p4Reward(id)))throw new Error('This reward is no longer claimable.');if(!await p38Confirm(`Spend ${p38Price(p4Reward(id))} stars and issue one voucher for “${p4Reward(id).name}”?`))return;const v=await p4ClaimReward(id);await refresh();state.p4SelectedRewardId=null;state.p4SelectedVoucherId=v.id;state.p4TicketTab='waiting';state.childTab='tickets';lockGuardian('🎟️ Voucher claimed! Your new ticket is in the Treasure Box.');return;}
  if(action==='voucher-guardian'){state.p4SelectedVoucherId=id;state.guardianTab='voucher-detail';render();return;}
  if(action==='session-start'){await p4StartSession(id);state.p4SelectedVoucherId=id;state.guardianTab='voucher-detail';render();return;}
  if(action==='session-pause'||action==='session-review'){state.p4SelectedVoucherId=id;state.guardianTab='session-review';render();return;}
@@ -1272,10 +1272,10 @@ const p31OldRewardManager=p4RewardManager;
 p4RewardManager=function(){let html=p31OldRewardManager();const extra=btn('🎁 Gift a Voucher','not-used','btn-soft',`data-p31-action="gift-open"`);return html.replace('data-p4-action="policy-open"',`data-p4-action="policy-open"`).replace('</div></div><p class="p2-muted" style="margin:11px',`${extra}</div></div><p class="p2-muted" style="margin:11px`);};
 const p31OldDash=guardianDashboard;
 guardianDashboard=function(){const pending=p31Pending();const extra=`<section class="panel"><div class="panel-head"><div><p class="eyebrow">For your review</p><h3>📬 Requests (${pending.length})</h3></div>${btn('Review Requests','not-used','btn-rose',`data-p31-action="requests-open"`)}</div>${pending.length?`<div class="p2-list">${pending.slice(0,3).map(r=>`<div class="p2-card">${esc(r.kind==='task'?'📖 Quest':r.kind==='claim'?'🎁 Claim':'🎟️ Use Voucher')}: <strong>${esc(r.targetName)}</strong> <span class="p31-subtext">· ${esc(r.date||'')}</span></div>`).join('')}</div>`:'<p class="p2-muted">No requests waiting for review.</p>'}<div class="p2-actions">${btn('🌟 Daily Rules Check-in','not-used','btn-soft',`data-p31-action="rule-checkin-open"`)}${btn('🎁 Gift a Voucher','not-used','btn-soft',`data-p31-action="gift-open"`)}</div></section>`;return extra+p31OldDash();};
-function p31RequestsPage(){const rows=p31Pending();const history=state.p31Requests.filter(r=>r.status!=='pending').slice(0,12);return `<section><p class="eyebrow">Guardian · Approval Queue</p><h1 class="page-title">Requests 📬</h1><p class="lead">Your sister can send requests without seeing your PIN. Review them here whenever you open Guardian Mode.</p></section><section class="panel"><div class="p2-row"><h3>${rows.length} waiting for review</h3>${btn('← Dashboard','not-used','btn-plain',`data-p31-action="back-dashboard"`)}</div><div class="p31-request-list">${rows.length?rows.map(r=>{
+function p31RequestsPage(){const rows=p31Pending();const history=state.p31Requests.filter(r=>r.status!=='pending').slice(0,500);return `<section><p class="eyebrow">Guardian · Approval Queue</p><h1 class="page-title">Requests 📬</h1><p class="lead">Your sister can send requests without seeing your PIN. Review them here whenever you open Guardian Mode.</p></section><section class="panel"><div class="p2-row"><h3>${rows.length} waiting for review</h3>${btn('← Dashboard','not-used','btn-plain',`data-p31-action="back-dashboard"`)}</div><div class="p31-request-list">${rows.length?rows.map(r=>{
  const task=r.kind==='task'?p2Task(r.targetId):null,rew=r.kind==='claim'?p4Reward(r.targetId):null,v=r.kind==='activate'?p4Voucher(r.targetId):null;
  const eligible=r.kind==='task'?task&&p2CompletionEligibility(task,r.date,r.slot||'',null).ok:r.kind==='claim'?p4ClaimEnabled(rew):v&&(['active','review'].includes(v.status)||p4Eligible(v));
- let note=r.kind==='task'?`Requested completion ${r.slot?'('+r.slot+')':''} on ${r.date}; ${task?`+${task.stars} stars if eligible`:'Task missing'}`:r.kind==='claim'?`Requested claim · Current price ${rew?.price??'unknown'} stars`:`Requested activation of ${v?.ticketNumber||'missing ticket'}`;
+ let note=r.kind==='task'?`Requested completion ${r.slot?'('+r.slot+')':''} on ${r.date}; ${task?`+${task.stars} stars if eligible`:'Task missing'}`:r.kind==='claim'?`Requested claim · Current price ${rew?p38Price(rew):'unknown'} stars`:`Requested activation of ${v?.ticketNumber||'missing ticket'}`;
  return `<div class="p31-request"><div class="p2-row"><strong>${esc(r.kind==='task'?'📖 Task':r.kind==='claim'?'🎁 Reward':'🎟️ Voucher')} · ${esc(r.targetName)}</strong><span class="p2-tag">Pending</span></div><p class="p31-subtext">${esc(note)}</p>${v?p31RequirementDetail(v):''}${!eligible?'<p class="p2-notice">Requirements not currently met. You can decline, or complete the missing conditions before approval.</p>':''}<div class="p2-actions">${btn('✓ Approve','not-used','btn-primary p2-mini',`data-p31-action="request-approve" data-id="${esc(r.id)}" ${eligible?'':'disabled'}`)}${btn('Decline','not-used','btn-plain p2-mini',`data-p31-action="request-decline" data-id="${esc(r.id)}"`)}</div></div>`;}).join(''):empty('🌷','All caught up','No requests are waiting right now.')}</div></section>${history.length?`<section class="panel"><h3>Recent Decisions</h3><div class="p2-list" style="margin-top:12px">${history.map(r=>`<div class="p2-card p2-row"><span>${esc(r.targetName)} · ${esc(r.kind)}</span><span class="p2-tag">${r.status==='approved'?'✓ Approved':'Declined'}</span></div>`).join('')}</div></section>`:''}`;}
 function p31GiftPage(){const options=state.p4Rewards.filter(r=>!r.archived&&!r.draft);return `<section><p class="eyebrow">Guardian · Little Surprise</p><h1 class="page-title">Gift a Voucher 🎁</h1><p class="lead">Give a reward without spending any stars. Normal usage days, task requirements and screen-time limits still apply.</p></section><section class="panel">${options.length?`<form id="p31-gift-form" class="form-grid">${p2Field('Choose a reward',`<select name="rewardId" required>${options.map(r=>p2Option(r.id,null,`${r.icon} ${r.name} · ${p4RewardContent(r)}`)).join('')}</select>`)}${p2Field('A sweet message (optional)',`<textarea maxlength="240" name="message" placeholder="A special treat, just for you!"></textarea>`)}<p class="p31-summary">⭐ 0 stars will be deducted. This voucher is marked as a guardian gift. It cannot be refunded for stars.</p><div class="p2-actions"><button type="submit" class="btn btn-primary">🎁 Give Voucher</button>${btn('Cancel','not-used','btn-plain',`data-p31-action="back-rewards"`)}</div></form>`:empty('🎀','Create a reward first','A gift uses an existing reward and its normal restrictions.',btn('Manage Rewards','not-used','btn-rose',`data-p31-action="back-rewards"`))}</section>`;}
 const p31OldGuardian=guardian;
@@ -1317,7 +1317,7 @@ async function p31Approve(req){if(!req||req.status!=='pending')throw new Error('
  }else throw new Error('Unknown request type.');
  notice('✅ Request approved!');
 }
-async function p31GiftReward(form){const fd=new FormData(form),r=p4Reward(fd.get('rewardId'));if(!r||r.archived||r.draft)throw new Error('Choose an available reward.');const current=state.p4Vouchers.filter(v=>v.rewardId===r.id&&v.status!=='cancelled');if(r.maxClaims&&current.length>=r.maxClaims)throw new Error('This reward reached its maximum voucher count.');if(!confirm(`Gift “${r.name}” with NO stars deducted? Normal usage restrictions will still apply.`))return;
+async function p31GiftReward(form){const fd=new FormData(form),r=p4Reward(fd.get('rewardId'));if(!r||r.archived||r.draft)throw new Error('Choose an available reward.');const current=state.p4Vouchers.filter(v=>v.rewardId===r.id&&v.status!=='cancelled');if(r.maxClaims&&current.length>=r.maxClaims)throw new Error('This reward reached its maximum voucher count.');if(!await p38Confirm(`Gift “${r.name}” with NO stars deducted? Normal usage restrictions will still apply.`))return;
  const v=p4MakeVoucher(r);v.pricePaid=0;v.originalListedPrice=r.price;v.gifted=true;v.giftMessage=String(fd.get('message')||'').trim().slice(0,240);v.claimTransactionId=`purchase:${v.id}`;
  const trans={id:v.claimTransactionId,type:'purchase',amount:0,reason:`Guardian gifted: ${r.name} (${v.ticketNumber})`,rewardId:r.id,voucherId:v.id,createdAt:iso(),source:'guardian-gift'};
  await atomic(['vouchers','transactions'],tx=>{tx.objectStore('vouchers').add(v);tx.objectStore('transactions').add(trans);});await refresh();state.guardianTab='vouchers';notice('🎁 A special gifted voucher is in the Treasure Box!');
@@ -1344,8 +1344,8 @@ app.addEventListener('click',async event=>{
    if(action==='back-manage-rules'){state.guardianTab='manage';state.p2ManageTab='rules';render();}
    if(action==='back-rewards'){state.guardianTab='manage';state.p2ManageTab='upcoming';render();}
    if(action==='select-all-rules'){document.querySelectorAll('#p31-rules-form input[name="ruleIds"]:not(:disabled)').forEach(n=>n.checked=true);}
-   if(action==='request-approve'){if(!confirm('Approve this request and apply its action?'))return;await p31Approve(p31Request(id));}
-   if(action==='request-decline'){if(!confirm('Decline this request without changing stars or voucher usage?'))return;await p31UpdateRequest(p31Request(id),'declined');notice('Request declined. No stars changed.');}
+   if(action==='request-approve'){if(!await p38Confirm('Approve this request and apply its action?'))return;await p31Approve(p31Request(id));}
+   if(action==='request-decline'){if(!await p38Confirm('Decline this request without changing stars or voucher usage?'))return;await p31UpdateRequest(p31Request(id),'declined');notice('Request declined. No stars changed.');}
   }
  }catch(err){notice(err.message||'Could not complete the request.',true);}finally{state.p31Busy=false;}
 },true);
@@ -1498,7 +1498,7 @@ app.addEventListener('submit',async event=>{
     const values=new FormData(form);
     if(values.get('backupChecked')!=='on')throw new Error('Confirm that you saved the backup.');
     if(values.get('confirmation')!=='RESET')throw new Error('Type RESET exactly to confirm.');
-    if(!confirm('Final confirmation: erase all stars, histories, vouchers, requests, and timers? Your tasks, rules, rewards and PIN will remain.'))return;
+    if(!await p38Confirm('Final confirmation: erase all stars, histories, vouchers, requests, and timers? Your tasks, rules, rewards and PIN will remain.'))return;
     await p40ResetProgress();
   }catch(error){notice(error.message||'Progress reset was cancelled.',true);}
 },true);
@@ -1615,7 +1615,7 @@ app.addEventListener('click',async event=>{
   if(action==='milestone-gift'){
     const m=p40Milestone(node.dataset.id);
     if(!m||p40Collectible(m))throw new Error('This decoration is already in the collection.');
-    if(!confirm(`Gift “${m.name}” now? No stars will be spent.`))return;
+    if(!await p38Confirm(`Gift “${m.name}” now? No stars will be spent.`))return;
     await put('collectibles',{id:`unlock:${m.id}`,milestoneId:m.id,name:m.name,icon:m.icon,area:m.area,gifted:true,unlockedAt:iso()});
     await refresh();notice(`🎁 Gifted ${m.name}!`);
   }
@@ -1809,7 +1809,7 @@ async function p41PlaceSticker(id){const sticker=p41Owned(id);if(!sticker||stick
  await put('collectibles',{...sticker,placedAt:iso()});state.p41SelectedSticker=null;state.p41Album=p41StickerById(id).themeId;await refresh();notice(`✨ ${p41StickerById(id).name} joined your album!`);
 }
 async function p41GiftPacket(){if(!safeGuardian())throw new Error('Unlock Guardian Mode to gift packets.');if(state.p41Stickers.length>=p41StickerCatalog.length)throw new Error('All stickers are already collected.');
- if(!confirm('Gift one sticker packet with up to 3 guaranteed-new stickers? This costs zero stars.'))return;
+ if(!await p38Confirm('Gift one sticker packet with up to 3 guaranteed-new stickers? This costs zero stars.'))return;
  const id=`p41-packet:gift:${uniqueId()}`;await put('collectibles',{id,kind:'p41-packet',status:'unopened',source:'guardian-gift',label:'A special gift from your guardian',createdAt:iso(),stickerIds:[]});await refresh();notice('🎀 A surprise sticker packet was added to the Sticker Book!');
 }
 app.addEventListener('click',async event=>{
@@ -2293,7 +2293,7 @@ function p5bValidateConfig(obj){if(!obj||obj.app!==APP_ID||obj.kind!=='configura
 async function p5bImportConfig(obj){const d=p5bValidateConfig(obj),current={};for(const k of p5bConfigStores)current[k]=await getAll(k);
  const toAdd={};for(const k of p5bConfigStores){const existing=new Map(current[k].map(r=>[r.id,r]));toAdd[k]=d[k].filter(r=>{if(!existing.has(r.id))return true;if(JSON.stringify(existing.get(r.id))!==JSON.stringify(r))throw new Error(`Conflicting ${k} identifier. No changes made. Use a full backup if you intend to replace existing configuration.`);return false;});}
  const n=Object.values(toAdd).reduce((sum,rows)=>sum+rows.length,0);if(!n){notice('Everything in this setup already exists. No duplicates imported.');return;}
- if(!confirm(`Import ${n} new configuration entries? Existing settings, tasks, progress and vouchers will not be overwritten. Please ensure you have a full backup.`))return;
+ if(!await p38Confirm(`Import ${n} new configuration entries? Existing settings, tasks, progress and vouchers will not be overwritten. Please ensure you have a full backup.`))return;
  await atomic(p5bConfigStores,tx=>{for(const k of p5bConfigStores)for(const row of toAdd[k])tx.objectStore(k).add(row);});await refresh();notice(`📦 Imported ${n} new setup entries; existing progress preserved.`);
 }
 const p5bPreviewOld=previewBackup;
@@ -2804,7 +2804,7 @@ const p61PriorGuardianDashboard=guardianDashboard;
 guardianDashboard=function(){const html=p61PriorGuardianDashboard();return html.replace(/(<button[^>]*data-p41-action="gift-packet"[^>]*>[\s\S]*?<\/button>)/,`$1${btn('🌍 Gift Flag Packet','not-used','btn-soft',`data-p61-action="gift-flags"`)}`);};
 async function p61GiftFlagPacket(){if(!safeGuardian())throw new Error('Guardian Mode must be unlocked.');
  if(state.p41Stickers.length>=p41StickerCatalog.length)throw new Error('Every sticker has already been collected.');
- if(!confirm('Gift one Flags Around the World packet? It includes up to 3 new flags, or other new stickers if the flag album is complete. No stars will be spent.'))return;
+ if(!await p38Confirm('Gift one Flags Around the World packet? It includes up to 3 new flags, or other new stickers if the flag album is complete. No stars will be spent.'))return;
  await put('collectibles',{id:`p41-packet:flags:${uniqueId()}`,kind:'p41-packet',status:'unopened',source:'guardian-gift',themeId:'flags',label:'🌍 Flags Around the World',createdAt:iso(),stickerIds:[]});await refresh();notice('🌍 A new Flag Sticker Packet is ready to unwrap!');
 }
 const p61OriginalApprove=p31Approve;
@@ -3229,9 +3229,9 @@ const p63PreviousChildTaskDetail=p3ChildTaskDetail;
 p3ChildTaskDetail=function(task,date=p2Date()){
  let html=p63PreviousChildTaskDetail(task,date);if(task.type==='checklist')return html;
  const wallet=Number(state.summary.wallet||0),after=wallet+Math.max(0,Number(task.stars||0));
- const relevant=state.p4Rewards.filter(r=>!r.archived&&!r.draft).map(r=>({r,linked:(r.requiredTaskIds||[]).includes(task.id),distance:Math.max(0,r.price-after)})).sort((a,b)=>Number(b.linked)-Number(a.linked)||a.distance-b.distance||a.r.price-b.r.price).slice(0,2);
+ const relevant=state.p4Rewards.filter(r=>!r.archived&&!r.draft&&!r.hidden).map(r=>({r,linked:(r.requiredTaskIds||[]).includes(task.id),distance:Math.max(0,p38Price(r)-after)})).sort((a,b)=>Number(b.linked)-Number(a.linked)||a.distance-b.distance||p38Price(a.r)-p38Price(b.r)).slice(0,2);
  if(!relevant.length)return html;
- const panel=`<section class="panel p63-quest-rewards"><div class="panel-head"><div><p class="eyebrow">A little motivation</p><h3>🎁 Rewards to Look Forward To</h3></div></div><div class="p63-rewards-grid">${relevant.map(({r,linked})=>{const price=Math.max(0,Number(r.price||0)),remain=Math.max(0,price-after);return `<article class="p63-reward-teaser"><div class="p63-teaser-symbol">${esc(r.icon||'🎁')}</div><div class="grow"><strong>${esc(r.name)}</strong><small>⭐ ${price} stars · ${remain?`${remain} more stars after this quest`:'Enough stars after this quest!'}</small>${linked?'<span class="p63-linked-label">📖 This quest is a use requirement</span>':''}</div><div class="p63-progress"><span style="width:${price?Math.min(100,100*after/price):100}%"></span></div></article>`;}).join('')}</div><p class="p2-note">Completing this quest helps you save stars. Claiming and using rewards still follow their own rules and guardian approval.</p>${btn('See All Rewards →','not-used','btn-soft',`data-p63-action="open-shop"`)}</section>`;
+ const panel=`<section class="panel p63-quest-rewards"><div class="panel-head"><div><p class="eyebrow">A little motivation</p><h3>🎁 Rewards to Look Forward To</h3></div></div><div class="p63-rewards-grid">${relevant.map(({r,linked})=>{const price=Math.max(0,p38Price(r)),remain=Math.max(0,price-after);return `<article class="p63-reward-teaser"><div class="p63-teaser-symbol">${esc(r.icon||'🎁')}</div><div class="grow"><strong>${esc(r.name)}</strong><small>⭐ ${price} stars · ${remain?`${remain} more stars after this quest`:'Enough stars after this quest!'}</small>${linked?'<span class="p63-linked-label">📖 This quest is a use requirement</span>':''}</div><div class="p63-progress"><span style="width:${price?Math.min(100,100*after/price):100}%"></span></div></article>`;}).join('')}</div><p class="p2-note">Completing this quest helps you save stars. Claiming and using rewards still follow their own rules and guardian approval.</p>${btn('See All Rewards →','not-used','btn-soft',`data-p63-action="open-shop"`)}</section>`;
  return html+panel;
 };
 
@@ -3414,7 +3414,7 @@ p31GiftPage=function(){const root=document.createElement('div');root.innerHTML=p
 };
 p31GiftReward=async function(form){if(!safeGuardian())throw new Error('Guardian access is required.');const fd=new FormData(form),r=p4Reward(fd.get('rewardId'));
  if(!r||r.archived||r.draft)throw new Error('Choose an active reward.');if(!p64ClaimLimitOk(r))throw new Error('The reward has reached its claim limit.');if(r.type==='stickers'&&!p64StickerAvailable(r))throw new Error('No new stickers remain for this packet.');
- const days=fd.has('overrideDays'),requirements=fd.has('overrideRequirements'),reason=String(fd.get('overrideReason')||'').trim();if((days||requirements)&&reason.length<3)throw new Error('Explain the special gift exception.');if(!confirm(`Gift “${r.name}” without spending stars${days||requirements?' with special permissions':''}?`))return;
+ const days=fd.has('overrideDays'),requirements=fd.has('overrideRequirements'),reason=String(fd.get('overrideReason')||'').trim();if((days||requirements)&&reason.length<3)throw new Error('Explain the special gift exception.');if(!await p38Confirm(`Gift “${r.name}” without spending stars${days||requirements?' with special permissions':''}?`))return;
  const v=p4MakeVoucher(r);v.pricePaid=0;v.originalListedPrice=r.price;v.gifted=true;v.giftMessage=String(fd.get('message')||'').trim().slice(0,240);v.claimTransactionId=`purchase:${v.id}`;
  v.specialGiftPermissions={overrideDays:days,overrideRequirements:requirements,reason:reason.slice(0,200),guardian:state.p64CurrentGuardian||'guardian',createdAt:iso()};if(days)v.usageDays=[...p4AllDays];if(requirements){v.requiredTaskIds=[];v.requiredRuleIds=[];}
  const ledger={id:v.claimTransactionId,type:'purchase',amount:0,reason:`Guardian gifted: ${r.name} (${v.ticketNumber})`,rewardId:r.id,voucherId:v.id,createdAt:iso(),source:'guardian-gift',guardianId:state.p64CurrentGuardian||null};
@@ -3509,7 +3509,7 @@ async function p64AddGuardian(form){if(!safeGuardian())throw new Error('Guardian
 async function p64PinExists(pin){const original=await get('auth','guardian');if(original?.pinSalt&&constantTimeSame(await digest(pin,unbase64(original.pinSalt)),original.pinHash))return true;
  for(const p of state.p64Profiles){const a=await get('auth',`p64-auth:${p.id}`);if(a?.pinSalt&&constantTimeSame(await digest(pin,unbase64(a.pinSalt)),a.pinHash))return true;}return false;
 }
-async function p64RemoveGuardian(id){if(!safeGuardian())throw new Error('Guardian access required.');const profile=state.p64Profiles.find(p=>p.id===id);if(!profile)throw new Error('Cannot remove this guardian.');if(state.p64CurrentGuardian===id)throw new Error('Sign in as another guardian before removing this profile.');if(!confirm(`Remove ${profile.name}'s Guardian access? Their old activity history will be kept.`))return;
+async function p64RemoveGuardian(id){if(!safeGuardian())throw new Error('Guardian access required.');const profile=state.p64Profiles.find(p=>p.id===id);if(!profile)throw new Error('Cannot remove this guardian.');if(state.p64CurrentGuardian===id)throw new Error('Sign in as another guardian before removing this profile.');if(!await p38Confirm(`Remove ${profile.name}'s Guardian access? Their old activity history will be kept.`))return;
  await p5bDeleteRecord(`p64-guardian:${id}`);
  const db=await openDb();if(!db){cachedStore.auth=cachedStore.auth.filter(a=>a.key!==`p64-auth:${id}`);persistFallback(cachedStore);}else await new Promise((resolve,reject)=>{const tx=db.transaction('auth','readwrite');tx.objectStore('auth').delete(`p64-auth:${id}`);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});await refresh();notice('Guardian access was removed.');
 }
@@ -3656,7 +3656,7 @@ app.addEventListener('click',async event=>{const node=event.target.closest('[dat
  if(action==='wishlist-close'){state.p64WishOpen=false;state.childTab='shop';render();return;}
  if(action==='wishlist-guardian'){if(!safeGuardian())throw new Error('Guardian access required.');state.guardianTab='p64-wishes';render();return;}
  if(action==='wishlist-back'){state.guardianTab='manage';state.p2ManageTab='upcoming';render();return;}
- if(action==='wish-decline'){const wish=state.p64Wishes.find(x=>x.id===id);if(!wish||wish.status!=='open')throw new Error('Wish is unavailable.');if(!confirm(`Decline the wish “${wish.name}”?`))return;await put('records',{...wish,status:'declined',updatedAt:iso()});await refresh();render();return;}
+ if(action==='wish-decline'){const wish=state.p64Wishes.find(x=>x.id===id);if(!wish||wish.status!=='open')throw new Error('Wish is unavailable.');if(!await p38Confirm(`Decline the wish “${wish.name}”?`))return;await put('records',{...wish,status:'declined',updatedAt:iso()});await refresh();render();return;}
  if(action==='wish-convert'){const wish=state.p64Wishes.find(x=>x.id===id&&x.status==='open');if(!wish)throw new Error('Wish is unavailable.');state.p64ConvertingWish=id;state.p4SelectedRewardId=null;state.guardianTab='reward-editor';render();return;}
  if(action==='reward-timer-open'){const v=p4Voucher(id);if(!v||v.type!=='timed'||!p4LiveSession(id))throw new Error('A Guardian must start this voucher before opening the countdown.');state.p64FullTimer=id;render();return;}
  if(action==='reward-timer-close'){state.p64FullTimer=null;render();return;}
@@ -3675,7 +3675,7 @@ app.addEventListener('change',e=>{
 app.addEventListener('submit',async event=>{const form=event.target;if(!['p64-guardian-form','p64-wish-form','p64-gift-packet-form'].includes(form.id))return;event.preventDefault();event.stopImmediatePropagation();if(state.p64Busy)return;state.p64Busy=true;
  try{if(form.id==='p64-guardian-form')await p64AddGuardian(form);
  else if(form.id==='p64-wish-form')await p64SaveWish(form);
- else if(form.id==='p64-gift-packet-form'){if(!safeGuardian())throw new Error('Guardian access required.');const fd=new FormData(form),theme=String(fd.get('theme')||''),count=Number(fd.get('size')||3);if(!['',...p41Themes.map(t=>t.id)].includes(theme)||!p4Whole(count,1,3))throw new Error('Choose a valid sticker packet.');if(!p41StickerCatalog.some(s=>!p41Owned(s.id)))throw new Error('No new stickers remain.');if(!confirm('Gift a surprise sticker packet with zero stars spent?'))return;await put('collectibles',{id:`p41-packet:gift:${uniqueId()}`,kind:'p41-packet',status:'unopened',source:'guardian-gift',themeId:theme,packetSize:count,createdAt:iso(),label:theme?p41Themes.find(t=>t.id===theme)?.name:'A Magical Surprise',stickerIds:[]});await refresh();state.guardianTab='dashboard';notice('🎀 A surprise packet was delivered!');}
+ else if(form.id==='p64-gift-packet-form'){if(!safeGuardian())throw new Error('Guardian access required.');const fd=new FormData(form),theme=String(fd.get('theme')||''),count=Number(fd.get('size')||3);if(!['',...p41Themes.map(t=>t.id)].includes(theme)||!p4Whole(count,1,3))throw new Error('Choose a valid sticker packet.');if(!p41StickerCatalog.some(s=>!p41Owned(s.id)))throw new Error('No new stickers remain.');if(!await p38Confirm('Gift a surprise sticker packet with zero stars spent?'))return;await put('collectibles',{id:`p41-packet:gift:${uniqueId()}`,kind:'p41-packet',status:'unopened',source:'guardian-gift',themeId:theme,packetSize:count,createdAt:iso(),label:theme?p41Themes.find(t=>t.id===theme)?.name:'A Magical Surprise',stickerIds:[]});await refresh();state.guardianTab='dashboard';notice('🎀 A surprise packet was delivered!');}
  }catch(e){notice(e.message||'Could not save this change.',true);}finally{state.p64Busy=false;}
 },true);
 /* ---------- FINISHING STYLES ---------- */
@@ -4001,7 +4001,7 @@ p2SaveIncident=async function(form){
    const count=state.p2Incidents.filter(i=>i.date===date&&!i.reversedAt&&i.starsDeducted>0&&(Array.isArray(i.ruleIds)?i.ruleIds.includes(rule.id):i.ruleId===rule.id)).length;
    if(rule.dailyMax>0&&count>=rule.dailyMax)throw new Error(`The daily deduction cap for “${rule.name}” was reached. Record a reminder instead.`);
   }
-  if(!window.confirm(`Record ONE deduction of ${amount} star${amount===1?'':'s'} for this event, covering ${ids.length} selected rule${ids.length===1?'':'s'}?`))return null;
+  if(!await p38Confirm(`Record ONE deduction of ${amount} star${amount===1?'':'s'} for this event, covering ${ids.length} selected rule${ids.length===1?'':'s'}?`))return null;
  }
  const childExplanation=String(fd.get('childExplanation')||'').trim().slice(0,240);
  const stamp=iso(),id=uniqueId(),ruleNames=rules.map(r=>r.name),incident={id,ruleId:rules[0].id,ruleIds:ids,ruleName:ruleNames.join(' · '),ruleNames,date,outcome,reason,childExplanation,starsDeducted:amount,createdAt:stamp,guardianId:state.p64CurrentGuardian||'owner',showToChild:rules.some(r=>r.incidentChildVisible)};
@@ -5038,7 +5038,7 @@ async function p8CloudUpload({force=false}={}){
 async function p8CloudDownload({confirmRestore=true}={}){
  const remote=await p8CloudFetchSnapshot();if(!remote.snapshot)throw Error('This family workspace has no cloud progress yet.');
  const before=await exportBackup();
- if(confirmRestore){const okay=confirm(`This will REPLACE all local progress with cloud revision ${remote.revision}. Local PIN credentials remain on this device. A JSON safety backup will download first. Continue?`);if(!okay)return;}
+ if(confirmRestore){const okay=await p38Confirm(`This will REPLACE all local progress with cloud revision ${remote.revision}. Local PIN credentials remain on this device. A JSON safety backup will download first. Continue?`);if(!okay)return;}
  downloadText(`Star-Garden-Before-Cloud-Restore-${p2Date()}.json`,JSON.stringify(before,null,2),'application/json');
  await replaceBackupData(remote.snapshot.data);await refresh();
  const hash=await p8LocalHash(await getBackupData());p8SaveBaseline(remote.revision,hash);state.p8Cloud.revision=remote.revision;
@@ -5048,14 +5048,14 @@ async function p8CloudDownload({confirmRestore=true}={}){
 async function p8CloudSyncNow(){
  const c=await p8CloudSignedIn(),head=await p8CloudSyncDoc().get({source:'server'}),revision=head.exists?Number(head.data().revision||0):0;
  const local=await getBackupData(),hash=await p8LocalHash(local),baseline=p8GetBaseline();
- if(!head.exists){if(c.role==='viewer')throw Error('A guardian must upload the first cloud version.');if(confirm('No cloud data exists yet. Upload this browser’s progress as the first cloud version?'))await p8CloudUpload({force:true});return;}
+ if(!head.exists){if(c.role==='viewer')throw Error('A guardian must upload the first cloud version.');if(await p38Confirm('No cloud data exists yet. Upload this browser’s progress as the first cloud version?'))await p8CloudUpload({force:true});return;}
  if(!baseline){p8CloudStatus(`Cloud revision ${revision} exists, but this browser has never synced. Choose Download Cloud or Replace Cloud explicitly; no data was changed.`);return;}
  const localDirty=hash!==baseline.hash,remoteDirty=revision!==baseline.revision;
  if(!localDirty&&!remoteDirty){p8CloudStatus(`Already synced at revision ${revision}.`);return;}
  if(localDirty&&remoteDirty){p8CloudStatus(`SYNC CONFLICT: Both this browser and the cloud changed since revision ${baseline.revision}. Export your local backup and choose one side explicitly. No changes were overwritten.`,true);return;}
  if(remoteDirty)await p8CloudDownload({confirmRestore:true});
  else if(c.role==='viewer')p8CloudStatus('Local changes exist, but this account has viewer-only cloud access.',true);
- else if(confirm(`Upload this browser’s changes as cloud revision ${revision+1}?`))await p8CloudUpload();
+ else if(await p38Confirm(`Upload this browser’s changes as cloud revision ${revision+1}?`))await p8CloudUpload();
 }
 async function p8CloudInviteMember(uid,role){
  const c=await p8CloudSignedIn();if(c.user.uid!==c.family?.ownerUid)throw Error('Only the family owner can authorize accounts.');
@@ -5116,7 +5116,7 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-p8
    p14RequireOwner();
    const remote=await p8CloudSyncDoc().get({source:'server'});
    const revision=remote.exists?Number(remote.data().revision||0):0;
-   if(confirm(`This will REPLACE the shared cloud state at revision ${revision} with this browser's progress. It does not merge changes. Are you absolutely sure you have exported a local JSON backup?`))await p8CloudUpload({force:true});
+   if(await p38Confirm(`This will REPLACE the shared cloud state at revision ${revision} with this browser's progress. It does not merge changes. Are you absolutely sure you have exported a local JSON backup?`))await p8CloudUpload({force:true});
   }
  }catch(err){p8CloudStatus(err.message||'Firebase sync failed.',true);}finally{c.busy=false;render();}
 },true);
@@ -5166,7 +5166,7 @@ p31GiftReward=async function(form){
  const days=fd.has('overrideDays'),requirements=fd.has('overrideRequirements'),rawHours=String(fd.get('durationOverrideHours')||'').trim(),rawMinutes=String(fd.get('durationOverrideExtraMinutes')||'').trim(),hasDuration=rawHours!==''||rawMinutes!=='',hours=rawHours===''?0:Number(rawHours),minutes=rawMinutes===''?0:Number(rawMinutes),override=hasDuration?hours*60+minutes:null,reason=String(fd.get('overrideReason')||'').trim();
  if(override!==null&&(r.type!=='timed'||!Number.isSafeInteger(override)||override<1||override>1440))throw Error('Custom minutes are only for timed rewards and must be between 1 and 1,440.');
  if((days||requirements||override!==null)&&reason.length<3)throw Error('Please explain this special gift exception.');
- if(!confirm(`Gift “${r.name}” without spending stars${override!==null?` for ${override} minutes`:''}${days||requirements?' with special permission':''}?`))return;
+ if(!await p38Confirm(`Gift “${r.name}” without spending stars${override!==null?` for ${override} minutes`:''}${days||requirements?' with special permission':''}?`))return;
  const v=p4MakeVoucher(r);v.pricePaid=0;v.originalListedPrice=r.price;v.gifted=true;v.giftMessage=String(fd.get('message')||'').trim().slice(0,240);v.claimTransactionId=`purchase:${v.id}`;
  v.specialGiftPermissions={overrideDays:days,overrideRequirements:requirements,overrideDurationMinutes:override,reason:reason.slice(0,200),guardian:state.p64CurrentGuardian||'guardian',createdAt:iso()};
  if(days)v.usageDays=[...p4AllDays];
@@ -5218,7 +5218,7 @@ async function p9UndoCompletion(id){
  if(Number(c.starsAwarded||0)>0&&!linked)throw Error('This completion has stars but no safely matched award transaction. Use History to review the linked award before changing the completion.');
  if(amount>0&&state.summary.wallet<amount)throw Error(`Cannot reverse ${amount} stars because the wallet has already spent them. Correct spending first or use Guardian History to reconcile.`);
  const name=c.taskName||p2Task(c.taskId)?.name||'this task';
- if(!confirm(`Undo completion of “${name}” on ${c.date}? ${amount?`Its ${amount} awarded stars will also be reversed.`:'No stars will change.'} This may affect Challenge progress. The correction will be recorded.`))return;
+ if(!await p38Confirm(`Undo completion of “${name}” on ${c.date}? ${amount?`Its ${amount} awarded stars will also be reversed.`:'No stars will change.'} This may affect Challenge progress. The correction will be recorded.`))return;
  const stamp=iso(),auditKey='p9-completion-undo:'+c.id;
  await atomic(linked?['completions','transactions','records']:['completions','records'],tx=>{
   const completions=tx.objectStore('completions');
@@ -5347,7 +5347,7 @@ async function p9HandleEmailLink(){
   const c=await p8CloudInit();if(!c.auth.isSignInWithEmailLink(location.href))return;
   let pending=null;try{pending=JSON.parse(localStorage.getItem(P9_EMAIL_KEY)||'null');}catch{}
   const email=pending?.projectId===c.config.projectId?pending?.email:null;
-  const safeEmail=email||prompt('Confirm the email address to finish signing in:');
+  const safeEmail=email||await p38Prompt('Confirm the email address to finish signing in:');
   if(!safeEmail)throw Error('Email confirmation was cancelled. Open the link again when ready.');
   const signed=await c.auth.signInWithEmailLink(safeEmail,location.href);c.user=signed.user;
   localStorage.removeItem(P9_EMAIL_KEY);
@@ -5875,7 +5875,7 @@ p2SaveIncident=async function(form){
    const count=state.p2Incidents.filter(i=>i.date===date&&!i.reversedAt&&i.starsDeducted>0&&(Array.isArray(i.ruleIds)?i.ruleIds.includes(rule.id):i.ruleId===rule.id)).length;
    if(rule.dailyMax>0&&count>=rule.dailyMax)throw new Error(`The daily deduction cap for “${rule.name}” was reached. Record a reminder instead.`);
   }
-  if(!confirm(`Deduct ${amount} stars ONCE for this one event, referencing ${ids.length} selected rule${ids.length===1?'':'s'}? The calculated maximum is ${total}.`))return null;
+  if(!await p38Confirm(`Deduct ${amount} stars ONCE for this one event, referencing ${ids.length} selected rule${ids.length===1?'':'s'}? The calculated maximum is ${total}.`))return null;
  }
  const stamp=iso(),id=uniqueId(),names=rules.map(r=>r.name),incident={id,ruleId:ids[0],ruleIds:ids,ruleName:names.join(' · '),ruleNames:names,date,outcome,reason,starsDeducted:amount,createdAt:stamp,guardianId:state.p64CurrentGuardian||'owner',showToChild:rules.some(r=>r.incidentChildVisible)};
  await atomic(amount?['incidents','transactions']:['incidents'],tx=>{
@@ -5941,7 +5941,7 @@ async function pcManualUseVoucher(form){
  if(!fd.has('confirmed'))throw new Error('Please confirm that this reward was used.');
  const isTimed=v.type==='timed',used=isTimed?Math.round(Number(fd.get('actualMinutes'))*60):0;
  if(isTimed&&(!Number.isSafeInteger(used)||used<0||used>v.remainingSeconds))throw new Error('Enter actual minutes no greater than the voucher time remaining.');
- if(!confirm(`Record ticket ${v.ticketNumber} as USED on ${day}? This does not deduct any new stars.`))return;
+ if(!await p38Confirm(`Record ticket ${v.ticketNumber} as USED on ${day}? This does not deduct any new stars.`))return;
  const stamp=iso(),sessionId=isTimed?`pc-manual-session:${v.id}`:null;
  await p4MutateVoucher(id,isTimed?['usageSessions']:[],(fresh,tx)=>{
   if(!['claimed','paused'].includes(fresh.status))throw new Error('Voucher state changed. Reload and review it before recording use.');
@@ -5954,7 +5954,7 @@ async function pcManualUseVoucher(form){
 async function pcUndoManualUse(id){
  if(!safeGuardian())throw new Error('Guardian PIN is required.');
  const v=p4Voucher(id);if(!v||v.status!=='redeemed'||!v.pcManualUsed||v.pcManualUseReversedAt)throw new Error('Only a manually recorded voucher can be reopened here.');
- if(!confirm(`Undo manual use of ticket ${v.ticketNumber}? This reopens the remaining voucher time without changing stars.`))return;
+ if(!await p38Confirm(`Undo manual use of ticket ${v.ticketNumber}? This reopens the remaining voucher time without changing stars.`))return;
  await p4MutateVoucher(id,v.pcManualSessionId?['usageSessions']:[],(fresh,tx)=>{
   if(!fresh.pcManualUsed||fresh.status!=='redeemed')throw new Error('Voucher changed since it was opened.');
   tx.objectStore('vouchers').put({...fresh,status:fresh.pcPreviousStatus||'claimed',remainingSeconds:fresh.pcPreviousRemainingSeconds,usedSeconds:fresh.pcPreviousUsedSeconds||0,redeemedAt:null,pcManualUseReversedAt:iso()});
@@ -6059,7 +6059,7 @@ async function pcFamilyFirstRestore(){
  const c=await p8CloudSignedIn();if(!c.family)await p8FamilyCheck();
  const remote=await p8CloudFetchSnapshot();if(!remote.snapshot)throw new Error('The family owner has not uploaded a garden yet. Sync the original device first.');
  previewBackup(remote.snapshot);
- if(!confirm(`Load ${remote.snapshot.data.tasks.length} tasks and ${remote.snapshot.data.vouchers.length} vouchers from cloud revision ${remote.revision} on this device? You will set a new local Guardian PIN. No cloud data will be changed.`))return;
+ if(!await p38Confirm(`Load ${remote.snapshot.data.tasks.length} tasks and ${remote.snapshot.data.vouchers.length} vouchers from cloud revision ${remote.revision} on this device? You will set a new local Guardian PIN. No cloud data will be changed.`))return;
  const before=await exportBackup();
  // On a fresh browser the stores should be empty, but preserve a safety copy
  // if configuration data was cached by an earlier aborted setup.
@@ -6366,7 +6366,7 @@ async function p10BindThisDevice(pin){
  if(!c.profileId||!p10ValidProfileId(c.profileId))throw Error('Ask the family owner to link this Firebase UID to a Guardian profile first.');
  const raw=await get('auth','guardian');if(!raw)throw Error('This browser has no original Guardian PIN.');
  if(!isPin(pin)||!constantTimeSame(await digest(pin,unbase64(raw.pinSalt)),raw.pinHash))throw Error('Incorrect original Guardian PIN. The account was not linked.');
- if(!confirm(`Link THIS browser's original PIN to ${p10LinkedName(c.profileId)}? This changes the identity recorded for future actions on this browser, without changing the PIN itself.`))return;
+ if(!await p38Confirm(`Link THIS browser's original PIN to ${p10LinkedName(c.profileId)}? This changes the identity recorded for future actions on this browser, without changing the PIN itself.`))return;
  await put('auth',{key:'p10-cloud-local-identity',projectId:c.config.projectId,familyId:c.familyId,uid:c.user.uid,profileId:c.profileId,linkedAt:iso()});
  p8CloudStatus(`This browser's PIN is now linked to ${p10LinkedName(c.profileId)}. Lock and unlock to activate the identity.`);render();
 }
@@ -6478,7 +6478,7 @@ p4HandleAction=async function(action,node){
   if(!safeGuardian()||state.guardianTab!=='claim-reward')throw Error('Open the Guardian claim approval screen first.');
   const id=node.dataset.id,r=p4Reward(id);
   if(!r||!p4ClaimEnabled(r))throw Error('This reward is no longer available to claim.');
-  if(!confirm(`Spend ${r.price} stars and issue a voucher for “${r.name}”?`))return;
+  if(!await p38Confirm(`Spend ${p38Price(r)} stars and issue a voucher for “${r.name}”?`))return;
   const voucher=await p4ClaimReward(id);await refresh();
   state.p4SelectedRewardId=null;state.p4SelectedVoucherId=voucher.id;state.guardianTab='voucher-detail';
   notice('🎟️ Voucher issued! You are still in Guardian Mode.');render();return;
@@ -11125,7 +11125,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-p33-
  const plan=p33RoutinePending(r,date);
  if(plan.complete||!plan.pending.length){notice('This routine is already complete.');return;}
  if(plan.special.length||plan.pending.some(t=>!plan.awardable.includes(t))){notice('Some steps need individual completion or are no longer eligible. Open View Steps to review them.',true);return;}
- if(!confirm(`Record ${plan.awardable.length} eligible task${plan.awardable.length===1?'':'s'} in “${r.name}” for today? Stars will be awarded only once per task.`))return;
+ if(!await p38Confirm(`Record ${plan.awardable.length} eligible task${plan.awardable.length===1?'':'s'} in “${r.name}” for today? Stars will be awarded only once per task.`))return;
  state.p33.routineBusy=r.id;b.disabled=true;
  try{const form=document.createElement('form');form.innerHTML=`<input name="date" value="${esc(date)}"><textarea name="note">Completed through routine ${esc(r.name)}</textarea>`+plan.awardable.map(t=>`<input name="taskIds" value="${esc(t.id)}" data-routine-id="${esc(r.id)}">`).join('');
  const awarded=await p2BatchReview(form);await refresh();render();notice(`Recorded ${awarded} task${awarded===1?'':'s'} from ${r.name}. No duplicate routine stars were added.`);
@@ -12497,10 +12497,10 @@ app.addEventListener('click',async e=>{
   if(action==='child-queue'){state.guardianTab='requests';render();return;}
   if(action==='open-response'){state.p37.selected=button.dataset.id;state.guardianTab='p37-guest-review';render();return;}
   if(action==='reshare'){const req=p37Request(button.dataset.id);if(!req||req.status!=='active')throw Error('Request cannot be shared.');
-   const invite={v:1,type:'guest-request',rid:req.id,nonce:req.nonce,date:req.date,expiresAt:req.expiresAt,childName:req.childName,recipient:req.recipient,from:req.createdByName,items:req.items.map(({key,kind,name,icon,detail})=>({key,kind,name,icon,detail}))};
+   const invite={v:1,type:'guest-request',rid:req.id,nonce:req.nonce,date:req.date,expiresAt:req.expiresAt,childName:req.childName,recipient:req.recipient,from:req.createdByName,message:req.message||'',items:req.items.map(({key,kind,name,icon,detail})=>({key,kind,name,icon,detail}))};
    const url=p37Link('guest',invite);await p37Share(url,`${req.childName}'s little adventures`,'Please help confirm these activities.');return;
   }
-  if(action==='cancel-request'){const req=p37Request(button.dataset.id);if(!req||req.status!=='active')throw Error('This request cannot be canceled.');if(p37Response(req.id)?.items.some(i=>i.status==='approved'))throw Error('This request already has an approved award. Use the existing correction workflow for awards; completed approvals cannot be canceled retroactively.');if(!confirm('Cancel this guest confirmation request? Pending responses will become ineligible for approval, and you can create a corrected link.'))return;
+  if(action==='cancel-request'){const req=p37Request(button.dataset.id);if(!req||req.status!=='active')throw Error('This request cannot be canceled.');if(p37Response(req.id)?.items.some(i=>i.status==='approved'))throw Error('This request already has an approved award. Use the existing correction workflow for awards; completed approvals cannot be canceled retroactively.');if(!await p38Confirm('Cancel this guest confirmation request? Pending responses will become ineligible for approval, and you can create a corrected link.'))return;
    await put('records',{...req,status:'cancelled',canceledAt:p37Now(),canceledBy:p37Actor()});await refresh();notice('Request canceled. Existing shared copies cannot be remotely erased.');return;
   }
   if(action==='copy-link'||action==='share-link'){const link=state.p37.issued?.link;if(!link)throw Error('Generate a guest checklist link first.');
@@ -12522,6 +12522,224 @@ const P37_STYLE=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d1-guest">${P37_STYLE}</style>`);
 /* End Phase 6D.1 */
+
+/* Phase 6D.2 — refinements and reward visibility / flash-sale management.
+   Existing Family Sync and its storage paths are preserved. No new backend.
+   A guest confirmation is not identity evidence. */
+state.p38={requestPage:1,guestHistoryPage:1};
+
+// Short guest responses: no repeated activity titles/descriptions; original request
+// identifies each indexed answer. Old version-1 links remain supported.
+const p38ValidateResponseV1=p37ValidResponse;
+p37ValidResponse=function(value){
+ if(value?.v!==2)return p38ValidateResponseV1(value);
+ if(value.type!=='guest-response'||typeof value.rid!=='string'||!/^[-a-f0-9]{24,64}$/.test(value.rid)||!/^([a-f0-9]{32})$/.test(value.nonce||'')||!p2ValidDate(value.date)||!p37ValidName(value.childName,36)||!p37ValidName(value.submittedAs,45)||!Number.isFinite(Date.parse(value.submittedAt))||typeof value.answers!=='string'||value.answers.length<1||value.answers.length>24||!/^[012]+$/.test(value.answers))throw Error('This guest response link is invalid.');
+ return value;
+};
+p37GuestResponsePayload=function(){const inv=p37ValidInvite(p37Extract(location.hash,'guest')),draft=state.p37.guestDraft;
+ if(Date.now()>Date.parse(inv.expiresAt))throw Error('This guest checklist has expired.');
+ if(!draft||inv.items.some(x=>!['done','notdone','unsure'].includes(draft.answers[x.key])))throw Error('Please answer every item first.');
+ const codes={done:'0',notdone:'1',unsure:'2'};
+ return p37ValidResponse({v:2,type:'guest-response',rid:inv.rid,nonce:inv.nonce,date:inv.date,childName:inv.childName,submittedAs:String(draft.name||'').trim().slice(0,45),submittedAt:p37Now(),answers:inv.items.map(x=>codes[draft.answers[x.key]]).join('')});
+};
+const p38AnswerLabel={0:'done',1:'notdone',2:'unsure'};
+function p38ExpandResponse(row,request){
+ if(!row?.compactAnswers||!request||request.items.length!==row.compactAnswers.length)return row;
+ if(row.items?.length===request.items.length&&row.items.every((x,i)=>x.key===request.items[i].key))return row;
+ return {...row,recipient:request.recipient,items:request.items.map((item,i)=>({key:item.key,kind:item.kind,name:item.name,answer:p38AnswerLabel[row.compactAnswers[i]],status:'pending',reason:'',reviewedBy:null,reviewedAt:null}))};
+}
+const p38PriorRefresh=refresh;
+refresh=async function(){await p38PriorRefresh();state.p37.responses=state.p37.responses.map(row=>p38ExpandResponse(row,p37Request(row.id)));};
+p37Import=async function(link){
+ if(!safeGuardian())throw Error('Guardian authentication required.');
+ const data=p37ValidResponse(p37Extract(link,'response'));
+ if(data.v!==2){ // Retain full support for already-shared pre-refinement response URLs.
+  const old=state.p37.responses.find(x=>x.id===data.rid);
+  if(old){state.p37.selected=old.id;state.guardianTab='p37-guest-review';render();notice('Already imported; no duplicate awards.');return;}
+  const req=p37Request(data.rid),match=p37Matches(req,data);if(req&&!match.ok)throw Error(match.reason);
+  const row={key:P37_RES+data.rid,id:data.rid,nonce:data.nonce,date:data.date,childName:data.childName,recipient:data.recipient,submittedAs:data.submittedAs,submittedAt:data.submittedAt,receivedAt:p37Now(),receivedBy:p37Actor(),items:data.items.map(x=>({...x,status:'pending',reason:'',reviewedBy:null,reviewedAt:null})),status:match.ok?'pending':'on-hold'};
+  await put('records',row);await refresh();state.p37.selected=data.rid;state.guardianTab='p37-guest-review';state.p37.importDraft='';state.p37.inbound=null;render();notice(match.ok?'Guest confirmation imported.':'Response saved on hold until the request is found.');return;
+ }
+ const existing=p37Response(data.rid);if(existing){state.p37.selected=data.rid;state.guardianTab='p37-guest-review';render();notice('This response was already imported. No duplicate award.');return;}
+ const req=p37Request(data.rid);
+ if(req&&req.items.length!==data.answers.length)throw Error('The answers do not match the original request.');
+ const starter={key:P37_RES+data.rid,id:data.rid,nonce:data.nonce,date:data.date,childName:data.childName,recipient:req?.recipient||'',submittedAs:data.submittedAs,submittedAt:data.submittedAt,receivedAt:p37Now(),receivedBy:p37Actor(),compactAnswers:data.answers,items:data.answers.split('').map((a,i)=>({key:`unmatched-${i}`,kind:'task',name:`Item ${i+1}`,answer:p38AnswerLabel[a],status:'pending',reason:'',reviewedBy:null,reviewedAt:null})),status:req?'pending':'on-hold'};
+ const row=p38ExpandResponse(starter,req),match=p37Matches(req,row);if(req&&!match.ok)throw Error(match.reason);
+ await put('records',row);await refresh();state.p37.selected=data.rid;state.p37.inbound=null;state.p37.importDraft='';state.guardianTab='p37-guest-review';render();notice(match.ok?'Guest confirmation imported for individual review.':'Response held until the original request is available. No stars can be awarded.');
+};
+const p38PriorGenerate=p37Generate;
+p37Generate=async function(form){
+ const msg=String(new FormData(form).get('message')||'').trim().slice(0,180);
+ const before=new Set(state.p37.requests.map(r=>r.id));await p38PriorGenerate(form);
+ const created=state.p37.requests.find(r=>!before.has(r.id));if(!created)return;
+ const updated={...created,message:msg};await put('records',updated);await refresh();
+ const invite={v:1,type:'guest-request',rid:created.id,nonce:created.nonce,date:created.date,expiresAt:created.expiresAt,childName:created.childName,recipient:created.recipient,from:created.createdByName,message:msg,items:created.items.map(({key,kind,name,icon,detail})=>({key,kind,name,icon,detail}))};
+ const link=p37Link('guest',invite);state.p37.issued={requestId:created.id,link};render();
+};
+const p38PriorInviteValidate=p37ValidInvite;
+p37ValidInvite=function(inv){p38PriorInviteValidate(inv);if(inv.message!==undefined&&!p37ValidName(inv.message,180))throw Error('The invitation message is invalid.');return inv;};
+const p38PriorCreatePage=p37CreatePage;
+p37CreatePage=function(){const root=document.createElement('div');root.innerHTML=p38PriorCreatePage();const form=root.querySelector('#p37-create');if(form){
+ const second=form.querySelector('fieldset.p2-fieldset');const label=document.createElement('label');label.className='field p38-guest-message';label.innerHTML='<span>A little message for your guest (optional)</span><textarea name="message" maxlength="180" rows="2" placeholder="Thank you for helping with these little adventures! 🌷"></textarea><small>Only shared with this guest; please avoid private family information.</small>';
+ if(second)second.before(label);else form.prepend(label);
+ }return root.innerHTML;};
+const p38PriorGuestPage=p37GuestPage;
+p37GuestPage=function(){const markup=p38PriorGuestPage();let inv;try{inv=p37ValidInvite(p37Extract(location.hash,'guest'));}catch{return markup;}
+ if(!inv.message)return markup;const root=document.createElement('div');root.innerHTML=markup;
+ const meta=root.querySelector('.p37-guest-meta');meta?.insertAdjacentHTML('afterend',`<p class="p38-message-to-guest">💌 ${esc(inv.message)}</p>`);return root.innerHTML;
+};
+// Re-sharing preserves the original message (the request is immutable).
+const p38PriorRequestList=p37RequestList;
+p37RequestList=function(){return p38PriorRequestList();};
+const p38PriorShare=p37Share;
+p37Share=async function(url,title,text){
+ // iMessage and certain in-app browsers reject long URL activities. Prefer
+ // a short text share for compact response links; copy is always available.
+ if(url.includes('#mlsg-response=')){
+  if(navigator.share){try{await navigator.share({text:`${text||'Guest confirmation'}\n${url}`});return 'Opened the share sheet. Send this to your Guardian.';}catch(e){if(e.name==='AbortError')return 'Sharing canceled. Your answers are still here.';}}
+  await p37Copy(url);return 'Share sheet unavailable. The compact link has been copied; paste it into your message.';
+ }
+ return p38PriorShare(url,title,text);
+};
+
+// Improve Guest Review readability while preserving the recorded decisions.
+const p38PriorDetail=p37DetailPage;
+p37DetailPage=function(){const root=document.createElement('div');root.innerHTML=p38PriorDetail();const response=p37Response(state.p37.selected),req=p37Request(response?.id),match=response&&p37Matches(req,response);
+ const summary=root.querySelector('.p37-confirm');const allReviewed=!!response&&response.items.every(x=>x.status!=='pending');
+ if(summary&&match?.ok){summary.classList.add('p38-review-summary');summary.innerHTML=`<div class="p38-review-summary-row"><span aria-hidden="true">${allReviewed?'✓':'🌷'}</span><div><strong>${allReviewed?'Review complete':'Guest report · Awaiting Guardian review'}</strong><small>${esc(response.submittedAs||'Unnamed guest')} · ${esc(fmtDate(response.submittedAt))} · Guest identity unverified</small></div></div>`;}
+ root.querySelectorAll('.p37-review-item').forEach((card,i)=>{
+  const item=response?.items[i],status=item&&req&&match?.ok?p37ItemState(req,item):null;
+  card.classList.add('p38-review-card');
+  const reason=card.querySelector('[data-p37-reason]');if(reason){const reasonLabel=reason.closest('label');const ta=document.createElement('textarea');ta.rows=2;ta.maxLength=240;ta.dataset.p37Reason=reason.dataset.p37Reason;ta.placeholder='Optional reason — visible to Guardians only';ta.className='p38-reason-input';reason.replaceWith(ta);reasonLabel?.classList.add('p38-reason-label');}
+  if(item?.status!=='pending')card.querySelectorAll('.p37-help').forEach(x=>x.remove());
+  else if(status?.awarded){const note=card.querySelector('.p37-help');if(note){note.classList.add('p38-inline-hint');note.textContent='This completion has already earned its stars. Acknowledge this report to finish reviewing.';}}
+  else if(status?.changed){const note=card.querySelector('.p37-help');if(note){note.classList.add('p38-inline-hint');note.textContent='Activity changed after sharing. Acknowledge this report and verify separately.';}}
+  const tag=card.querySelector('.p37-review-head .p2-tag');if(tag&&!tag.textContent.trim())tag.remove();
+ });
+ const end=root.querySelector('.panel>.p37-help:last-child');if(end&&allReviewed)end.remove();
+ return root.innerHTML;
+};
+const p38PriorReviewCenter=p37ReviewCenter;
+p37ReviewCenter=function(){const root=document.createElement('div');root.innerHTML=p38PriorReviewCenter();const notifications=root.querySelector('.p37-notifications');
+ if(notifications){const openForThisGuardian=state.p37.requests.some(req=>req.createdBy===p37Actor()&&p37Response(req.id)?.items.some(x=>x.status==='pending'));if(!openForThisGuardian)notifications.remove();}
+ return root.innerHTML;
+};
+
+// Paginate the full Recent Decisions list, not only its first 12 records.
+const p38PriorRequestsPage=p31RequestsPage;
+p31RequestsPage=function(){const root=document.createElement('div');root.innerHTML=p38PriorRequestsPage();const h=[...root.querySelectorAll('h3')].find(x=>x.textContent.trim()==='Recent Decisions');const section=h?.closest('section.panel');if(!section)return root.innerHTML;
+ let list=section.querySelector('.p2-list,.p67-decision-list,.p64-recent');if(!list)return root.innerHTML;
+ const history=state.p31Requests.filter(r=>r.status!=='pending').sort((a,b)=>String(b.resolvedAt||b.updatedAt||'').localeCompare(String(a.resolvedAt||a.updatedAt||'')));
+ if(history.length){list.innerHTML=history.map(r=>`<div class="p38-decision-row"><div><strong>${esc(r.targetName||p2Task(r.targetId)?.name||p4Reward(r.targetId)?.name||'Request')}</strong><small>${esc(r.kind==='task'?'Quest completion':r.kind==='claim'?'Reward request':'Voucher request')} · ${esc(r.resolvedAt?fmtDate(r.resolvedAt):r.date||'')}</small></div><span class="chip ${r.status==='approved'?'good':''}">${esc(r.status==='approved'?'✓ Approved':'Declined')}</span></div>`).join('');}
+ const rows=[...list.children];const pageSize=8,pages=Math.max(1,Math.ceil(rows.length/pageSize)),page=Math.max(1,Math.min(pages,state.p38.requestPage));state.p38.requestPage=page;
+ rows.forEach((el,i)=>el.hidden=i<(page-1)*pageSize||i>=page*pageSize);
+ if(pages>1){const bar=document.createElement('div');bar.className='p38-pager';bar.innerHTML=`<button type="button" class="btn btn-plain btn-small" data-p38-action="decisions-page" data-page="${page-1}" ${page<=1?'disabled':''}>← Previous</button><span>Page ${page} of ${pages} · ${rows.length} decisions</span><button type="button" class="btn btn-soft btn-small" data-p38-action="decisions-page" data-page="${page+1}" ${page===pages?'disabled':''}>Next →</button>`;list.after(bar);}
+ return root.innerHTML;
+};
+
+// Daily Star Review: keep shared tasks in the routine AND in Individual Tasks.
+const p38PriorDailyReview=p2ReviewPage;
+p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=p38PriorDailyReview();const form=root.querySelector('#p2-review-form');const grouped=form?.querySelector('.p32-review-groups');if(!grouped)return root.innerHTML;
+ const date=state.p2ReviewDate||p2Date();const routineInputs=[...grouped.querySelectorAll('.p32-review-routine:not(.p32-review-independent) input[name="taskIds"]')];const found=new Set(routineInputs.map(x=>x.value));
+ let individual=[...grouped.querySelectorAll('.p32-review-routine')].find(g=>g.querySelector('.p32-review-routine-head')?.textContent?.includes('Individual Tasks'));
+ if(found.size&&!individual){individual=document.createElement('div');individual.className='p32-review-routine p32-review-independent';individual.innerHTML='<div class="p32-review-routine-head"><span class="p32-routine-emoji">📖</span><div><strong>Individual Tasks</strong><small>Also available outside routines</small></div></div><div class="p32-review-task-list"></div>';grouped.append(individual);}
+ const list=individual?.querySelector('.p32-review-task-list');if(list){const existing=new Set([...list.querySelectorAll('input[name="taskIds"]')].map(x=>x.value));for(const id of found){if(existing.has(id))continue;const t=p2Task(id);if(!t||t.type==='checklist'||t.archived||t.draft||!p2Due(t,date))continue;const sample=routineInputs.find(x=>x.value===id)?.closest('label');if(!sample)continue;const clone=sample.cloneNode(true);clone.querySelector('input[name="taskIds"]')?.removeAttribute('data-routine-id');clone.querySelector('input[name="taskIds"]')?.removeAttribute('data-routineId');list.append(clone);existing.add(id);}if(!list.children.length)individual.remove();}
+ return root.innerHTML;
+};
+const p38PriorRulesCheck=p31RulePage;
+p31RulePage=function(){const root=document.createElement('div');root.innerHTML=p38PriorRulesCheck();root.querySelectorAll('[data-p31-action="back-manage-rules"]').forEach(b=>b.textContent='← Back');return root.innerHTML;};
+
+// Journey entries: actual item names, request type, status, attribution & dates.
+const p38PriorJourney=p19DailyPage;
+p19DailyPage=function(){const root=document.createElement('div');root.innerHTML=p38PriorJourney();const section=[...root.querySelectorAll('section.panel')].find(p=>p.querySelector('h3')?.textContent.includes('Requests & Rewards'));if(!section)return root.innerHTML;
+ const day=p2ValidDate(state.p19.dailyDate)?state.p19.dailyDate:p2Date(),requests=(state.p31Requests||[]).filter(r=>String(r.date||r.createdAt||'').slice(0,10)===day),vouchers=(state.p4Vouchers||[]).filter(v=>[v.redeemedAt,v.claimedAt,v.pcManualUsedDate].some(x=>String(x||'').slice(0,10)===day));
+ const list=section.querySelector('.p19-daily-list');if(!list)return root.innerHTML;
+ list.innerHTML=[...requests.map(r=>{const t=r.kind==='task'?p2Task(r.targetId):null,rew=r.kind==='claim'?p4Reward(r.targetId):null,v=r.kind==='activate'?p4Voucher(r.targetId):null;const what=r.targetName||t?.name||rew?.name||v?.name||'Activity request';const kind=r.kind==='task'?'Quest approval request':r.kind==='claim'?'Reward claim request':'Voucher use request';const amt=r.kind==='task'&&t?` · +${Number(t.stars)||0} possible stars`:r.kind==='claim'&&rew?` · ${Number(rew.price)||0} stars`:'';const status=r.status||'pending';return `<div class="p38-journey-row"><span class="p38-journey-icon">${esc(t?.icon||rew?.icon||v?.icon||'💌')}</span><div class="grow"><strong>${esc(what)}</strong><small>${esc(kind)}${esc(amt)}</small><small>${esc(r.resolvedByName||r.guardianName||'')} ${r.resolvedAt?'· '+esc(fmtDate(r.resolvedAt)):''}</small></div><span class="chip ${status==='approved'?'good':''}">${esc(status)}</span></div>`;}),...vouchers.map(v=>`<div class="p38-journey-row"><span class="p38-journey-icon">${esc(v.icon||'🎟️')}</span><div class="grow"><strong>${esc(v.name||'Reward voucher')}</strong><small>Voucher ${esc(v.ticketNumber||'')} · ${money(v.pricePaid||0)} stars spent</small><small>${esc(v.claimedAt?fmtDate(v.claimedAt):'')} · ${esc(p4Status(v)[0])}</small></div><span class="chip">${esc(v.status||'Recorded')}</span></div>`)].join('')||'<p class="p2-muted">No requests or reward activity recorded on this date.</p>';
+ return root.innerHTML;
+};
+
+// Reward hiding, pause controls, and simple scheduled flash-sale pricing.
+// No existing voucher or past purchase is repriced.
+function p38SaleActive(r){const sale=r?.flashSale;if(!sale||!Number.isSafeInteger(Number(sale.price))||Number(sale.price)<0||Number(sale.price)>=Number(r.price))return false;const n=Date.now();return Number.isFinite(Date.parse(sale.starts))&&Number.isFinite(Date.parse(sale.ends))&&n>=Date.parse(sale.starts)&&n<Date.parse(sale.ends);}
+function p38Price(r){return p38SaleActive(r)?Number(r.flashSale.price):Number(r?.price||0);}
+function p38SaleStatus(r){if(!r?.flashSale?.starts||!r?.flashSale?.ends)return '';const now=Date.now();return now>=Date.parse(r.flashSale.ends)?'Sale ended':now<Date.parse(r.flashSale.starts)?'Sale scheduled':p38SaleActive(r)?'Flash Sale Live':'';}
+function p38Datetime(iso){if(!iso)return '';const d=new Date(iso);if(!Number.isFinite(d.getTime()))return '';return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+// Patch the original claim predicate to respect hidden/paused rewards and live prices.
+// The declaration is intentionally modified at build time, not reassigned (it is const).
+const p38PreviousClaimCheck=p4CheckClaim;
+p4CheckClaim=function(r,rows,transactions){if(r?.hidden||r?.paused)throw Error('This reward is hidden or paused.');return p38PreviousClaimCheck(r?{...r,price:p38Price(r)}:r,rows,transactions);};
+const p38PreviousSnapshot=p4Snapshot;
+p4Snapshot=function(r){return p38PreviousSnapshot(r?{...r,price:p38Price(r)}:r);};
+const p38PreviousCard=p4RewardCard;
+p4RewardCard=function(r){const showing=r?{...r,price:p38Price(r)}:r;let html=p38PreviousCard(showing);if(p38SaleActive(r))html=html.replace(/(<div class="p4-reward-icon"[^>]*>)/,`<div class="p38-sale-ribbon">✨ FLASH SALE · <s>${money(r.price)} ⭐</s> ${money(p38Price(r))} ⭐</div>$1`);
+ if(r?.paused){const host=document.createElement('div');host.innerHTML=html;const badge=host.querySelector('.p4-label');if(badge){badge.textContent='Paused';badge.classList.remove('ready');}host.querySelector('article')?.insertAdjacentHTML('beforeend','<p class="p38-paused-label">Temporarily paused by your Guardian</p>');html=host.innerHTML;}return html;};
+const p38PreviousClaimPage=p4ClaimPage;
+p4ClaimPage=function(){const root=document.createElement('div');root.innerHTML=p38PreviousClaimPage();const r=state.p4Rewards.find(x=>x.id===state.p4SelectedRewardId);if(!r)return root.innerHTML;
+ const price=p38Price(r),metrics=root.querySelectorAll('.p4-metric-grid .p4-amount');if(metrics[0])metrics[0].textContent='−'+money(price)+' ⭐';if(metrics[1])metrics[1].textContent=money(Number(state.summary.wallet||0)-price)+' ⭐';
+ if(p38SaleActive(r))root.querySelector('.p4-metric-grid')?.insertAdjacentHTML('beforebegin',`<p class="p38-sale-ribbon">✨ Flash Sale is live! Standard price: ${money(r.price)} stars · Current price: ${money(price)} stars</p>`);
+ return root.innerHTML;};
+const p38PreviousRewardDetails=p4ChildRewardDetails;
+p4ChildRewardDetails=function(r){let html=p38PreviousRewardDetails(r?{...r,price:p38Price(r)}:r);if(p38SaleActive(r))html=html.replace('<section class="panel',`<section class="panel p38-sale-detail`);return html.replace('</section>',`${p38SaleActive(r)?`<p class="p38-sale-ribbon">✨ Flash Sale · Normally ${money(r.price)} stars · ${money(p38Price(r))} stars now</p>`:''}</section>`);};
+const p38PreviousEditor=p4RewardEditor;
+p4RewardEditor=function(){const root=document.createElement('div');root.innerHTML=p38PreviousEditor();const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;const r=state.p4Rewards.find(x=>x.id===state.p4SelectedRewardId)||{};
+ const group=document.createElement('fieldset');group.className='p2-fieldset p38-reward-availability';group.innerHTML=`<legend>Visibility & Flash Sale</legend><p class="p2-muted">Control what appears in Child Mode. Existing vouchers remain valid.</p><label class="inline-check"><input type="checkbox" name="hidden" ${r.hidden?'checked':''}> Hide this reward from Child Mode</label><label class="inline-check"><input type="checkbox" name="paused" ${r.paused?'checked':''}> Pause new claims temporarily (reward stays visible)</label><div class="p38-sale-fields"><p class="p2-muted"><strong>Optional Flash Sale</strong> · Discount applies only to claims made during the scheduled window.</p><div class="grid2"><label class="field">Sale price (stars)<input type="number" name="flashPrice" min="0" step="1" placeholder="Leave blank for no sale" value="${r.flashSale?Number(r.flashSale.price):''}"></label><label class="field">Starts<input type="datetime-local" name="flashStarts" value="${esc(p38Datetime(r.flashSale?.starts))}"></label><label class="field">Ends<input type="datetime-local" name="flashEnds" value="${esc(p38Datetime(r.flashSale?.ends))}"></label></div></div><p class="field-help">A sale doesn't change vouchers already issued. Device time and Family Sync determine when other devices see the offer.</p>`;
+ const publish=[...form.querySelectorAll('fieldset')].find(f=>/Publish/.test(f.querySelector('legend')?.textContent||''));if(publish)publish.before(group);else form.querySelector('.p2-actions')?.before(group);return root.innerHTML;
+};
+const p38PreviousSaveReward=p4SaveReward;
+p4SaveReward=async function(form){const fd=new FormData(form),rawPrice=String(fd.get('flashPrice')||'').trim(),rawStart=String(fd.get('flashStarts')||''),rawEnd=String(fd.get('flashEnds')||'');let sale=null;
+ if(rawPrice||rawStart||rawEnd){const base=Number(fd.get('price')),discount=Number(rawPrice),start=Date.parse(rawStart),end=Date.parse(rawEnd);if(!rawPrice||!rawStart||!rawEnd||!Number.isSafeInteger(discount)||discount<0||discount>=base||!Number.isFinite(start)||!Number.isFinite(end)||end<=start)throw Error('Set a lower whole-star sale price and valid start/end dates, or clear all sale fields.');sale={price:discount,starts:new Date(start).toISOString(),ends:new Date(end).toISOString()};}
+ const existing=String(fd.get('editId')||''),priorIds=new Set(state.p4Rewards.map(x=>x.id));await p38PreviousSaveReward(form);
+ const row=existing?state.p4Rewards.find(x=>x.id===existing):state.p4Rewards.find(x=>!priorIds.has(x.id));if(!row)throw Error('Reward saved but its new visibility settings could not be located.');
+ await put('rewards',{...row,hidden:fd.has('hidden'),paused:fd.has('paused'),flashSale:sale});await refresh();render();
+};
+const p38PreviousManager=p4RewardManager;
+p4RewardManager=function(){const root=document.createElement('div');root.innerHTML=p38PreviousManager();root.querySelectorAll('.p2-list article.p2-card').forEach(card=>{const edit=card.querySelector('[data-p4-action="reward-edit"]');const r=state.p4Rewards.find(x=>x.id===edit?.dataset.id);if(!r)return;
+ const details=card.querySelector('.p2-muted');if(details)details.insertAdjacentHTML('beforeend',`${r.hidden?' · Hidden from Child Mode':''}${r.paused?' · Paused':''}${p38SaleStatus(r)?' · '+esc(p38SaleStatus(r)):''}`);
+ const actions=card.querySelector('.p2-task-actions');if(r.hidden||r.paused)actions?.querySelector('[data-p4-action="reward-claim-direct"]')?.remove();if(actions&& !r.archived){actions.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-soft p2-mini" data-p38-action="toggle-hide" data-id="${esc(r.id)}">${r.hidden?'👁 Show':'🙈 Hide'}</button><button type="button" class="btn btn-plain p2-mini" data-p38-action="toggle-pause" data-id="${esc(r.id)}">${r.paused?'▶ Resume':'⏸ Pause'}</button>`);}
+ });return root.innerHTML;};
+
+// Accessible application-owned confirmation dialog; all former native
+// confirm() call sites are converted to await this promise at build time.
+function p38Confirm(message){return new Promise(resolve=>{const overlay=document.createElement('div');overlay.className='p38-dialog-overlay';overlay.innerHTML=`<section class="p38-dialog" role="alertdialog" aria-modal="true" aria-labelledby="p38-dialog-title" aria-describedby="p38-dialog-message"><div class="p38-dialog-icon">🌷</div><h2 id="p38-dialog-title">Please confirm</h2><p id="p38-dialog-message">${esc(String(message||'Are you sure?'))}</p><div class="p38-dialog-actions"><button type="button" class="btn btn-plain" data-p38-dialog="cancel">Cancel</button><button type="button" class="btn btn-primary" data-p38-dialog="confirm">Yes, continue</button></div></section>`;document.body.append(overlay);const previous=document.activeElement;
+ const finish=(answer)=>{overlay.removeEventListener('click',click);document.removeEventListener('keydown',key,true);overlay.remove();previous?.focus?.();resolve(answer);};
+ const click=e=>{const b=e.target.closest('[data-p38-dialog]');if(b)finish(b.dataset.p38Dialog==='confirm');else if(e.target===overlay)finish(false);};
+ const key=e=>{if(e.key==='Escape'){e.preventDefault();finish(false);}if(e.key==='Tab'){const choices=[...overlay.querySelectorAll('button')],idx=choices.indexOf(document.activeElement);if(e.shiftKey&&idx===0){choices.at(-1).focus();e.preventDefault();}else if(!e.shiftKey&&idx===choices.length-1){choices[0].focus();e.preventDefault();}}};
+ overlay.addEventListener('click',click);document.addEventListener('keydown',key,true);overlay.querySelector('[data-p38-dialog="cancel"]').focus();
+ });}
+function p38Prompt(message){return new Promise(resolve=>{const overlay=document.createElement('div');overlay.className='p38-dialog-overlay';overlay.innerHTML=`<section class="p38-dialog" role="dialog" aria-modal="true" aria-labelledby="p38-dialog-title"><h2 id="p38-dialog-title">Confirm information</h2><p>${esc(String(message||''))}</p><label class="field">Email address<input type="email" class="p38-prompt-input" autocomplete="email" placeholder="name@example.com"></label><div class="p38-dialog-actions"><button type="button" class="btn btn-plain" data-p38-dialog="cancel">Cancel</button><button type="button" class="btn btn-primary" data-p38-dialog="confirm">Continue</button></div></section>`;document.body.append(overlay);const input=overlay.querySelector('input');const old=document.activeElement;
+ const close=val=>{document.removeEventListener('keydown',key,true);overlay.remove();old?.focus?.();resolve(val);};const key=e=>{if(e.key==='Escape'){e.preventDefault();close(null);}else if(e.key==='Enter'&&document.activeElement===input){e.preventDefault();close(input.value.trim());}};
+ document.addEventListener('keydown',key,true);overlay.addEventListener('click',e=>{const action=e.target.closest('[data-p38-dialog]')?.dataset.p38Dialog;if(action)close(action==='confirm'?input.value.trim():null);});input.focus();
+ });}
+app.addEventListener('click',async e=>{const b=e.target.closest('[data-p38-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();const action=b.dataset.p38Action;
+ try{if(action==='decisions-page'){state.p38.requestPage=Number(b.dataset.page)||1;render();return;}
+  if(['toggle-hide','toggle-pause'].includes(action)){if(!safeGuardian())throw Error('Guardian authentication required.');const r=state.p4Rewards.find(x=>x.id===b.dataset.id);if(!r)throw Error('Reward unavailable.');const key=action==='toggle-hide'?'hidden':'paused';await put('rewards',{...r,[key]:!r[key],updatedAt:iso()});await refresh();render();notice(key==='hidden'?'Reward visibility updated.':'Reward claim availability updated.');}
+ }catch(err){notice(err.message||'Could not update the item.',true);}
+},true);
+// Global UI pass: remove obsolete header badges on the guest-request creator,
+// normalize Daily Rules Check-in navigation, and align daily review surfaces.
+const p38PreviousRender=render;
+render=function(){p38PreviousRender();if(state.view!=='guardian'||!safeGuardian())return;
+ const root=app.querySelector('main');if(!root)return;root.classList.toggle('p38-guest-request-page',state.guardianTab==='p37-create');
+ if(state.guardianTab==='rule-checkin')root.querySelectorAll('button,a').forEach(b=>{if(b.textContent.trim()==='Home'||b.textContent.trim()==='← Home')b.textContent='← Back';});
+};
+const P38_STYLE=String.raw`
+#app .p38-guest-request-page .topbar .p17-status-pill,#app .p38-guest-request-page .topbar [data-p17-status],#app .p38-guest-request-page .topbar .p64-guardian-indicator,#app .p38-guest-request-page .topbar .p64-guardian-profile,#app .p38-guest-request-page .topbar .p65-guardian-indicator{display:none!important}
+#app .p38-message-to-guest{background:#f8f1fa;border:1px solid #e8d9ec;border-radius:14px;padding:13px 16px;color:#765e82;text-align:left!important;font-size:.93rem;line-height:1.5}
+#app .p38-guest-message textarea{max-height:140px;min-height:78px}#app .p38-guest-message>span{font-weight:800;font-size:.88rem}
+#app .p38-review-summary{background:#fffafd;border:1px solid #efdfeb;padding:12px 15px;box-shadow:none}#app .p38-review-summary-row{display:flex;align-items:center;gap:10px}#app .p38-review-summary-row>span{font-size:1.25rem}#app .p38-review-summary-row strong{font-size:.92rem;color:#76506c}#app .p38-review-summary-row small{display:block;font-size:.76rem;color:#927c91;margin-top:3px}
+#app .p38-review-card{background:#fff;box-shadow:none;padding:16px 18px}#app .p38-review-card .p37-review-head .p2-tag{background:#f6edf4;color:#835e7a;border-radius:30px;padding:6px 11px;font-size:.78rem}
+#app .p38-review-card .p38-inline-hint{background:transparent;border:0;border-left:3px solid #e1c9dd;border-radius:0;padding:6px 11px;color:#8a768a;font-size:.8rem;margin:9px 0 0}
+#app .p38-review-card .p38-reason-label{color:#6f586c;font-weight:700;font-size:.84rem}#app .p38-review-card .p38-reason-input{width:100%;background:#fffafd;color:#5d4b61;border:1px solid #dec6d7;border-radius:12px;padding:12px 14px;min-height:74px;resize:vertical;font:inherit;font-weight:400;font-size:.88rem}
+#app .p38-decision-row{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:12px 3px;border-bottom:1px solid #efe2ea}#app .p38-decision-row[hidden]{display:none!important}#app .p38-decision-row:last-child{border-bottom:0}#app .p38-decision-row strong{display:block;font-size:.92rem;color:#6a4d63}#app .p38-decision-row small{display:block;font-size:.78rem;color:#8b7788;margin-top:3px}#app .p38-pager{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:15px;font-size:.8rem;color:#8b7588}
+#app .p27-excuse-panel,#app .p32-excuse-panel{background:rgba(255,253,250,.93)!important;border-color:var(--line)!important}
+#app .p38-journey-row{display:flex;align-items:center;gap:12px;padding:13px 5px;border-bottom:1px solid #f0e1ea;min-width:0}#app .p38-journey-row:last-child{border-bottom:0}#app .p38-journey-icon{width:45px;height:45px;background:#fcf0f7;border:1px solid #f0dbe6;border-radius:13px;display:grid;place-items:center;flex:none;font-size:1.4rem}#app .p38-journey-row strong{display:block;color:#664d64;line-height:1.35;overflow-wrap:anywhere}#app .p38-journey-row small{display:block;color:#8b7788;font-size:.79rem;line-height:1.45;margin-top:3px}#app .p38-journey-row .chip{margin-left:auto;flex:none;text-transform:capitalize}
+#app .p38-reward-availability{display:grid;gap:13px}#app .p38-reward-availability .grid2{margin-top:10px}#app .p38-sale-fields{padding:14px;background:#fff8ef;border-radius:14px;border:1px solid #efdfc9}#app .p38-sale-fields .field{font-weight:750;color:#755f53}
+#app .p38-sale-ribbon{background:#fff0d6;color:#956530;font-weight:800;padding:9px 12px;border:1px solid #ebd5a7;border-radius:11px;font-size:.81rem;margin:9px 0}#app .p38-sale-ribbon s{opacity:.75;font-weight:500}#app .p38-paused-label{color:#9a7d8e;font-size:.85rem}
+.p38-dialog-overlay{position:fixed;inset:0;z-index:5000;background:rgba(43,30,48,.40);display:grid;place-items:center;padding:18px;backdrop-filter:blur(4px)}.p38-dialog{background:#fffdfa;border:1px solid #e8d5e3;box-shadow:0 26px 80px #3f2d4038;border-radius:24px;padding:28px;display:grid;gap:14px;width:min(440px,100%);max-height:calc(100dvh - 36px);overflow:auto;color:#60475e}.p38-dialog h2{font-family:Georgia,serif;font-size:1.35rem}.p38-dialog p{color:#786679;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.p38-dialog-icon{font-size:2rem}.p38-dialog-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}.p38-dialog .field input{width:100%}
+@media(max-width:600px){#app .p38-review-card{padding:13px}#app .p38-journey-row{align-items:flex-start;flex-wrap:wrap}#app .p38-journey-row .chip{margin-left:56px}#app .p38-reward-availability .grid2{grid-template-columns:1fr}.p38-dialog{padding:22px}.p38-dialog-actions .btn{flex:1}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d2-refinements">${P38_STYLE}</style>`);
+/* End Phase 6D.2 */
 
 </script>
 </body>
