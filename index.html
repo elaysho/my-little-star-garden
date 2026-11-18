@@ -13013,6 +13013,244 @@ const P39_STYLE=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d3-refinements">${P39_STYLE}</style>`);
 /* End Phase 6D.3 */
 
+
+/* ===== Phase 6D.4 — Cohesive Guardian UX / Learning Garden preparation =====
+   UI-only enhancement. Existing store schemas, Guardian policies and cloud
+   synchronization algorithms remain unchanged. */
+const p42={historyPage:1,pages:{},syncModal:false,choiceHandled:false};
+function p42Pager(container,key,pageSize=8){
+ if(!container)return;
+ const items=[...container.children].filter(el=>el.matches('article,.p2-card,.p5a-task-card,.p64-challenge-card'));
+ container.classList.add('p42-paged-list');
+ // The legacy global pager targets .p2-list. Give managed lists their own
+ // grid class so two independent pagers cannot overwrite one another.
+ if(container.classList.contains('p2-list')){container.classList.remove('p2-list');container.classList.add('p42-manage-grid');}
+ if(items.length<=pageSize)return;
+ const total=Math.ceil(items.length/pageSize),page=Math.min(total,Math.max(1,Number(p42.pages[key]||1)));
+ p42.pages[key]=page;
+ items.forEach((el,i)=>{el.hidden=i<(page-1)*pageSize||i>=page*pageSize;});
+ const nav=document.createElement('nav');nav.className='p42-pager';nav.setAttribute('aria-label','List pages');
+ nav.innerHTML=`<span>${(page-1)*pageSize+1}–${Math.min(items.length,page*pageSize)} of ${items.length}</span><div><button type="button" class="btn btn-plain btn-small" data-p42-action="page" data-key="${esc(key)}" data-page="${page-1}" ${page===1?'disabled':''}>← Previous</button><span>Page ${page} of ${total}</span><button type="button" class="btn btn-soft btn-small" data-p42-action="page" data-key="${esc(key)}" data-page="${page+1}" ${page===total?'disabled':''}>Next →</button></div>`;
+ container.after(nav);
+}
+// Shared date / a single cohesive Daily Star Review workspace. Keep the
+// actual date input inside the existing form so its save/eligibility logic works.
+const p42PriorDailyReview=p2ReviewPage;
+p2ReviewPage=function(){const root=document.createElement('div');root.innerHTML=p42PriorDailyReview();
+ const form=root.querySelector('#p2-review-form'),list=form?.querySelector('.p32-review-groups');if(!form||!list)return root.innerHTML;
+ const dateInput=form.querySelector('#p2ReviewDate')||form.querySelector('input[name="date"]');
+ const dateField=dateInput?.closest('.field')||dateInput?.parentElement;
+ if(dateField){dateField.classList.add('p42-shared-date');const label=dateField.querySelector('label');if(label)label.textContent='Review date · applies to all sections';dateField.insertAdjacentHTML('afterend','<p class="p42-date-caption">Everything below refers to the selected date: excused activities, routines and individual tasks.</p>');}
+ const excuse=root.querySelector('.p32-excuse-panel');
+ if(excuse){excuse.querySelector('.p32-excuse-date-row')?.remove();excuse.querySelector('.p32-excuse-date-hint')?.remove();excuse.classList.add('p42-inline-excuses');list.before(excuse);}
+ const head=document.createElement('div');head.className='p42-award-heading';head.innerHTML='<div><h3>⭐ Completed tasks</h3><p class="p2-muted">Select the accomplishments you personally verified. Routine items can also be completed individually.</p></div>';
+ list.before(head);
+ const individual=[...list.querySelectorAll('.p32-review-routine')].find(x=>x.querySelector('.p32-review-routine-head')?.textContent?.includes('Individual Tasks'));
+ if(individual){individual.classList.add('p42-independent');const subtitle=individual.querySelector('.p32-review-routine-head small');if(subtitle)subtitle.textContent='Includes standalone tasks and eligible routine tasks';}
+ const section=form.closest('section.panel');section?.classList.add('p42-review-workspace');
+ const oldHint=form.querySelector('.p2-note');if(oldHint&&/shared task appears/i.test(oldHint.textContent||''))oldHint.remove();
+ return root.innerHTML;
+};
+// No duplicated explanations: two distinct facts inside one quiet routine note.
+const p42PriorJourney=p19DailyPage;
+p19DailyPage=function(){const root=document.createElement('div');root.innerHTML=p42PriorJourney();
+ const routine=root.querySelector('.p29-routines-history')||[...root.querySelectorAll('section.panel')].find(s=>s.querySelector('h3')?.textContent.includes('Completed Routines'));
+ if(routine){const a=routine.querySelector('.p29-routine-note')||routine.querySelector('.p2-muted');const b=routine.querySelector('.p29-routine-history-caution');
+  if(a||b){const n=document.createElement('div');n.className='p42-routine-explainer';n.innerHTML='<strong>About routine history</strong><div><span>⭐</span><p>Stars from routine steps are <b>already included</b> in the day’s total—no extra award for completing the routine.</p></div><div><span>📜</span><p>Historical results use the currently saved routine membership. Older steps may be unavailable if a routine was edited later.</p></div>';
+   (a||b).before(n);a?.remove();b?.remove();}
+ }
+ return root.innerHTML;
+};
+// Remove the old special-case Review Center header by reconstructing the
+// standard decorated Guardian topbar (including current Guardian/sync state).
+function p42StandardTopbar(){const root=document.createElement('div');root.innerHTML=p19GuardianDecorate(shell('<section></section>',true));return root.querySelector('main header.topbar');}
+// Complete, paged Review History instead of a hard-coded 30-record preview.
+const p42PriorReviewCenter=p37ReviewCenter;
+p37ReviewCenter=function(){const root=document.createElement('div');root.innerHTML=p42PriorReviewCenter();
+ if(state.p37.filter!=='history')return root.innerHTML;
+ const panel=root.querySelector('.p39-review-inbox')||[...root.querySelectorAll('section.panel')].find(x=>x.querySelector('.p37-tabs'));
+ if(!panel)return root.innerHTML;const tabs=panel.querySelector('.p37-tabs');if(!tabs)return root.innerHTML;
+ while(tabs.nextSibling)tabs.nextSibling.remove();
+ const rows=[...state.p37.responses.filter(r=>r.items?.every(i=>i.status!=='pending')).map(r=>({type:'guest',id:r.id,date:r.date||'',at:r.receivedAt||'',title:`${r.submittedAs||'Unnamed guest'}’s confirmation`,description:`${r.childName||state.profile?.nickname||'Child'} · ${r.date||''}`,details:`${r.items.filter(i=>i.status==='approved').length} approved · ${r.items.filter(i=>i.status==='reviewed').length} acknowledged · ${r.items.filter(i=>i.status==='declined').length} declined`})),...state.p31Requests.filter(r=>r.status!=='pending').map(r=>({type:'child',at:r.resolvedAt||r.updatedAt||'',date:r.date||'',title:r.targetName||'Child request',description:r.kind==='task'?'Quest completion':r.kind==='claim'?'Reward claim':r.kind==='activate'?'Voucher use':'Guardian decision',details:r.status==='approved'?'Approved':'Declined'}))].sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+ const size=8,pages=Math.max(1,Math.ceil(rows.length/size));p42.historyPage=Math.min(pages,Math.max(1,p42.historyPage));
+ const section=document.createElement('div');section.className='p42-review-history';section.innerHTML=`<div class="p42-history-heading"><div><h3>📖 Recent Review History</h3><p class="p2-muted">Guest confirmations and child requests are kept together, newest first.</p></div><span class="chip">${rows.length} decisions</span></div><div class="p42-history-rows">${rows.slice((p42.historyPage-1)*size,p42.historyPage*size).map(r=>`<article class="p42-history-row"><span class="p42-history-icon" aria-hidden="true">${r.type==='guest'?'🌷':'💌'}</span><div class="grow"><strong>${esc(r.title)}</strong><small>${esc(r.description)}${r.at?' · '+esc(fmtDate(r.at)):''}</small><span class="p42-history-state">${esc(r.details)}</span></div>${r.type==='guest'?btn('Details','not-used','btn-soft p2-mini',`data-p37-action="open-response" data-id="${esc(r.id)}"`):''}</article>`).join('')||'<p class="p39-quiet-empty">No completed reviews yet.</p>'}</div>${pages>1?`<nav class="p42-pager" aria-label="Review history pages"><span>${(p42.historyPage-1)*size+1}–${Math.min(rows.length,p42.historyPage*size)} of ${rows.length}</span><div><button type="button" class="btn btn-plain btn-small" data-p42-action="history-page" data-page="${p42.historyPage-1}" ${p42.historyPage<=1?'disabled':''}>← Previous</button><span>Page ${p42.historyPage} of ${pages}</span><button type="button" class="btn btn-soft btn-small" data-p42-action="history-page" data-page="${p42.historyPage+1}" ${p42.historyPage>=pages?'disabled':''}>Next →</button></div></nav>`:''}`;
+ panel.append(section);return root.innerHTML;
+};
+// Reward action toolbar: keep Archive last, with an actual full-width mobile
+// primary CTA. No detached second-row Archive on desktop.
+const p42PriorRewardManager=p4RewardManager;
+p4RewardManager=function(){const root=document.createElement('div');root.innerHTML=p42PriorRewardManager();
+ const h=[...root.querySelectorAll('h3')].find(x=>/^Reward Shop \(/.test(x.textContent||''));if(h)h.textContent=h.textContent.replace(/ active\)$/,')');
+ root.querySelectorAll('.p2-list article.p2-card').forEach(card=>{const controls=card.querySelector('.p39-reward-controls');if(!controls)return;
+  const buttons=[...controls.querySelectorAll('button')];const order=[...buttons.filter(b=>b.dataset.p4Action==='reward-claim-direct'),...buttons.filter(b=>b.dataset.p4Action==='reward-edit'),...buttons.filter(b=>b.dataset.p38Action==='toggle-hide'),...buttons.filter(b=>b.dataset.p38Action==='toggle-pause'),...buttons.filter(b=>b.dataset.p4Action==='reward-archive')];
+  controls.replaceChildren(...order);controls.classList.add('p42-reward-actions');order.find(b=>b.dataset.p4Action==='reward-claim-direct')?.classList.add('p42-reward-primary');order.find(b=>b.dataset.p4Action==='reward-archive')?.classList.add('p42-reward-archive');
+ });return root.innerHTML;
+};
+// Unified Manage Activity pagination, without scroll-trapping containers.
+const p42PriorManage=guardianManage;
+guardianManage=function(){const root=document.createElement('div');root.innerHTML=p42PriorManage();const tab=state.p2ManageTab;
+ if(['tasks','routines','challenges','upcoming'].includes(tab)){
+  const grid=tab==='tasks'||tab==='routines'?root.querySelector('.p5a-task-grid'):tab==='upcoming'?root.querySelector('.p5b-card-grid')||root.querySelector('.p2-list'):root.querySelector('.p5b-card-grid')||root.querySelector('.p2-list');
+  if(grid){p42Pager(grid,'manage:'+tab,8);if(tab==='tasks'||tab==='routines'||tab==='challenges'){
+   grid.querySelectorAll('.p2-card .p2-task-actions').forEach(row=>{row.classList.add('p42-manage-task-actions');const buttons=[...row.querySelectorAll('button')];const archives=buttons.filter(b=>/archive/i.test(b.dataset.p2Action||''));archives.forEach(b=>row.append(b));});
+  }}
+ }
+ return root.innerHTML;
+};
+// Bulk sale: keep percentage input; remove the large decorative percentage tile.
+const p42PriorBulkPage=p39BulkPage;
+p39BulkPage=function(){const root=document.createElement('div');root.innerHTML=p42PriorBulkPage();root.querySelector('.p39-bulk-percentage-badge')?.remove();return root.innerHTML;};
+// User chooses a mode on fresh opening of an existing garden. This gate does
+// not replace onboarding, PIN/password checks, guest links or incoming imports.
+function p42ModeScreen(){return `<main class="p42-mode-screen"><section class="p42-mode-card"><div class="p42-mode-mark">🌷</div><p class="eyebrow">MY LITTLE STAR GARDEN</p><h1>Welcome to your little garden</h1><p class="p42-mode-sub">Where would you like to go today?</p><div class="p42-mode-options"><button type="button" class="p42-mode-choice" data-p42-action="enter-child"><span class="p42-mode-icon">🌼</span><strong>Child Mode</strong><span>Adventures, learning, stickers and stars</span><span class="p42-mode-link">Enter the garden →</span></button><button type="button" class="p42-mode-choice p42-mode-guardian" data-p42-action="enter-guardian"><span class="p42-mode-icon">🔐</span><strong>Guardian Mode</strong><span>Review progress and manage activities</span><span class="p42-mode-link">Choose Guardian →</span></button></div><p class="p42-mode-foot">Guardian Mode still requires your normal account and PIN checks. Your progress stays on this device until it is shared.</p></section></main>`;}
+const p42PriorRender=render;
+render=function(){
+ // A Sync check from Dashboard should show the existing content in a modal,
+ // not push a new section below Quick Actions.
+ if(typeof p30SyncOpen!=='undefined'&&p30SyncOpen&&state.view==='guardian'&&state.guardianTab==='dashboard'){p30SyncOpen=false;p42.syncModal=true;}
+ if(state.guardianTab!=='dashboard'||state.view!=='guardian')p42.syncModal=false;
+ if(!p42.choiceHandled&&state.view==='child'&&state.profile&&!location.hash.startsWith('#mlsg-guest=')&&!state.p37?.inbound&&!state.p19?.resume){p42.choiceHandled=true;state.view='p42-mode';}
+ if(state.view==='p42-mode'){app.innerHTML=p42ModeScreen();return;}
+ p42PriorRender();
+ if(state.view!=='guardian'||!safeGuardian())return;
+ if(state.guardianTab==='p61-review-center'){
+  const top=app.querySelector('main > header.topbar');if(top){const normal=p42StandardTopbar();if(normal){normal.classList.add('p42-unified-topbar');top.replaceWith(normal);}}
+  app.querySelector('main')?.classList.remove('p39-review-view');
+ }
+ if(p42.syncModal){
+  // Previous sync-result dialogs would duplicate the same feedback; keep just
+  // one accessible modal. The underlying Sync Now action remains unchanged.
+  app.querySelector('main > .p14-overlay,main > .p14-dialog-overlay')?.remove();
+  const panel=p30SyncPanelHtml();const overlay=document.createElement('div');overlay.className='p42-sync-overlay';
+  overlay.innerHTML=`<section class="p42-sync-dialog" role="dialog" aria-modal="true" aria-labelledby="p42-sync-title"><div class="p42-sync-header"><div><p class="eyebrow">Guardian · Family sharing</p><h2 id="p42-sync-title">☁️ Check Family Sync</h2></div><button type="button" class="btn btn-plain" data-p42-action="sync-close" aria-label="Close Family Sync">✕ Close</button></div>${panel}</section>`;
+  document.body.querySelector('.p42-sync-overlay')?.remove();document.body.append(overlay);
+  if(state.p19?.syncFeedback){const old=document.querySelectorAll('.p14-modal-overlay,.p19-overlay');old.forEach(e=>{if(!e.closest('.p42-sync-overlay'))e.remove();});}
+ }else document.body.querySelector('.p42-sync-overlay')?.remove();
+};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-p42-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();
+ const action=b.dataset.p42Action;
+ if(action==='enter-child'){p42.choiceHandled=true;state.view='child';state.childTab='home';render();return;}
+ if(action==='enter-guardian'){p42.choiceHandled=true;state.view='child';p16EnterGuardian().catch(err=>notice(err.message||'Could not open Guardian sign-in.',true));return;}
+ if(action==='sync-close'){p42.syncModal=false;if(state.p19)state.p19.syncFeedback=null;render();return;}
+ if(action==='history-page'){p42.historyPage=Math.max(1,Number(b.dataset.page)||1);render();return;}
+ if(action==='page'){const key=b.dataset.key,pg=Number(b.dataset.page);if(key&&Number.isInteger(pg)&&pg>=1){p42.pages[key]=pg;render();}return;}
+},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&p42.syncModal){p42.syncModal=false;if(state.p19)state.p19.syncFeedback=null;render();}},true);
+// A click outside closes only the modal; it does not invoke other dashboard actions.
+document.addEventListener('click',e=>{if(e.target.classList?.contains('p42-sync-overlay')){p42.syncModal=false;render();}},true);
+const P42_CSS=String.raw`
+/* Shared typography, spacing and form controls */
+#app .layout-stack>.panel,#app .layout-stack>section,#app .layout-stack>.grid2{min-width:0}
+#app .p37-help{margin:16px 0 0!important;line-height:1.6;padding:12px 14px;max-width:100%;overflow-wrap:anywhere}
+#app #p37-import .p2-actions{margin:17px 0 0!important}
+#app .panel>.field-help,#app .panel>p.p2-muted{margin-block:12px}
+#app .p2-fieldset>p{margin-block:6px}
+#app form .p2-actions,#app form .actions,#app .p62-rule-footer,#app .p67-rule-footer,#app .p31-rule-footer{justify-content:flex-start!important;text-align:left!important}
+#app :is(.field,.form-grid,.grid2,.p2-row,.p2-card){min-width:0}
+#app :is(.field input[type="search"],.field input[type="text"],.field select,.field textarea){box-sizing:border-box;min-width:0;max-width:100%}
+#app input[type="search"],#app input[type="text"][placeholder*="Search"]{border-radius:12px;border:1px solid #e4cddb;background:#fff;min-height:44px;padding:10px 13px}
+#app input[type="search"]:focus-visible,#app input[type="text"][placeholder*="Search"]:focus-visible{outline:3px solid #f0d0e3;outline-offset:1px}
+#app .p2-symbol,#app .p39-bulk-icon{flex-shrink:0}
+#app .p3-icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(45px,1fr));gap:8px;margin-top:12px}
+#app .p3-icon-grid .p3-icon-choice{min-height:44px;min-width:0;display:grid;place-items:center;padding:7px;border-radius:11px}
+#app .p3-icon-grid .p3-icon-choice:focus-visible{outline:3px solid #a86991;outline-offset:2px}
+#app .p3-icon-preview{min-width:48px;min-height:48px;display:grid;place-items:center;flex:none}
+#app .field:has(.p3-icon-grid)>.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#app .field:has(.p3-icon-grid) input[name=icon]{flex:1 1 190px;min-height:44px;max-width:100%}
+#app .field:has(.p3-icon-grid)>.row>.p2-note{flex:1 1 180px} 
+/* Single-date Daily Review, balanced panels and a wide two-column task list. */
+#app .p42-review-workspace{padding:clamp(15px,2.4vw,25px)}
+#app .p42-review-workspace #p2-review-form{gap:14px}
+#app .p42-shared-date{background:#fcf5fa;border:1px solid #eed9e7;border-radius:16px;padding:15px;max-width:440px}
+#app .p42-shared-date :is(input[type="date"],input[type="datetime-local"]){background:#fff}
+#app .p42-date-caption{color:#8b7586;font-size:.84rem;line-height:1.55;margin:-7px 0 9px}
+#app .p42-inline-excuses{margin:4px 0 10px;background:#fff!important;border:1px solid #eedde7!important;box-shadow:none;min-width:0}
+#app .p42-award-heading{margin:8px 0 0}
+#app .p42-award-heading h3{font-size:1.15rem;margin:0 0 6px}
+#app .p42-award-heading p{margin:0}
+#app .p42-review-workspace .p32-review-groups{grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:stretch;gap:15px!important}
+#app .p42-independent{grid-column:1/-1}
+#app .p42-independent .p32-review-task-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:18px}
+#app .p42-independent .p32-review-task{min-width:0}
+/* Two distinct routine-history facts, kept together without repeated alert boxes. */
+#app .p42-routine-explainer{background:#fbf7fa;border:1px solid #eedde7;border-radius:15px;padding:14px 18px;margin-top:16px;display:grid;gap:10px}
+#app .p42-routine-explainer>strong{color:#76576e;font-size:.86rem}
+#app .p42-routine-explainer>div{display:flex;gap:10px;align-items:flex-start}
+#app .p42-routine-explainer>div>span{flex:none}
+#app .p42-routine-explainer p{margin:0;color:#7d7181;font-size:.82rem;line-height:1.5}
+/* Normal Guardian header—no outdated Review-only replacements. */
+#app main>.p42-unified-topbar{margin-bottom:20px}
+#app .p42-review-heading{background:linear-gradient(135deg,#fff9fc,#f9f5fa 80%);border:1px solid #eedde7}
+/* History list and paginator */
+#app .p42-history-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:17px 0}
+#app .p42-history-heading h3{margin:0 0 5px;font-size:1.12rem}
+#app .p42-history-rows{display:grid;gap:0}
+#app .p42-history-row{display:flex;align-items:center;gap:14px;padding:15px 3px;border-bottom:1px solid #f0e1e9;min-width:0}
+#app .p42-history-row:last-child{border-bottom:0}
+#app .p42-history-icon{width:44px;height:44px;border-radius:14px;background:#fcecf4;display:grid;place-items:center;font-size:1.3rem;flex:none}
+#app .p42-history-row .grow{min-width:0}
+#app .p42-history-row strong{display:block;color:#694f64;font-size:.94rem;overflow-wrap:anywhere}
+#app .p42-history-row small{display:block;color:#978093;font-size:.79rem;line-height:1.5;margin-top:3px}
+#app .p42-history-state{display:inline-block;color:#856178;font-size:.79rem;margin-top:6px}
+#app .p42-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid #f0e2eb;padding-top:15px;margin-top:12px;color:#8b7184;font-size:.83rem}
+#app .p42-pager>div{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+/* Manage cards: no scroll-trapping max height; consistent actions. */
+#app .p42-manage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#app .p42-paged-list{max-height:none!important;height:auto!important;overflow:visible!important;scrollbar-width:auto}
+#app .p42-paged-list>[hidden]{display:none!important}
+#app .p42-reward-actions{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px!important;align-items:center;margin-top:15px}
+#app .p42-reward-actions>.btn{width:100%;min-width:0;min-height:42px;padding:10px 8px;line-height:1.25;white-space:normal;max-width:100%;font-size:.83rem;text-align:center}
+#app .p42-reward-actions>.p42-reward-primary{grid-column:1/-1;background:#f5cfe2;color:#71425d}
+#app .p42-reward-actions>.p42-reward-archive{margin-left:0!important;background:#fff!important;color:#926e82!important}
+#app .p42-manage-task-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+#app .p42-manage-task-actions>.btn{min-width:0;width:100%;min-height:41px;padding:9px 8px;white-space:normal;line-height:1.3;text-align:center}
+#app .p42-manage-task-actions>.btn:is([data-p2-action=complete-open],[data-p2-action=routine-manage-steps],[data-p2-action=challenge-award]){grid-column:1/-1}
+/* Dropdown More Actions: proper spacing and stable button sizes. */
+#app .p62-reward-menu-items{box-sizing:border-box;min-width:235px;padding:10px;gap:7px}
+#app .p62-reward-menu-items .btn{padding:11px 13px;line-height:1.35;text-align:left;justify-content:flex-start;min-height:42px;min-width:0}
+/* Two-column bulk selection; discount belongs in the labeled field. */
+#app .p39-bulk-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+#app .p39-bulk-percent-row .field{max-width:360px}
+/* Clean mode selection without affecting onboarding and login protection. */
+#app .p42-mode-screen{min-height:100dvh;padding:clamp(16px,4vw,36px);display:grid;place-items:center;background:radial-gradient(circle at 20% 0%,#ffedf6 0%,transparent 43%),linear-gradient(140deg,#fffcfa,#f8f2fc)}
+#app .p42-mode-card{width:min(100%,780px);border:1px solid #e9d7e5;background:#fffdfd;border-radius:30px;text-align:center;padding:clamp(24px,5vw,48px);box-shadow:0 20px 55px rgba(120,79,105,.09)}
+#app .p42-mode-mark{font-size:3rem;margin-bottom:10px}
+#app .p42-mode-card h1{font:600 clamp(1.9rem,4vw,2.8rem)/1.2 Georgia,serif;color:#795571;margin:10px 0}
+#app .p42-mode-sub{font-size:1rem;color:#8c7486;margin-bottom:27px}
+#app .p42-mode-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+#app .p42-mode-choice{cursor:pointer;border:1.5px solid #efd4e3;background:#fff4f9;border-radius:22px;text-align:left;padding:24px;display:grid;gap:11px;color:#76556b;transition:transform .14s,box-shadow .14s;font:inherit;min-width:0}
+#app .p42-mode-choice:hover{transform:translateY(-2px);box-shadow:0 8px 20px #aa78961f}
+#app .p42-mode-choice:focus-visible{outline:3px solid #bd7ca0;outline-offset:3px}
+#app .p42-mode-choice.p42-mode-guardian{background:#f8f5fb;border-color:#e2d9ee}
+#app .p42-mode-icon{font-size:2.2rem}
+#app .p42-mode-choice strong{font-size:1.25rem}
+#app .p42-mode-choice>span:nth-last-child(2){font-size:.86rem;color:#8d7587;line-height:1.5}
+#app .p42-mode-link{font-weight:800;color:#975c7f;font-size:.86rem}
+#app .p42-mode-foot{font-size:.77rem;color:#8e7b8b;line-height:1.6;margin:24px auto 0;max-width:540px}
+/* Family Sync overlay keeps original data, but never needs a scroll. */
+.p42-sync-overlay{position:fixed;inset:0;z-index:3500;background:rgba(55,33,53,.46);display:grid;place-items:center;padding:15px;overflow-y:auto}
+.p42-sync-dialog{width:min(100%,560px);max-height:calc(100dvh - 30px);overflow-y:auto;background:#fffdfd;border:1px solid #ecd6e2;border-radius:23px;padding:clamp(17px,3vw,25px);box-shadow:0 22px 60px #40223936;box-sizing:border-box}
+.p42-sync-header{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.p42-sync-header h2{margin:7px 0;color:#6f5269;font-size:1.4rem}
+.p42-sync-dialog .p30-sync-panel{margin-top:13px}
+@media(max-width:760px){
+ #app .p42-review-workspace .p32-review-groups{grid-template-columns:1fr!important}
+ #app .p42-independent .p32-review-task-list{grid-template-columns:1fr}
+ #app .p39-bulk-list{grid-template-columns:1fr}
+ #app .p42-manage-grid{grid-template-columns:1fr}
+ #app .p42-manage-task-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #app .p42-reward-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px!important;width:100%}
+ #app .p42-reward-actions>.btn{width:100%;min-width:0;white-space:normal;text-align:center;line-height:1.35}
+ #app .p42-reward-actions>.p42-reward-primary{grid-column:1/-1}
+ #app .p42-mode-options{grid-template-columns:1fr}
+ #app .p42-pager{align-items:flex-start}
+ #app .p42-pager>div{width:100%;justify-content:space-between}
+}
+@media(max-width:420px){#app .p42-history-row{gap:9px;flex-wrap:wrap}#app .p42-history-row>.btn{margin-left:auto}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d4-consistency">${P42_CSS}</style>`);
+/* End Phase 6D.4 */
+
 </script>
 </body>
 </html>
