@@ -11468,6 +11468,213 @@ const P34_CSS=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="p34-style">${P34_CSS}</style>`);
 /* ===== End Phase 6C.2B.2E.6 ===== */
 
+/* ======================================================================
+   Phase 6C.2B.2E.7 — Little Victories & reliable Challenge accounting.
+   Challenge Garden visual journey remains explicitly deferred.
+   ====================================================================== */
+state.p35CardTheme=state.p35CardTheme||'blossom';
+const p35Themes={
+ blossom:{label:'Cherry Blossom Garden',icon:'🌸',bg1:'#fff3f9',bg2:'#f7e6f5',ink:'#6c4662',accent:'#ae6f93',mint:'#e5f3e7',line:'#ebc6d9',panel:'#fffdfc',soft:'#fde9f2',highlight:'#f8d6e8',flower:'🌸'},
+ stars:{label:'Starry Night Garden',icon:'🌙',bg1:'#f7efff',bg2:'#e6e5fb',ink:'#5c4b83',accent:'#8077b2',mint:'#edf1ff',line:'#d6cfea',panel:'#fffdfd',soft:'#eeecfa',highlight:'#dfddfb',flower:'⭐'},
+ meadow:{label:'Sunny Flower Meadow',icon:'🌻',bg1:'#fff9e7',bg2:'#f0f5dd',ink:'#6a604b',accent:'#a67c66',mint:'#eaf3de',line:'#e7dcbf',panel:'#fffefb',soft:'#fff0d9',highlight:'#f8e1ba',flower:'🌼'}
+};
+const p35PriorShareModal=p8DailyModal;
+p8DailyModal=function(){
+ const html=p35PriorShareModal();if(!html||!state.p8DailyShareOpen)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const dialog=root.querySelector('.p68-share-dialog');if(!dialog)return html;
+ const section=document.createElement('div');section.className='p35-theme-choose';section.setAttribute('role','group');section.setAttribute('aria-label','Achievement card design');
+ section.innerHTML='<strong>🎀 Choose a card design</strong><div class="p35-theme-options">'+Object.entries(p35Themes).map(([id,item])=>`<button type="button" class="p35-theme ${state.p35CardTheme===id?'p35-selected':''}" data-p35-theme="${id}" aria-pressed="${state.p35CardTheme===id}"><span aria-hidden="true">${item.icon}</span><span>${item.label}</span></button>`).join('')+'</div>';
+ const actions=dialog.querySelector('.p2-actions');if(actions)actions.before(section);else dialog.append(section);
+ return root.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const btn=event.target.closest('[data-p35-theme]');if(!btn)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const theme=btn.dataset.p35Theme;if(!p35Themes[theme])return;
+ state.p35CardTheme=theme;
+ document.querySelectorAll('[data-p35-theme]').forEach(b=>{const on=b.dataset.p35Theme===theme;b.classList.toggle('p35-selected',on);b.setAttribute('aria-pressed',String(on));});
+},true);
+
+// Keep the underlying approved day, stars, history, and guardian identity.
+// Only the card's visual presentation changes.
+const p35PreviousDailyCard=p8DailyCard;
+p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
+ if(!snapshot||typeof document==='undefined')return p35PreviousDailyCard(snapshot,guardianName,message);
+ const theme=p35Themes[state.p35CardTheme]||p35Themes.blossom;
+ const canvas=document.createElement('canvas');canvas.width=2400;canvas.height=1800;
+ const ctx=canvas.getContext('2d');if(!ctx)return p35PreviousDailyCard(snapshot,guardianName,message);
+ const rr=(x,y,w,h,r,fill,stroke)=>p10RoundRect(ctx,x,y,w,h,r,fill,stroke);
+ const line=(text,x,y,maxWidth,font,color,lh=44,maxLines=2)=>{ctx.font=font;ctx.textAlign='left';ctx.fillStyle=color;p10TextLine(ctx,String(text||''),x,y,maxWidth,lh,maxLines);};
+ const dateLabel=p2ValidDate(snapshot.day)?new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'}):String(snapshot.day||'');
+ const bg=ctx.createLinearGradient(0,0,2400,1800);bg.addColorStop(0,theme.bg1);bg.addColorStop(1,theme.bg2);ctx.fillStyle=bg;ctx.fillRect(0,0,2400,1800);
+ // Soft watercolor-like floating highlights along the outside edge.
+ for(let i=0;i<22;i++){const x=i%2===0?70:2320,y=85+i*78;ctx.beginPath();ctx.ellipse(x,y,17+(i%4)*5,34+(i%3)*4,(i%5)*.18,0,Math.PI*2);ctx.fillStyle=i%2===0?theme.highlight:theme.mint;ctx.globalAlpha=.65;ctx.fill();}ctx.globalAlpha=1;
+ rr(54,50,2292,1700,52,theme.panel,theme.line);
+ ctx.lineWidth=5;ctx.strokeStyle=theme.line;ctx.setLineDash([9,18]);ctx.strokeRect(83,77,2234,1648);ctx.setLineDash([]);ctx.lineWidth=1;
+ // A subtle garland and butterflies/stars kept out of the text columns.
+ ctx.textAlign='center';for(const [x,y,glyph,font] of [[125,155,theme.flower,'49px serif'],[2250,167,theme.flower,'55px serif'],[127,1605,'🦋','47px serif'],[2253,1570,'✨','45px serif'],[2090,1650,theme.flower,'50px serif']]){ctx.font=font;ctx.fillText(glyph,x,y);}
+ line('✦  MY LITTLE STAR GARDEN  ✦',146,164,1600,'800 34px system-ui',theme.accent,44,1);
+ line(`${String(snapshot.nickname||'Little Star').slice(0,28)}'s Little Victories`,145,247,1960,'800 76px system-ui',theme.ink,85,1);
+ line(dateLabel,151,309,1900,'29px system-ui',theme.accent,38,1);
+ // Left: illustrated treasure/garden panel with today's earned stars.
+ rr(142,361,654,904,42,theme.soft,theme.line);
+ ctx.textAlign='center';ctx.font='136px serif';ctx.fillText(theme.flower,470,580);
+ ctx.font='99px serif';ctx.fillText('⭐',471,724);
+ ctx.fillStyle=theme.ink;ctx.font='800 138px system-ui';ctx.fillText(String(Number(snapshot.stars)||0),470,875);
+ ctx.font='800 31px system-ui';ctx.fillText('STARS EARNED TODAY',470,937);
+ ctx.fillStyle=theme.accent;ctx.font='27px system-ui';ctx.fillText(`${Number(snapshot.completedTasks)||0} quests · ${Number(snapshot.followedRules)||0} rules`,470,995);
+ ctx.strokeStyle=theme.line;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(228,1040);ctx.lineTo(708,1040);ctx.stroke();
+ ctx.font='800 45px system-ui';ctx.fillStyle=theme.ink;ctx.fillText(`✨ ${Number(snapshot.lifetime)||0}`,470,1120);ctx.font='25px system-ui';ctx.fillStyle=theme.accent;ctx.fillText('LIFETIME STARS',470,1172);
+ // Right: genuinely earned accomplishments, not filler records.
+ const x=838,w=1412;
+ function section(y,title,rows,empty){
+  rr(x,y,w,430,32,'#ffffff',theme.line);line(title,x+44,y+66,w-88,'800 35px system-ui',theme.ink,45,1);
+  if(!(rows||[]).length){line(empty,x+54,y+159,w-108,'26px system-ui',theme.accent,37,2);return;}
+  let yy=y+135;for(const item of rows.slice(0,3)){
+   rr(x+40,yy-42,w-80,77,19,theme.bg1);
+   const glyph=String(item.icon||'🌼');ctx.font='34px serif';ctx.textAlign='left';ctx.fillText(glyph,x+62,yy+12);
+   line(item.name||'A little victory',x+122,yy+8,w-206,'700 27px system-ui',theme.ink,34,1);
+   yy+=103;
+  }
+ }
+ section(362,'📖  Today’s Completed Quests',snapshot.topQuests||snapshot.quests||[],'Every small effort is worth celebrating.');
+ section(813,'🌷  Rules Followed',snapshot.topRules||snapshot.rules||[],'A new chance to practice kindness and care.');
+ // Bottom note & improvements (only when an incident exists).
+ const incidents=typeof p33Incidents==='function'?p33Incidents(snapshot.day):[];
+ const noteY=1290,noteH=355;
+ rr(142,noteY,2108,noteH,34,theme.mint,theme.line);
+ if(incidents.length){
+  line('🌱  What to Improve?',190,noteY+67,1700,'800 34px system-ui',theme.ink,43,1);
+  let yy=noteY+131;for(const item of incidents.slice(0,2)){
+   line(`${item.stars?`−${item.stars} ⭐ · `:''}${item.name}`,198,yy,1970,'700 26px system-ui',theme.ink,34,1);yy+=38;
+   if(item.detail){line(item.detail,211,yy,1950,'24px system-ui',theme.accent,32,1);yy+=48;}else yy+=16;
+  }
+  if(incidents.length>2)line(`+ ${incidents.length-2} more in My Adventure Journal`,197,noteY+324,1870,'23px system-ui',theme.accent,30,1);
+  if(message&&incidents.length<=2)line('💌 '+String(message).trim().slice(0,95),198,1635,1920,'italic 22px system-ui',theme.accent,31,1);
+ }else{
+  line('🌼  A Little Note of Encouragement',190,noteY+78,1820,'800 35px system-ui',theme.ink,44,1);
+  line(String(message||'Every little effort helps your garden grow!').trim().slice(0,150)||'Every little effort helps your garden grow!',198,noteY+165,1920,'italic 30px system-ui',theme.ink,43,3);
+ }
+ line(`Made with love · Approved by ${String(guardianName||'Guardian').slice(0,45)}`,170,1710,1920,'23px system-ui',theme.accent,30,1);
+ return canvas;
+};
+
+// Unified routine evidence for Challenge calculations: a confirmed step OR
+// explicit valid excuse satisfies the step; at least one genuine completion is
+// still mandatory. A reversed/corrected completion is never credited.
+function p35RoutineEvidence(task,day){
+ if(!task||task.type!=='checklist'||!Array.isArray(task.routineItems)||!p2ValidDate(day)||!p2Due(task,day))return {qualified:false,completed:0,excused:0,total:0};
+ const members=p3Members(task,day),valid=p11SavedTaskCompletions(day),completedIds=new Set(valid.map(c=>c.taskId));
+ let completed=0,excused=0;
+ for(const {task:member} of members){
+  if(completedIds.has(member.id))completed++;
+  else if(member.skippable&&p5bExcused(member.id,day))excused++;
+ }
+ return {qualified:members.length>0&&completed>0&&completed+excused===members.length,completed,excused,total:members.length};
+}
+const p35PreviousProgress=p2ChallengeProgress;
+p2ChallengeProgress=function(ch,day=p2Date()){
+ const items=p64ChallengeItems(ch);
+ if(!items.some(x=>x.kind==='routine'))return p35PreviousProgress(ch,day);
+ const start=ch.period==='weekly'?p2WeekStart(day):'0001-01-01';
+ const candidate=new Set();
+ for(const c of state.p2Completions||[])if(p2ValidDate(c.date)&&c.date>=start&&c.date<=day)candidate.add(c.date);
+ for(const e of state.p5bExcusals||[])if(p2ValidDate(e.date)&&e.date>=start&&e.date<=day)candidate.add(e.date);
+ for(const r of state.p41RuleConfirmations||[])if(p2ValidDate(r.date)&&r.date>=start&&r.date<=day)candidate.add(r.date);
+ for(const t of state.summary?.transactions||[])if(t.type==='rule-earned'&&!t.reversedAt&&p2ValidDate(t.ruleDate)&&t.ruleDate>=start&&t.ruleDate<=day)candidate.add(t.ruleDate);
+ let count=0;
+ for(const date of [...candidate].sort()){
+  const passed=items.filter(item=>item.kind==='routine'?p35RoutineEvidence(p2Task(item.id),date).qualified:p64EntryInfo(item,date).ok);
+  if(ch.matchMode!=='any'){if(items.length&&passed.length===items.length)count++;}
+  else if(ch.distinctDays)count+=passed.length?1:0;
+  else {
+   const stepIds=new Set(passed.filter(i=>i.kind==='routine').flatMap(i=>p3Members(p2Task(i.id),date).map(({task})=>task.id)));
+   count+=passed.filter(i=>!(i.kind==='task'&&stepIds.has(i.id))).length;
+  }
+ }
+ return count;
+};
+const p35PreviousEntryInfo=p64EntryInfo;
+p64EntryInfo=function(item,date){
+ if(item?.kind==='routine'){
+  const r=p2Task(item.id);const result=p35RoutineEvidence(r,date);
+  return {name:r?.name||'Unavailable routine',icon:r?.icon||'📋',kind:'Routine',ok:result.qualified};
+ }
+ return p35PreviousEntryInfo(item,date);
+};
+// Give a useful, non-illustrated explanation of a routine Challenge's scope.
+const p35PreviousChallengeDetail=p63ChallengeDetail;
+p63ChallengeDetail=function(ch){
+ const html=p35PreviousChallengeDetail(ch);const items=p64ChallengeItems(ch);
+ if(!items.some(item=>item.kind==='routine'))return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const from=ch.period==='weekly'?p2WeekStart(p2Date()):'0001-01-01',to=p2Date();
+ const checkedDays=new Set((state.p2Completions||[]).filter(c=>p2ValidDate(c.date)&&c.date>=from&&c.date<=to).map(c=>c.date));
+ for(const e of state.p5bExcusals||[])if(p2ValidDate(e.date)&&e.date>=from&&e.date<=to)checkedDays.add(e.date);
+ const dates=[...checkedDays].sort().reverse();const qualified=[];
+ for(const d of dates)if(items.some(i=>i.kind==='routine'&&p35RoutineEvidence(p2Task(i.id),d).qualified))qualified.push(d);
+ const summary=document.createElement('p');summary.className='p35-challenge-explainer';summary.textContent=qualified.length?`Routine completion verified on ${qualified.slice(0,4).join(', ')}${qualified.length>4?' and earlier dates':''}. Excused routine steps count toward finishing the routine, but never award stars.`:'No eligible routine completion found in this tracking period. A routine needs at least one completed step and all other scheduled steps completed or excused.';
+ root.querySelector('.p63-task-list')?.after(summary);
+ return root.innerHTML;
+};
+
+// Reward forms: flatten claim controls, use clear terminology, and place task
+// timing before the All/Any selection; preserve all input names and data.
+const p35PreviousRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){
+ const root=document.createElement('div');root.innerHTML=p35PreviousRewardEditor();const form=root.querySelector('#p4-reward-form');if(!form)return root.innerHTML;
+ const claim=form.querySelector('.p64-claim-panel');
+ if(claim){
+  const fields=claim.querySelector('.grid2');
+  if(fields){fields.classList.add('p35-flat-claims');claim.before(fields);
+   const reset=fields.querySelector('[name="claimFrequency"]')?.closest('.field');const resetLabel=reset?.querySelector('label');if(resetLabel)resetLabel.textContent='Claim limit reset';
+   const limit=fields.querySelector('[name="claimLimit"]')?.closest('.field');const limitLabel=limit?.querySelector('label');if(limitLabel)limitLabel.textContent='Maximum claims in the chosen period';
+   const definition=document.createElement('p');definition.className='field-help p35-claim-definition';definition.textContent='A claim is a request to exchange stars for a reward. A Guardian must approve it.';fields.after(definition);
+  }
+  claim.remove();
+ }
+ const req=form.querySelector('.p27-requirements'),flow=req?.querySelector('.p34-req-flow');
+ if(flow){
+  const timing=flow.querySelector('.p34-period'),match=flow.querySelector('.p34-match-field');
+  const heading2=flow.querySelector('.p34-period-heading'),heading3=[...flow.querySelectorAll('.p34-flow-head')].find(h=>h.textContent.includes('Decide What Counts'));
+  if(timing&&heading2&&match&&heading3){
+   heading2.textContent='2 · When Must Selected Tasks Be Completed?';
+   heading3.textContent='3 · Which Requirements Must Be Met?';
+   match.before(heading2,timing);
+   match.before(heading3);
+  }
+  const timingHint=timing?.querySelector('.field-help');if(timingHint)timingHint.textContent='On the day of use, or on each day the task is scheduled during the Monday–Sunday week. A valid excuse satisfies that day without awarding stars.';
+ }
+ for(const el of form.querySelectorAll('.field-help,p,p.p2-muted')){
+  const txt=(el.textContent||'').trim();
+  if(txt.includes('A weekday-only task may not be completable on a weekend reward usage day')||txt.includes('Printing uses a cute A4 ticket layout')||txt.startsWith('Claims and uses are different.'))el.remove();
+ }
+ p11ApplyFrequency(form);p34ApplyRewardUI(form);p34UpdateRequirements(form);return root.innerHTML;
+};
+const P35_STYLE=String.raw`
+#app .p35-theme-choose{margin:13px 0 18px;border:1px solid var(--line);padding:14px;border-radius:16px;background:#fffdfd;min-width:0}
+#app .p35-theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+#app .p35-theme{background:#fff9fb;border:1px solid #e7cedc;border-radius:13px;color:#77566b;display:flex;gap:5px;flex-direction:column;align-items:center;justify-content:center;padding:10px 6px;font:inherit;font-size:.78rem;min-width:0;cursor:pointer;white-space:normal}
+#app .p35-theme>span:first-child{font-size:1.55rem}
+#app .p35-theme.p35-selected{background:#fce4f0;border:2px solid #a96890;font-weight:800}
+#app .p35-theme:focus-visible{outline:3px solid #a96890;outline-offset:2px}
+#app #p4-reward-form .p35-flat-claims{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:8px 0 5px;min-width:0}
+#app #p4-reward-form .p35-flat-claims .field{min-width:0;margin:0}
+#app #p4-reward-form .p35-flat-claims .field input,#app #p4-reward-form .p35-flat-claims select{max-width:100%;min-width:0;width:100%}
+#app #p4-reward-form .p35-claim-definition{margin:2px 0 13px}
+#app #p4-reward-form .p34-req-flow .p34-period{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;margin:0!important;box-shadow:none!important}
+#app #p4-reward-form .p34-req-flow .p34-flow-head{margin-top:10px;margin-bottom:8px;padding-top:14px;border-top:1px solid #eddae5}
+#app #p4-reward-form .p34-req-flow .p34-flow-head:first-child{margin-top:0;border:0;padding-top:0}
+#app #p4-reward-form .p34-req-flow .p34-match-field{padding:0;margin:0}
+#app #p4-reward-form .p11-use-amount,#app #p4-reward-form .p11-cooldown,#app #p4-reward-form .p34-hour-cooldown{margin-bottom:0!important;padding-bottom:0!important}
+#app #p4-reward-form .p11-use-help,#app #p4-reward-form .p11-claim-help{margin-top:5px!important}
+#app .p35-challenge-explainer{background:#fff8fb;border:1px solid #f0dce8;border-radius:12px;padding:11px 13px;margin:12px 0;color:#846779;font-size:.85rem;line-height:1.5}
+@media(max-width:600px){#app .p35-theme-options{grid-template-columns:repeat(3,minmax(0,1fr))}#app .p35-theme{font-size:.7rem;padding:9px 3px}#app #p4-reward-form .p35-flat-claims{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="p35-style">${P35_STYLE}</style>`);
+/* ===== End Phase 6C.2B.2E.7 ===== */
+
 </script>
 </body>
 </html>
