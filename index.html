@@ -13516,6 +13516,201 @@ const P43_STYLES=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d5-guardian-ux">${P43_STYLES}</style>`);
 /* End Phase 6D.5 */
 
+/* ===== Phase 6D.6 — Child Mode routine/quest and Word Garden refinement =====
+   Uses existing award/learning records; no data migration or additional awards. */
+
+// A routine member is satisfied by ONE valid credited completion for that day.
+// Its separate frequency limit controls how many more standalone awards remain.
+function p45StepState(t,day){
+ const credited=p32CreditedTask(t.id,day);
+ const excused=!credited&&!!t.skippable&&p5bExcused(t.id,day);
+ return {credited,excused,satisfied:credited||excused};
+}
+function p45RoutineState(r,day){
+ const legacy=!Array.isArray(r.routineItems);
+ if(legacy){const entries=p2TaskCompletions(r.id,day).filter(c=>!c.correctedAt);
+  const members=(r.steps||[]).map((name,i)=>({task:{id:'old-'+i,name,icon:'🌸'},credited:entries.some(c=>c.stepIndex===i),excused:false}));
+  return {members,done:members.filter(x=>x.credited).length,excused:0,total:members.length};
+ }
+ const members=p3Members(r,day).map(({task})=>({task,...p45StepState(task,day)}));
+ return {members,done:members.filter(x=>x.credited).length,excused:members.filter(x=>x.excused).length,total:members.length};
+}
+
+// Replaces the inaccurate full-daily-limit check in child routine preview.
+p61RoutineCard=function(r,guardian=false,day=p2Date()){
+ if(guardian)return p61OriginalTaskCard(r,guardian,day);
+ const p=p45RoutineState(r,day),satisfied=p.done+p.excused;
+ const remaining=p.members.filter(x=>!x.credited&&!x.excused),pct=p.total?Math.round(100*satisfied/p.total):0;
+ const finished=p.total>0&&satisfied===p.total&&p.done>0;
+ const upcoming=remaining.slice(0,3).map(({task:t})=>`<li><span class="p61-step-emoji" aria-hidden="true">${esc(t.icon||'🌷')}</span><span>${esc(t.name)}</span><span class="p61-step-circle" aria-hidden="true">○</span></li>`).join('');
+ return `<article class="p2-card p61-routine-card p45-routine-card ${finished?'p45-routine-complete':''}"><div class="p2-hero"><span class="p2-symbol" aria-hidden="true">${esc(r.icon||'📋')}</span><div class="grow"><h3>${esc(r.name)}</h3><p class="p2-muted">${esc(p61PeriodNames[p61PeriodOf(r)])} · ${p.done} completed${p.excused?' · '+p.excused+' excused':''} · ${p.total} steps</p></div><span class="p2-pill">${satisfied}/${p.total}</span></div><div class="p61-progress" role="progressbar" aria-label="${esc(r.name)} progress" aria-valuemin="0" aria-valuemax="${p.total}" aria-valuenow="${satisfied}"><span style="width:${pct}%"></span></div><div class="p61-preview-label">${finished?'YOUR ROUTINE TODAY':'YOUR NEXT STEPS'}</div><ul class="p61-preview">${upcoming||`<li class="p61-all-finished">${finished?'🌟 Every step has been recorded!':p.total&&p.excused===p.total?'🌿 All steps were excused today.':'🌸 Your guardian can add steps here.'}</li>`}</ul>${remaining.length>3?`<p class="p61-more">+ ${remaining.length-3} more steps</p>`:''}${p.excused?'<p class="p61-more">🌿 Excused steps count toward your routine, but do not earn stars.</p>':''}<div class="p2-task-actions">${btn(finished?'🌟 View Completed Routine':`View All ${p.total} Steps`,'not-used','btn-soft p2-mini',`data-p2-action="child-task" data-id="${esc(r.id)}"`)}</div></article>`;
+};
+// The Home card must agree with the Quests routine card and detail progress.
+const p45PriorOverview=p61OverviewCard;
+p61OverviewCard=function(task,day=p2Date()){
+ if(task?.type!=='checklist')return p45PriorOverview(task,day);
+ const p=p45RoutineState(task,day),satisfied=p.done+p.excused;
+ const next=p.members.find(m=>!m.credited&&!m.excused);
+ const done=p.total>0&&p.done>0&&satisfied===p.total;
+ const title=next?`Next: ${next.task.name}`:done?'All steps recorded!':p.total?'Nothing to complete today':'No active steps today';
+ return `<article class="p61-overview-card ${done?'p61-overview-done':''}"><div class="p61-overview-main"><span class="p61-overview-icon">${esc(task.icon||'📋')}</span><div class="grow"><strong>${esc(task.name)}</strong><p class="p2-muted">${esc(title)}</p></div><span class="p2-pill">${satisfied}/${p.total}</span></div><div class="p61-progress small"><span style="width:${p.total?Math.round(satisfied/p.total*100):0}%"></span></div>${btn(done?'View Again':'Open Adventure','not-used','btn-soft p2-mini',`data-p2-action="child-task" data-id="${esc(task.id)}"`)}</article>`;
+};
+
+const p45PriorTaskDetail=p3ChildTaskDetail;
+p3ChildTaskDetail=function(task,day){
+ const root=document.createElement('div');root.innerHTML=p45PriorTaskDetail(task,day);
+ if(task?.type==='checklist'){
+  const steps=p45RoutineState(task,day),heading=root.querySelector('section.panel h3');
+  if(heading){heading.textContent=`🌷 ${steps.done} completed${steps.excused?' · '+steps.excused+' excused':''} · ${steps.total} steps`;}
+  const cards=[...root.querySelectorAll('section.panel .p2-list > .p2-card')];
+  steps.members.forEach((m,i)=>{if(!cards[i]||!m.credited&&!m.excused)return;
+   cards[i].insertAdjacentHTML('beforeend',`<div class="p45-member-status">${m.credited?'✓ Counted toward this routine':'🌿 Excused today · no stars awarded'}</div>`);
+  });
+ }
+ if(task?.type!=='checklist'){
+  // Avoid two independent rows for status and multi-award progress.
+  const award=root.querySelector('.p8-award-state');
+  const progress=root.querySelector('.p6-quest-progress');
+  if(award&&progress){const row=document.createElement('div');row.className='p45-quest-pills';progress.before(row);row.append(award,progress);
+   const completions=p11SavedTaskCompletions(day).filter(c=>c.taskId===task.id&&Number(c.starsAwarded||0)>0);
+   const earned=completions.reduce((sum,c)=>sum+Number(c.starsAwarded||0),0);
+   award.setAttribute('aria-label',award.textContent||'');
+   award.innerHTML=`<span class="p45-pill-full">${award.textContent}</span><span class="p45-pill-short">⭐ ${completions.length}/${Math.max(1,Number(task.maxPerDay||1))} · ${earned}★</span>`;
+   const stateLabel=progress.querySelector('.p6-state');if(stateLabel){stateLabel.setAttribute('aria-label',stateLabel.textContent||'');stateLabel.innerHTML=`<span class="p45-pill-full">${stateLabel.textContent}</span><span class="p45-pill-short">${/waiting|pending/i.test(stateLabel.textContent)?'💌 Pending':'🌷 Ready'}</span>`;}
+
+   if(task.frequency==='multi'){
+    const already=p11SavedTaskCompletions(day).filter(c=>c.taskId===task.id&&Number(c.starsAwarded||0)>0).length;
+    const ready=progress.querySelector('.p6-state');
+    if(ready&&already>0&&p2CompletionEligibility(task,day,'',null).ok&&!/pending|waiting|guardian/i.test(ready.textContent||''))ready.innerHTML='<span class="p45-pill-full">🌷 Another completion available</span><span class="p45-pill-short">🌷 Ready again</span>';
+   }
+  }
+  // Use the established input style rather than relying on browser defaults.
+  root.querySelectorAll('.p6-notes textarea,.p6-approval textarea').forEach(el=>el.classList.add('p45-child-textarea'));
+ }
+ // Keep contextual navigation and achievement sharing together.
+ const share=root.querySelector('.p67-share-row');const back=root.querySelector('[data-p2-action="child-back"]');
+ if(share&&back){const buttons=back.closest('.p2-actions');if(buttons){buttons.classList.add('p45-detail-actions');const sharing=share.querySelector('button');if(sharing){sharing.classList.add('p45-share-button');sharing.textContent='🌟 Share My Achievement';buttons.append(sharing);}share.remove();}}
+ return root.innerHTML;
+};
+// Challenge detail has the same contextual action arrangement.
+const p45PriorChallengeDetail=p63ChallengeDetail;
+p63ChallengeDetail=function(c){const root=document.createElement('div');root.innerHTML=p45PriorChallengeDetail(c);
+ const share=root.querySelector('.p67-share-row');const back=root.querySelector('[data-p2-action="child-back"]');
+ if(share&&back){const actions=back.closest('.p2-actions');const button=share.querySelector('button');if(actions&&button){actions.classList.add('p45-detail-actions');button.classList.add('p45-share-button');button.textContent='🌟 Share My Achievement';actions.append(button);share.remove();}}
+ return root.innerHTML;
+};
+
+// A saved correct spelling remains saved; a child may practice again.
+// Do not automatically leave the spelling exercise after a successful try.
+const p45PriorWordSave=p22Save;
+p22Save=async function(kind,date,w,extra={}){
+ const before=state.p26.wordStep;await p45PriorWordSave(kind,date,w,extra);
+ if((kind==='spell'&&before===1)||(kind==='filipino'&&before===2)){
+  state.p26.wordStep=before;
+  state.p22.notice='';
+ }
+};
+
+// Rebuild the presentation of an existing Word of the Day without touching
+// the date rotation, progress records, answer checks, or 90-word curriculum.
+const p45PriorLearn=p22LearnPage;
+p22LearnPage=function(){
+ const root=document.createElement('div');root.innerHTML=p45PriorLearn();
+ const current=Math.max(0,Math.min(3,Number(state.p26.wordStep)||0));
+ const date=state.p22.selectedDate||p22ManilaDate(),w=p22Word(date);
+ const layout=root.querySelector('.p22-layout'),practice=root.querySelector('.p22-practice');
+ const active=practice?.querySelector(':scope > section.p26-active-panel');
+ if(current===0&&layout&&active){
+  layout.classList.add('p45-discover-layout');
+  const word=layout.querySelector('.p22-word-card');
+  if(word){active.classList.add('p45-discover-panel');
+   const head=active.querySelector('.p22-step-head');if(head){head.querySelector('h3').textContent='🌼 Meet today’s word';}
+   const description=active.querySelector(':scope > p');if(description)description.textContent='Look closely at today’s word. Read the meaning, try the English and Filipino examples, and say the word aloud.';
+   const button=active.querySelector('[data-p22-action="discover"]');
+   if(button){button.classList.add('p45-discover-action');button.textContent=button.disabled?'✓ Word discovered':'🌼 I explored this word';}
+   const actions=active.querySelector('.p26-step-actions');
+   if(actions)actions.before(word);else active.append(word);
+   // Put the single discovery confirmation under the word itself.
+   const inner=active.querySelector('.p22-word-card');if(button&&inner)inner.append(button);
+   const oldStatus=inner?.querySelector('.p22-word-actions');oldStatus?.remove();
+  }
+ }
+ if(current===1&&active){
+  // The completion chip provides success feedback without a second green alert.
+  active.querySelector('.p22-success')?.remove();
+  const feedback=active.querySelector('.p22-feedback');if(feedback&&/Wonderful spelling|spelled|Filipino counterpart/i.test(feedback.textContent||''))feedback.remove();
+  if(p22Has('spell',date,w.id))active.querySelector('.p22-step-head')?.insertAdjacentHTML('afterend','<p class="p45-try-again">You’ve spelled this word successfully. Try it again whenever you like!</p>');
+ }
+ if(current===2&&active){
+  const header=active.querySelector('.p22-step-head h3');if(header)header.textContent='🇵🇭 3. Learn and say it in Filipino';
+  const copy=active.querySelector(':scope > p');if(copy)copy.textContent='Filipino is part of today’s learning. Read the word and sentence aloud, then practice spelling. You can look at the example whenever you need it.';
+  active.querySelector('.p26-spelling-help')?.remove();
+  const reveal=active.querySelector('[data-p26-action="reveal-filipino"]');reveal?.remove();
+  const card=document.createElement('div');card.className='p45-filipino-card';
+  card.innerHTML=`<div class="p45-language-pair"><div><small>ENGLISH</small><strong>${esc(w.en)}</strong></div><div><small>FILIPINO · TAGALOG</small><strong lang="fil">${esc(w.fil)}</strong></div></div><div class="p45-read-aloud"><span aria-hidden="true">🗣️</span><div><b>Say this aloud in Filipino</b><p lang="fil">“${esc(w.filSentence)}”</p><small>Read it slowly, then try saying it naturally. Ask a grown-up if you need pronunciation help.</small></div></div>`;
+  const form=active.querySelector('form');if(form)form.before(card);
+  const next=active.querySelector('.p26-step-actions [data-p26-action="word-step"][data-step="3"]');
+  if(next){next.textContent='Next: My Sentence →';next.disabled=!p22Has('filipino',date,w.id);if(next.disabled)next.title='Practice the Filipino word first, then continue.';}
+  const feedback=active.querySelector('.p22-feedback');if(feedback&&/Filipino counterpart/i.test(feedback.textContent||''))feedback.remove();
+  if(p22Has('filipino',date,w.id))active.querySelector('.p22-step-head')?.insertAdjacentHTML('afterend','<p class="p45-try-again">You’ve practiced the Filipino word. You can try spelling it again!</p>');
+ }
+ if(current===3&&active){const heading=active.querySelector('h3');if(heading)heading.textContent='💌 4. Use the Word';}
+ // Do not allow skipping the Filipino practice simply by tapping step four.
+ const sentenceNav=root.querySelector('.p26-step[data-step="3"]');
+ if(sentenceNav&&!p22Has('filipino',date,w.id)){sentenceNav.disabled=true;sentenceNav.title='Learn the Filipino word before moving to My Sentence.';}
+ return root.innerHTML;
+};
+
+// The entry and anonymous guest pages use the same sans-serif display family
+// as the app's other page headings (no special Georgia override).
+const P45_STYLES=String.raw`
+/* Child quest detail and multi-award statuses */
+#app .p45-child-textarea{width:100%!important;min-height:110px;max-width:100%;box-sizing:border-box;padding:13px 15px!important;border:1.5px solid #e8ccdd!important;border-radius:14px!important;background:#fff!important;color:#624a5c!important;font:inherit;line-height:1.55;resize:vertical}
+#app .p45-child-textarea:focus-visible{outline:3px solid #b780a4;outline-offset:2px}
+#app .p45-quest-pills{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:12px 0 17px}
+#app .p45-quest-pills .p8-award-state{display:inline-flex!important;align-items:center;width:auto!important;max-width:100%;margin:0!important;white-space:normal}
+#app .p45-quest-pills .p6-quest-progress{display:flex;align-items:center;margin:0!important;width:auto!important}
+#app .p45-quest-pills .p6-state{margin:0;max-width:100%}
+#app .p45-pill-short{display:none}
+#app .p45-member-status{margin-top:10px;border-radius:10px;padding:9px 12px;background:#f0f7ef;color:#487657;font-weight:750;font-size:.82rem}
+#app .p45-detail-actions{display:flex;justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:10px;margin-top:19px}
+#app .p45-detail-actions .btn{min-height:45px;white-space:normal;text-align:center}
+#app .p45-detail-actions .p45-share-button{background:#fff1f8;border:1px solid #edcadd;color:#87516e;font-weight:800}
+#app .p45-routine-card .p61-preview-label{margin-top:10px}
+/* Word discovery: one featured learning surface rather than an idle side panel. */
+#app .p45-discover-layout{display:block!important;max-width:1000px;margin-inline:auto}
+#app .p45-discover-layout .p22-practice{width:100%}
+#app .p45-discover-panel{display:grid;gap:14px}
+#app .p45-discover-panel>.p22-word-card{margin:0;padding:0;background:transparent;border:none;box-shadow:none}
+#app .p45-discover-panel .p22-word-card>.eyebrow{display:none}
+#app .p45-discover-panel .p22-word-hero{background:linear-gradient(125deg,#f8e5f0,#fff0f5);padding:26px 14px;min-height:175px}
+#app .p45-discover-panel .p22-word-hero h2{font-size:clamp(2.5rem,5vw,4.3rem);font-weight:850;letter-spacing:-.035em}
+#app .p45-discover-panel .p22-word-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+#app .p45-discover-panel .p22-word-body>div{background:#fffafd;border:1px solid #f1dce8;border-radius:15px;padding:15px}
+#app .p45-discover-panel .p22-word-body .p22-filipino{background:#fff3f9;grid-column:1/-1}
+#app .p45-discover-panel .p45-discover-action{justify-self:start;margin-top:5px}
+#app .p45-discover-panel>.p26-step-actions{display:flex;justify-content:flex-end;gap:10px}
+#app .p45-try-again{margin:10px 0 14px!important;color:#846b7d;font-size:.85rem}
+#app .p22-practice .p22-feedback:empty{display:none}
+#app .p26-step:disabled{opacity:.55;cursor:not-allowed}
+#app .p45-filipino-card{display:grid;gap:13px;margin:16px 0;border:1px solid #edcfe1;background:#fffafd;padding:15px;border-radius:15px}
+#app .p45-language-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#app .p45-language-pair>div{display:grid;gap:5px;background:#fff1f8;padding:14px;border-radius:13px;min-width:0}
+#app .p45-language-pair small{font-size:.74rem;letter-spacing:.07em;font-weight:800;color:#916a82}
+#app .p45-language-pair strong{font-size:clamp(1.25rem,3vw,1.65rem);overflow-wrap:anywhere;color:#6d4c64}
+#app .p45-read-aloud{display:flex;gap:12px;align-items:flex-start;background:#f7f2fb;border-radius:13px;padding:14px}
+#app .p45-read-aloud>span{font-size:1.4rem}
+#app .p45-read-aloud b{color:#704e6b}
+#app .p45-read-aloud p{font-size:1.07rem;margin:7px 0}
+#app .p45-read-aloud small{display:block;color:#86728a}
+/* One heading family throughout Child, Guardian, entry and Guest. */
+#app .p42-mode-card h1{font-family:inherit!important;font-weight:850!important;letter-spacing:-.028em;font-size:clamp(1.8rem,3.4vw,2.6rem)!important;line-height:1.22!important}
+#app .p37-guest-card h1{font-family:inherit!important;font-weight:850!important;letter-spacing:-.028em;font-size:clamp(1.65rem,3.4vw,2.35rem)!important;line-height:1.23!important}
+@media(max-width:700px){#app .p45-quest-pills{flex-wrap:nowrap;gap:7px}#app .p45-quest-pills .p45-pill-full{display:none}#app .p45-quest-pills .p45-pill-short{display:inline}#app .p45-quest-pills .p8-award-state,#app .p45-quest-pills .p6-state{padding:7px 9px!important;font-size:.74rem!important;white-space:nowrap}#app .p45-discover-panel .p22-word-body{grid-template-columns:1fr}#app .p45-discover-panel .p22-word-body .p22-filipino{grid-column:auto}#app .p45-language-pair{grid-template-columns:1fr}#app .p45-detail-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#app .p45-detail-actions>.btn{width:100%;min-width:0}#app .p45-quest-pills{align-items:flex-start}}
+@media(max-width:380px){#app .p45-detail-actions{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d6-child-polish">${P45_STYLES}</style>`);
+/* ===== End Phase 6D.6 ===== */
 </script>
 </body>
 </html>
