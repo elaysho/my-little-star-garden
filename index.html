@@ -11873,127 +11873,206 @@ p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
 /* End Phase 6C.2B.2E.9 */
 
 
-/* Phase 6C.2B.2E.11 — achievement card refinement pass.
-   Fixes: consistent number typography, improved palette for lifetime/practice text,
-   task icons instead of numbers, and rule icons added. */
+/* Phase 6C.2B.2E.13 — flexible quest list, dynamic rules/practice, gentle lifetime sparkle.
+   Canvas-only card exporter change; no changes to Guardian, rules, sync, or award logic. */
 p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
- const c=document.createElement('canvas');c.width=2400;c.height=1800;
- const ctx=c.getContext('2d');if(!ctx)throw Error('This browser cannot generate the card.');
  const pal=state.p35CardTheme==='stars'?
-  {bg:'#f0eef9',paper:'#fffefd',ink:'#5f5575',accent:'#8a7ca9',soft:'#eeebfa',soft2:'#f5f3fb',line:'#ddd7ed',leaf:'#b8c3d9',feature:'#7a6b93',featureText:'#7f7594',practice:'#716986',practiceText:'#887f9c',practiceBar:'#b8aecf'}:
+  {bg:'#f0eef9',paper:'#fffefd',ink:'#5f5575',accent:'#8a7ca9',soft:'#eeebfa',soft2:'#f5f3fb',line:'#ddd7ed',leaf:'#b8c3d9',feature:'#76638f',featureText:'#7f7594',practice:'#716986',practiceText:'#81788f',practiceBar:'#b8aecf',glint:'#ab9aca',glow:'rgba(196,183,221,.20)'}:
   state.p35CardTheme==='meadow'?
-  {bg:'#f9f5e9',paper:'#fffefa',ink:'#6f604c',accent:'#9d8667',soft:'#fbf0dc',soft2:'#f7f4ea',line:'#e7d9bf',leaf:'#a9b99d',feature:'#8c7350',featureText:'#89765c',practice:'#7b6a52',practiceText:'#94836a',practiceBar:'#ccb98f'}:
-  {bg:'#fdf0f5',paper:'#fffdfa',ink:'#7c5870',accent:'#a6849c',soft:'#f9e5ee',soft2:'#f7f4ea',line:'#efd0dc',leaf:'#b3c4a4',feature:'#947360',featureText:'#8b7568',practice:'#8b6a79',practiceText:'#9d7f8d',practiceBar:'#cbb58a'};
+  {bg:'#f9f5e9',paper:'#fffefa',ink:'#6f604c',accent:'#9d8667',soft:'#fbf0dc',soft2:'#f7f4ea',line:'#e7d9bf',leaf:'#a9b99d',feature:'#846e4f',featureText:'#89765c',practice:'#74634e',practiceText:'#897960',practiceBar:'#ccb98f',glint:'#b5a16e',glow:'rgba(222,203,155,.19)'}:
+  {bg:'#fdf0f5',paper:'#fffdfa',ink:'#7c5870',accent:'#a6849c',soft:'#f9e5ee',soft2:'#f7f4ea',line:'#efd0dc',leaf:'#b3c4a4',feature:'#8a6b70',featureText:'#8b756e',practice:'#805f70',practiceText:'#927788',practiceBar:'#cbb58a',glint:'#c4a18f',glow:'rgba(228,201,188,.21)'};
+ const c=document.createElement('canvas');c.width=2400;c.height=1800;
+ let ctx=c.getContext('2d');if(!ctx)throw Error('This browser cannot generate the card.');
+ const amount=n=>Math.max(0,Number(n)||0);
+ const quests=Array.isArray(snapshot.quests)?snapshot.quests:(Array.isArray(snapshot.topQuests)?snapshot.topQuests:[]);
+ const rules=Array.isArray(snapshot.rules)?snapshot.rules:(Array.isArray(snapshot.topRules)?snapshot.topRules:[]);
+ const incidents=typeof p33Incidents==='function'?p33Incidents(snapshot.day):[];
+ const practiceGroups=incidents.map(item=>({
+  names:String(item.name||'Rule to practice').split(/\s+·\s+/).map(v=>v.trim()).filter(Boolean),
+  detail:String(item.detail||'').trim()
+ }));
+ const day=p2ValidDate(snapshot.day)?new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'}):snapshot.day||'';
+ const font=(size,weight=400,serif=false)=>`${weight} ${size}px ${serif?'Georgia, Times New Roman, serif':'system-ui, sans-serif'}`;
+ // Wrap every word, including very long words, without ellipsis or hidden rules.
+ function wrapped(str,maxWidth,fontSpec){
+  ctx.font=fontSpec;
+  const words=String(str??'').trim().split(/\s+/).filter(Boolean),lines=[];
+  let line='';
+  for(const word of words){
+   if(ctx.measureText(word).width<=maxWidth){
+    const attempt=line?line+' '+word:word;
+    if(line&&ctx.measureText(attempt).width>maxWidth){lines.push(line);line=word;}else line=attempt;
+   }else{
+    if(line){lines.push(line);line='';}
+    let part='';
+    for(const char of Array.from(word)){
+     if(part&&ctx.measureText(part+char).width>maxWidth){lines.push(part);part=char;}else part+=char;
+    }
+    line=part;
+   }
+  }
+  if(line)lines.push(line);
+  return lines.length?lines:[''];
+ }
+ const rulesEntries=rules.map(item=>{
+  const lines=wrapped(item.name||'Rule followed',525,font(25,600));
+  return {item,lines,height:Math.max(57,lines.length*30+18)};
+ });
+ const practiceEntries=[];
+ for(const group of practiceGroups){
+  for(const name of group.names.length?group.names:['Rule to practice']){
+   const lines=wrapped(name,705,font(25,650));
+   practiceEntries.push({kind:'name',lines,height:lines.length*31+11});
+  }
+  if(group.detail){const lines=wrapped(group.detail,710,font(21,400));
+   practiceEntries.push({kind:'detail',lines,height:lines.length*28+12});}
+  practiceEntries.push({kind:'gap',height:7});
+ }
+ const rulesNeeded=111+rulesEntries.reduce((sum,row)=>sum+row.height,0);
+ const practiceNeeded=practiceEntries.length?116+practiceEntries.reduce((sum,row)=>sum+row.height,0):163;
+ const practiceHeight=Math.max(practiceEntries.length?175:163,practiceNeeded);
+ const top=830,bottomBase=1575,gap=18;
+ const required=Math.max(0,Math.ceil(Math.max(228,rulesNeeded)+gap+practiceHeight-(bottomBase-top)));
+ const extra=required;
+ const bottom=bottomBase+extra;
+ const practiceY=bottom-practiceHeight;
+ const rulesHeight=practiceY-top-gap;
+ c.height=1800+extra;ctx=c.getContext('2d');
  const rr=(x,y,w,h,r,fill,stroke=pal.line,lw=2)=>{
   ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
   if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.stroke();}
  };
  const write=(str,x,y,size,color=pal.ink,weight=400,opts={})=>{
   ctx.save();ctx.textAlign=opts.align||'left';ctx.textBaseline='alphabetic';
-  ctx.font=`${opts.italic?'italic ':''}${weight} ${size}px ${opts.serif?'Georgia, Times New Roman, serif':'system-ui, sans-serif'}`;
+  ctx.font=`${opts.italic?'italic ':''}${font(size,weight,opts.serif)}`;
   ctx.fillStyle=color;p10TextLine(ctx,String(str??''),x,y,opts.width||2000,opts.lineHeight||size*1.35,opts.lines||1);ctx.restore();
  };
- const drawEmoji=(emoji,x,y,size=32,align='center')=>{
-  ctx.save();ctx.font=`${size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;ctx.textAlign=align;ctx.textBaseline='middle';ctx.fillStyle=pal.ink;ctx.fillText(String(emoji||'🌸'),x,y);ctx.restore();
+ const drawEmoji=(emoji,x,y,size=32)=>{
+  ctx.save();ctx.font=`${size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+  ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(emoji||'🌸'),x,y);ctx.restore();
  };
- const amount=n=>Math.max(0,Number(n)||0);
- const quests=Array.isArray(snapshot.quests)?snapshot.quests:(Array.isArray(snapshot.topQuests)?snapshot.topQuests:[]);
- const rules=Array.isArray(snapshot.rules)?snapshot.rules:(Array.isArray(snapshot.topRules)?snapshot.topRules:[]);
- const incidents=typeof p33Incidents==='function'?p33Incidents(snapshot.day):[];
- const day=p2ValidDate(snapshot.day)?new Date(snapshot.day+'T12:00:00').toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'}):snapshot.day||'';
- ctx.fillStyle=pal.bg;ctx.fillRect(0,0,2400,1800);
- rr(42,40,2316,1720,50,pal.paper,pal.line,4);
- rr(67,64,2266,1672,36,pal.paper,pal.line,2);
-
+ const drawLines=(lines,x,y,sz,color,weight,step)=>{
+  ctx.save();ctx.font=font(sz,weight);ctx.fillStyle=color;ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  lines.forEach((line,i)=>ctx.fillText(line,x,y+i*step));ctx.restore();
+ };
+ ctx.fillStyle=pal.bg;ctx.fillRect(0,0,c.width,c.height);
+ rr(42,40,2316,1720+extra,50,pal.paper,pal.line,4);
+ rr(67,64,2266,1672+extra,36,pal.paper,pal.line,2);
  function sprig(x,y,scale=1){
   ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);
   ctx.strokeStyle=pal.leaf;ctx.lineWidth=5;ctx.lineCap='round';
   ctx.beginPath();ctx.moveTo(0,300);ctx.bezierCurveTo(85,220,65,70,190,-20);ctx.stroke();
   [[48,238,-.5],[84,158,.6],[116,98,-.5],[162,24,.6]].forEach(([xx,yy,rot],i)=>{
    ctx.save();ctx.translate(xx,yy);ctx.rotate(rot);ctx.beginPath();ctx.ellipse(0,0,24+i%2*5,48,.1,0,Math.PI*2);ctx.fillStyle=i%2?pal.leaf:pal.line;ctx.globalAlpha=.75;ctx.fill();ctx.restore();
-  });
-  ctx.restore();
+  });ctx.restore();
  }
  sprig(70,75,1.15);
-
  write('M Y  L I T T L E  S T A R  G A R D E N',1200,147,22,pal.accent,750,{align:'center'});
  write("Today's Little Victories",1200,242,79,pal.ink,400,{align:'center',serif:true});
  write(`${day} · Little Star's Keepsake`,1200,292,26,pal.accent,400,{align:'center'});
- ctx.strokeStyle='#e8e0e4';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(140,330);ctx.lineTo(2260,330);ctx.stroke();
-
+ ctx.strokeStyle=pal.line;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(140,330);ctx.lineTo(2260,330);ctx.stroke();
  rr(156,381,1222,405,42,pal.soft,pal.line,2);
  rr(1418,381,826,405,42,pal.soft2,pal.line,2);
-
- ctx.save();
- ctx.shadowColor='#b28e66';ctx.shadowBlur=15;ctx.shadowOffsetY=8;
+ // Main star stays the visual hero; magical details belong only to Lifetime Stars.
+ ctx.save();ctx.shadowColor='#b28e66';ctx.shadowBlur=15;ctx.shadowOffsetY=8;
  ctx.fillStyle='#e7b850';ctx.strokeStyle='#cf9b42';ctx.lineWidth=5;
- ctx.beginPath();
- for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?48:102,x=330+Math.cos(a)*r,y=574+Math.sin(a)*r;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
- ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
-
- // Consistent numeric typography for both main metrics.
+ ctx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?48:102,x=330+Math.cos(a)*r,y=574+Math.sin(a)*r;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
  write(String(amount(snapshot.stars)),530,610,126,pal.ink,700,{serif:true});
  write('Stars earned today',535,662,30,pal.ink,650);
  write('From completed quests and followed rules',535,706,24,pal.accent,400);
-
+ // An understated celestial glimmer around the lifetime metric: matte, soft, not glittery noise.
+ const halo=ctx.createRadialGradient(2110,575,12,2110,575,210);
+ halo.addColorStop(0,pal.glow);halo.addColorStop(1,'rgba(255,255,255,0)');
+ ctx.fillStyle=halo;ctx.fillRect(1930,405,300,355);
+ ctx.save();ctx.strokeStyle=pal.glint;ctx.globalAlpha=.26;ctx.lineWidth=2;
+ ctx.setLineDash([3,15]);ctx.beginPath();ctx.moveTo(2005,664);ctx.bezierCurveTo(2070,635,2180,625,2178,506);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+ function glint(x,y,r,opacity=1){
+  ctx.save();ctx.translate(x,y);ctx.strokeStyle=pal.glint;ctx.fillStyle=pal.glint;ctx.globalAlpha=opacity;
+  ctx.lineWidth=2.5;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(-r,0);ctx.quadraticCurveTo(-r*.17,-r*.17,0,-r);
+  ctx.quadraticCurveTo(r*.17,-r*.17,r,0);ctx.quadraticCurveTo(r*.17,r*.17,0,r);
+  ctx.quadraticCurveTo(-r*.17,r*.17,-r,0);ctx.closePath();ctx.fill();ctx.restore();
+ }
+ [[2084,491,18,.73],[2175,553,14,.58],[2030,667,11,.66],[2141,694,9,.52],[1980,542,7,.35],[2200,637,7,.43]].forEach(v=>glint(...v));
+ [[2054,536,3],[2128,621,3.5],[2170,710,2.5],[2001,610,2.5],[2195,475,2.2],[2103,676,2.8]].forEach(([x,y,r])=>{ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=pal.glint;ctx.globalAlpha=.54;ctx.fill();ctx.globalAlpha=1;});
  write('L I F E T I M E  S T A R S',1470,475,23,pal.feature,800);
  write(String(amount(snapshot.lifetime)),1470,610,126,pal.feature,700,{serif:true});
  write('Little stars collected so far',1470,668,27,pal.featureText,650);
-
+ // Rules dynamically occupy the space not required by the practice list.
  const leftX=156,leftW=1190,rightX=1398,rightW=846;
- rr(leftX,830,leftW,745,38,'#fffefe',pal.line,2);
- rr(rightX,830,rightW,285,38,'#fffefe',pal.line,2);
- rr(rightX,1145,rightW,430,38,pal.soft2,pal.line,2);
-
+ rr(leftX,top,leftW,bottom-top,38,'#fffefe',pal.line,2);
+ rr(rightX,top,rightW,rulesHeight,38,'#fffefe',pal.line,2);
+ rr(rightX,practiceY,rightW,practiceHeight,38,pal.soft2,pal.line,2);
  write('A Day Full of Little Wins',leftX+47,900,47,pal.ink,650,{serif:true});
  write('Each quest is recognized for what she accomplished.',leftX+49,950,25,pal.accent);
-
- function questRow(item,i){
-  const y=1042+i*145;
-  rr(leftX+45,y-42,67,67,16,pal.soft,pal.line,1.5);
-  drawEmoji(item.icon||'🌸',leftX+78,y-8,34,'center');
-  write(item.name||'A little victory',leftX+137,y-4,29,pal.ink,700,{width:780});
-  write(item.count>1?`${item.count} completions · Completed`:'Completed',leftX+137,y+36,22,pal.accent);
-  write(`+${amount(item.stars)} ★`,leftX+leftW-60,y+5,29,pal.accent,800,{align:'right'});
-  if(i<2 && quests.length>1){ctx.strokeStyle='#f0e7eb';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(leftX+48,y+64);ctx.lineTo(leftX+leftW-45,y+64);ctx.stroke();}
+ // Fill the Little Wins panel with as many real completed quests as fit.
+ // Rows grow when a quest name wraps, so nothing is clipped or painted over.
+ const questEntries=quests.map(item=>{
+  const lines=wrapped(item.name||'A little victory',780,font(29,700));
+  return {item,lines,height:102+(lines.length-1)*34};
+ });
+ const visibleQuests=[];
+ let questY=1000;
+ for(const entry of questEntries){
+  // Keep room for a journal count if other quests still will not fit.
+  const hasFollowing=visibleQuests.length+1<questEntries.length;
+  const lowerLimit=bottom-(hasFollowing?60:24);
+  if(questY+entry.height>lowerLimit)break;
+  visibleQuests.push({...entry,y:questY});
+  questY+=entry.height;
  }
- if(!quests.length)write('Your next adventure is waiting!',leftX+50,1070,30,pal.accent);
- else quests.slice(0,3).forEach(questRow);
- if(quests.length>3)write(`+ ${quests.length-3} more quests in your Adventure Journal`,leftX+48,1510,23,pal.accent);
-
+ if(!visibleQuests.length)write('Your next adventure is waiting!',leftX+50,1070,30,pal.accent);
+ for(let i=0;i<visibleQuests.length;i++){
+  const {item,lines,height,y}=visibleQuests[i];
+  rr(leftX+45,y+3,63,63,16,pal.soft,pal.line,1.5);
+  drawEmoji(item.icon||'🌸',leftX+76,y+35,33);
+  drawLines(lines,leftX+137,y+34,29,pal.ink,700,34);
+  write(item.count>1?`${item.count} completions · Completed`:'Completed',leftX+137,y+68+(lines.length-1)*34,22,pal.accent);
+  write(`+${amount(item.stars)} ★`,leftX+leftW-60,y+35,29,pal.accent,800,{align:'right'});
+  if(i<visibleQuests.length-1){
+   ctx.strokeStyle=pal.line;ctx.lineWidth=1.6;
+   ctx.beginPath();ctx.moveTo(leftX+48,y+height-9);ctx.lineTo(leftX+leftW-45,y+height-9);ctx.stroke();
+  }
+ }
+ if(quests.length>visibleQuests.length)
+  write(`+ ${quests.length-visibleQuests.length} more quests in your Adventure Journal`,leftX+48,bottom-30,23,pal.accent);
  write('Rules Followed',rightX+42,905,43,pal.ink,650,{serif:true});
- if(!rules.length){
-  write('Tomorrow brings another chance to grow.',rightX+43,973,25,pal.accent);
- }else{
-  rules.slice(0,2).forEach((item,i)=>{
-   const rowTop=940+i*76;
-   rr(rightX+42,rowTop,52,52,14,pal.soft,pal.line,1.5);
-   drawEmoji(item.icon||'🛡️',rightX+68,rowTop+26,26,'center');
-   write(item.name,rightX+112,rowTop+37,27,pal.ink,500,{width:520});
-   write(`+${amount(item.stars)} ★`,rightX+rightW-42,rowTop+37,27,pal.accent,800,{align:'right'});
-  });
+ if(!rulesEntries.length){write('Tomorrow brings another chance to grow.',rightX+43,973,25,pal.accent);}
+ else{
+  let y=top+100;
+  for(const row of rulesEntries){
+   rr(rightX+42,y,50,50,14,pal.soft,pal.line,1.5);
+   drawEmoji(row.item.icon||'🛡️',rightX+67,y+25,25);
+   drawLines(row.lines,rightX+112,y+33,25,pal.ink,600,30);
+   write(`+${amount(row.item.stars)} ★`,rightX+rightW-40,y+32,25,pal.accent,800,{align:'right'});
+   y+=row.height;
+  }
  }
-
- write(incidents.length?'Something to Keep Practicing':'A Little Note of Encouragement',rightX+42,1215,40,pal.practice,650,{serif:true});
- if(incidents.length){
-  incidents.slice(0,2).forEach((item,i)=>{
-   const y=1282+i*125;
-   ctx.fillStyle=pal.practiceBar;ctx.fillRect(rightX+42,y-30,6,105);
-   write(item.name,rightX+65,y,27,pal.practice,700,{width:650});
-   write(item.detail,rightX+65,y+42,23,pal.practiceText,400,{width:680,lines:2,lineHeight:30});
-  });
-  if(incidents.length>2)write(`+ ${incidents.length-2} more in the Journal`,rightX+65,1535,21,pal.practiceText);
+ const sectionTitle=practiceEntries.length?'Something to Keep Practicing':'A Little Note of Encouragement';
+ write(sectionTitle,rightX+42,practiceY+70,40,pal.practice,650,{serif:true});
+ if(practiceEntries.length){
+  let y=practiceY+104;
+  for(const row of practiceEntries){
+   if(row.kind==='gap'){y+=row.height;continue;}
+   if(row.kind==='name'){
+    rr(rightX+44,y+5,7,Math.max(24,row.lines.length*31-2),3,pal.practiceBar,'',0);
+    drawLines(row.lines,rightX+66,y+30,25,pal.practice,650,31);
+   }else drawLines(row.lines,rightX+66,y+24,21,pal.practiceText,400,28);
+   y+=row.height;
+  }
  }else{
-  write(message||'Every little effort helps your garden grow!',rightX+44,1304,27,pal.practiceText,400,{width:745,lines:3,lineHeight:40});
+  const text=String(message||'Every little effort helps your garden grow!');
+  const lines=wrapped(text,725,font(25,400));
+  drawLines(lines,rightX+44,practiceY+113,25,pal.practiceText,400,32);
  }
-
- ctx.strokeStyle='#e8e0e4';ctx.beginPath();ctx.moveTo(140,1590);ctx.lineTo(2260,1590);ctx.stroke();
- write(`“${String(message||"I'm proud of your little efforts. Keep growing!").slice(0,100)}”`,165,1663,27,pal.accent,400,{italic:true,width:1450});
- write(`With love, ${String(guardianName||'Guardian').slice(0,35)}`,2230,1652,22,pal.accent,400,{align:'right'});
- write('A little keepsake from your garden',2230,1684,19,pal.accent,400,{align:'right'});
+ const footerY=1590+extra;
+ ctx.strokeStyle=pal.line;ctx.beginPath();ctx.moveTo(140,footerY);ctx.lineTo(2260,footerY);ctx.stroke();
+ write(`“${String(message||"I'm proud of your little efforts. Keep growing!").slice(0,100)}”`,165,footerY+73,27,pal.accent,400,{italic:true,width:1450});
+ write(`With love, ${String(guardianName||'Guardian').slice(0,35)}`,2230,footerY+62,22,pal.accent,400,{align:'right'});
+ write('A little keepsake from your garden',2230,footerY+94,19,pal.accent,400,{align:'right'});
  return c;
 };
-/* End Phase 6C.2B.2E.11 */
+/* End Phase 6C.2B.2E.13 */
 
 </script>
 </body>
