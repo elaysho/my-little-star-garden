@@ -12074,6 +12074,146 @@ p8DailyCard=function(snapshot,guardianName,message=p10ShareMessage()){
 };
 /* End Phase 6C.2B.2E.13 */
 
+
+/* ==============================================================
+   Phase 6C.2B.2E.14 — small Guardian UI refinements.
+   Visual/route changes only; no changes to stored records or sync.
+   ============================================================== */
+const p36PreviousIncidentPage=p2IncidentPage;
+p2IncidentPage=function(){
+ const root=document.createElement('div');root.innerHTML=p36PreviousIncidentPage();
+ const form=root.querySelector('#p2-incident-form');
+ if(!form)return root.innerHTML;
+ // The first group already exists. Keep every field through the child
+ // explanation together in a second fieldset, without changing any input.
+ const rulesGroup=form.querySelector(':scope > fieldset.p2-fieldset');
+ const date=form.querySelector('input[name="date"]')?.closest('.grid2')||form.querySelector('input[name="date"]')?.closest('.field');
+ const child=form.querySelector('[name="childExplanation"]')?.closest('.field');
+ if(rulesGroup&&date&&child){
+  const fieldset=document.createElement('fieldset');fieldset.className='p2-fieldset p36-incident-details';
+  fieldset.innerHTML='<legend>02 · Incident details</legend>';
+  rulesGroup.after(fieldset);
+  let node=date;let guard=0;
+  while(node&&node!==child.nextElementSibling&&guard++<20){
+   const next=node.nextElementSibling;
+   fieldset.append(node);
+   if(node===child)break;
+   node=next;
+  }
+ }
+ const explanation=form.querySelector('.p34-child-share');
+ if(explanation)explanation.classList.add('p36-plain-child-check');
+ const note=[...form.querySelectorAll('.p2-notice')].find(el=>el.textContent.includes('Please avoid deducting stars'));
+ if(note)note.classList.add('p36-soft-pink-note');
+ return root.innerHTML;
+};
+
+// Keep the navigation-aware header Back, remove the redundant action inside
+// Review Wishes (which always pointed to Manage Rewards).
+const p36PreviousGuardianWishlist=p64GuardianWishlist;
+p64GuardianWishlist=function(){
+ const root=document.createElement('div');root.innerHTML=p36PreviousGuardianWishlist();
+ root.querySelectorAll('[data-p64-action="wishlist-back"]').forEach(el=>el.remove());
+ return root.innerHTML;
+};
+
+// Position the existing Print Unused Tickets action in the page header,
+// replacing the redundant Back to Manage Rewards / Awards control.
+const p36PreviousVoucherManager=p4VoucherManager;
+p4VoucherManager=function(){
+ const root=document.createElement('div');root.innerHTML=p36PreviousVoucherManager();
+ root.querySelectorAll('[data-p4-action="reward-manage-back"]').forEach(el=>el.remove());
+ const print=root.querySelector('[data-p4-action="print-unused"]');
+ const head=root.querySelector('section:first-child');
+ if(print&&head){
+  print.remove();print.classList.add('p36-voucher-print');
+  print.textContent='🖨️ Print Unused Tickets';head.append(print);
+ }
+ return root.innerHTML;
+};
+
+// Reuse Guardian navigation history for page-level Cancel buttons, rather
+// than routing every form back to a fixed default. Local edit dismissal and
+// modal Cancel buttons intentionally keep their existing behavior.
+function p36NavigatePrevious(){
+ if(state.view!=='guardian'||!safeGuardian())return;
+ const current=state.guardianTab;
+ let trail=Array.isArray(state.p22?.routeTrail)?state.p22.routeTrail.slice():[];
+ if(trail[trail.length-1]===current)trail.pop();
+ let previous=trail[trail.length-1];
+ if(!previous||previous===current)previous=current==='p8-cloud'?'settings':current==='p5b-reports'?'history':'dashboard';
+ if(previous!== 'reward-editor')state.p64ConvertingWish=null;
+ state.p66IncidentOrigin=null;
+ if(current==='incident-editor')state.p34.incidentEdit=null;
+ state.p22.routingBack=true;
+ state.guardianTab=previous;
+ state.p22.routeTrail=trail.length?trail:[previous];
+ render();
+ state.p22.routeTrail=trail.length?trail:[previous];
+}
+const p36PreviousRender=render;
+render=function(){
+ p36PreviousRender();
+ if(state.view!=='guardian'||!safeGuardian())return;
+ const main=app.querySelector('main .layout-stack');if(!main)return;
+
+ // Generic page-form Cancel uses the same trail as header Back. Do not
+ // override modals, confirmation prompts, or local inline editing.
+ const pageTabs=new Set(['bonus','task-editor','rule-editor','challenge-editor','complete-task','daily-review','incident-editor','reward-editor','claim-reward','reward-policy','gift-reward','reset-progress','session-review']);
+ if(pageTabs.has(state.guardianTab)){
+  main.querySelectorAll('section.panel .btn').forEach(button=>{
+   if(button.textContent.trim()!=='Cancel')return;
+   if(button.closest('[role="dialog"], .p14-overlay, .p68-share-overlay, .p27-excuse-confirm, .p32-excuse-prompt'))return;
+   if(button.type==='submit')return;
+   // Preserve the button's styling and turn it into navigation-aware Cancel.
+   [...button.attributes].filter(attr=>/^data-p\w+-action$/.test(attr.name)).forEach(attr=>button.removeAttribute(attr.name));
+   button.dataset.p36Action='nav-cancel';button.type='button';
+  });
+ }
+
+ if(state.guardianTab==='vouchers'){
+  const header=main.querySelector(':scope > section:first-child');
+  if(header){
+   header.querySelectorAll('.p19-back,[data-p22-action="nav-back"], [data-p19-action="go-back"]').forEach(b=>b.remove());
+   const print=main.querySelector('[data-p4-action="print-unused"]');
+   if(print){print.classList.add('p36-voucher-print');header.append(print);}
+  }
+ }
+ if(state.guardianTab==='milestones'){
+  const header=main.querySelector(':scope > section:first-child');
+  if(header){
+   header.classList.add('p36-milestones-header');
+   const row=header.querySelector('.pa-milestone-heading-row')||header;
+   header.querySelectorAll('.p19-back,.p23-milestone-back,.pa-milestone-back,[data-p40-action="back-dashboard"],[data-p5b-action="back-manage"]').forEach(b=>b.remove());
+   // Put a single Back button at the right edge of the heading row.
+   const back=document.createElement('button');back.type='button';
+   back.className='btn btn-plain p36-milestone-back';
+   back.dataset.p36Action='nav-back';back.textContent='← Back';row.append(back);
+  }
+ }
+};
+// Use a capture listener on app: the older handlers do not match our
+// replacement data attributes, so no page-specific Cancel can run twice.
+app.addEventListener('click',event=>{
+ const button=event.target.closest('[data-p36-action]');
+ if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(button.dataset.p36Action==='nav-back'||button.dataset.p36Action==='nav-cancel')p36NavigatePrevious();
+},true);
+const P36_CSS=String.raw`
+#app .p36-incident-details{display:grid;gap:17px;min-width:0}
+#app .p36-incident-details .grid2,#app .p36-incident-details .field{min-width:0}
+#app .p34-child-share.p36-plain-child-check{background:transparent!important;border:0!important;box-shadow:none!important;padding:5px 0!important;border-radius:0!important}
+#app .p66-incident-panel .p2-notice.p36-soft-pink-note{background:#ffedf5!important;border:1px solid #edc6d9!important;color:#84566d!important;border-radius:14px!important;padding:14px 16px!important;line-height:1.55}
+#app .p36-voucher-print{margin-left:auto;align-self:flex-start;flex-shrink:0}
+#app .p36-milestones-header{display:block!important}
+#app .p36-milestones-header .pa-milestone-heading-row{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;flex-wrap:wrap;gap:12px;width:100%}
+#app .p36-milestone-back{margin-left:auto!important;align-self:flex-start;flex:none}
+@media(max-width:670px){#app .p36-voucher-print{margin-left:0;width:100%}#app .p36-milestone-back{margin-left:auto!important;width:auto!important;min-width:100px}#app .p36-milestones-header .pa-milestone-heading-row{flex-wrap:nowrap}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-6c2b2e14-refinements">${P36_CSS}</style>`);
+/* End Phase 6C.2B.2E.14 */
+
 </script>
 </body>
 </html>
