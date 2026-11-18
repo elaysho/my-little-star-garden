@@ -13711,6 +13711,339 @@ const P45_STYLES=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d6-child-polish">${P45_STYLES}</style>`);
 /* ===== End Phase 6D.6 ===== */
+
+/* ===== Phase 6D.7 : Child + Guardian follow-up refinements ===== */
+const P46_BUILD='mlsg-phase-6d7-child-guardian-refinements-20261119';
+// Keep Word Garden progression but refine the presentation and answer visibility.
+const p46PriorLearn=p22LearnPage;
+p22LearnPage=function(){
+ const root=document.createElement('div');root.innerHTML=p46PriorLearn();
+ const current=Math.max(0,Math.min(3,Number(state.p26?.wordStep)||0));
+ const date=state.p22?.selectedDate||p22ManilaDate(),w=p22Word(date);
+ const layout=root.querySelector('.p22-layout');if(layout)layout.classList.add('p46-word-layout');
+ const active=root.querySelector('.p22-practice .p26-active-panel');
+ if(active){
+  const heading=active.querySelector('.p22-step-head h3, h3');
+  if(heading)heading.textContent=String(heading.textContent||'').replace(/\b\d+\.\s*/g,'').replace(/\s{2,}/g,' ').trim();
+ }
+ if(current===0 && active){
+  const discoverBtn=active.querySelector('.p22-word-card [data-p22-action="discover"], .p45-discover-action');
+  const nextBtn=active.querySelector('.p26-step-actions [data-step="1"]');
+  if(discoverBtn||nextBtn){
+   const row=document.createElement('div');row.className='p46-inline-step-actions';
+   if(discoverBtn)row.append(discoverBtn);
+   if(nextBtn)row.append(nextBtn);
+   active.append(row);
+   const oldRows=active.querySelectorAll('.p26-step-actions');oldRows.forEach(el=>{ if(!el.querySelector('button')) el.remove(); });
+  }
+ }
+ if(current===1 && active){
+  const nextBtn=active.querySelector('.p26-step-actions [data-step="2"]');
+  const prevBtn=active.querySelector('.p26-step-actions [data-step="0"]');
+  const actionRow=document.createElement('div');actionRow.className='p46-inline-step-actions';
+  if(prevBtn)actionRow.append(prevBtn);
+  if(nextBtn)actionRow.append(nextBtn);
+  const old=active.querySelector('.p26-step-actions');
+  if((prevBtn||nextBtn) && old){ old.replaceWith(actionRow); }
+ }
+ if(current===2 && active){
+  const header=active.querySelector('.p22-step-head h3');if(header)header.textContent='🇵🇭 Learn and say it in Filipino';
+  const pair=active.querySelector('.p45-language-pair strong[lang="fil"]');
+  const aloud=active.querySelector('.p45-read-aloud p[lang="fil"]');
+  const helper=active.querySelector('.p45-try-again');
+  const done=p22Has('filipino',date,w.id);
+  const revealed=!!state.p26?.revealFilipino;
+  if(pair && aloud && !done && !revealed){
+   pair.textContent='• '.repeat(Math.min(8,String(w.fil||'').length)).trim() || '• • •';
+   aloud.textContent='The Filipino sample sentence is hidden until you reveal it or finish spelling.';
+   if(!active.querySelector('[data-p26-action="reveal-filipino"]')){
+    const hint=document.createElement('button');
+    hint.type='button';hint.className='btn btn-plain btn-small p46-fil-hint';
+    hint.dataset.p26Action='reveal-filipino';hint.textContent='Need a hint? Show the Filipino word';
+    const form=active.querySelector('form');
+    if(form)form.before(hint);
+   }
+  }
+  if(done||revealed){
+   pair.textContent=String(w.fil||'');
+   aloud.textContent='“'+String(w.filSentence||'')+'”';
+  }
+  if(helper){ helper.textContent=done?'You’ve practiced the Filipino word. You can try spelling it again!':'Learn the word, then spell it yourself.'; }
+  const nextBtn=active.querySelector('.p26-step-actions [data-step="3"]');
+  const prevBtn=active.querySelector('.p26-step-actions [data-step="1"]');
+  const actionRow=document.createElement('div');actionRow.className='p46-inline-step-actions';
+  if(prevBtn)actionRow.append(prevBtn);
+  if(nextBtn)actionRow.append(nextBtn);
+  const old=active.querySelector('.p26-step-actions');
+  if((prevBtn||nextBtn) && old){ old.replaceWith(actionRow); }
+ }
+ if(current===3 && active){
+  const header=active.querySelector('.p22-step-head h3');if(header)header.textContent='💌 Use the word in your sentence';
+  const nextFinish=active.querySelector('.p26-step-actions [data-p26-action="word-finish"]');
+  const prevBtn=active.querySelector('.p26-step-actions [data-step="2"]');
+  const actionRow=document.createElement('div');actionRow.className='p46-inline-step-actions';
+  if(prevBtn)actionRow.append(prevBtn);
+  if(nextFinish)actionRow.append(nextFinish);
+  const old=active.querySelector('.p26-step-actions');
+  if((prevBtn||nextFinish) && old){ old.replaceWith(actionRow); }
+ }
+ return root.innerHTML;
+};
+
+const p46PriorRender=render;
+render=function(){
+ p46PriorRender();
+ const main=app.querySelector('main'); if(!main) return;
+ // Child-mode voucher detail and achievement sharing refinements.
+ if(state.view==='child'){
+  // Voucher detail: keep Ask Guardian Now as a full-width action below print / availability actions.
+  const ticketPanel=main.querySelector('.p4-ticket-preview, .p31-ticket-preview, section.panel');
+  if(ticketPanel){
+   const ask=[...ticketPanel.querySelectorAll('button,.btn')].find(el=>/Ask Guardian Now|Check Pending Claim Now|Check Pending Request Now/i.test(el.textContent||''));
+   const print=[...ticketPanel.querySelectorAll('button,.btn')].find(el=>/Print Voucher/i.test(el.textContent||''));
+   const unavailable=[...ticketPanel.querySelectorAll('button,.btn')].find(el=>/Not available today/i.test(el.textContent||''));
+   if(ask && !ticketPanel.querySelector('.p46-ticket-ask-wrap')){
+    const wrap=document.createElement('div');wrap.className='p46-ticket-ask-wrap';wrap.append(ask);
+    const anchor=(unavailable||print);
+    if(anchor){
+      const host=anchor.closest('.p2-actions,.p6-approval,.panel,.p2-task-actions,article')||anchor.parentElement;
+      host?.after(wrap);
+    }
+   }
+  }
+  main.querySelectorAll('.p31-summary').forEach(el=>el.classList.add('p46-gift-banner'));
+  const shareDialog=main.querySelector('.p67-share-dialog');
+  if(shareDialog && shareDialog.querySelector('#p68-share-approval') && !shareDialog.classList.contains('p46-ach-dialog')){
+   const letter=shareDialog.querySelector('.p67-share-letter')?.innerHTML||'';
+   shareDialog.classList.add('p46-ach-dialog');
+   shareDialog.innerHTML=`<div class="p46-ach-top"><h2>🌟 Share My Achievement</h2><p>Show your guardian what you're proud of. They must approve before sharing a picture with family.</p></div><div class="p46-ach-card"><div class="p46-ach-card-label">Preview card</div><div class="p67-share-letter p46-ach-card-preview">${letter}</div></div><form id="p68-share-approval" class="form-grid p46-ach-form"><div class="p46-ach-pin-row"><label for="p46-share-pin">Guardian PIN</label><input id="p46-share-pin" name="pin" type="password" pattern="[0-9]{6}" minlength="6" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="Hand the device to a guardian" required></div><div class="p2-actions p46-ach-actions"><button type="submit" class="btn btn-primary">🔐 Approve PNG Share</button><button type="button" class="btn btn-plain" data-p68-action="share-cancel">Cancel</button></div></form><p class="p2-muted tiny p46-ach-note">Approval creates a shareable PNG. You choose whether and where to send it; nothing is posted automatically.</p>`;
+  }
+ }
+ // Guardian refinements.
+ if(state.view==='guardian'){
+  // Daily Star Review: make the date field match the larger check-in date card.
+  const reviewForm=main.querySelector('#p2-review-form');
+  if(reviewForm){
+   const firstField=reviewForm.querySelector('.field');
+   if(firstField) firstField.classList.add('p46-review-date-card');
+  }
+  // Put the No Task Today heading/description outside the bordered list body.
+  const excuse=main.querySelector('.p32-excuse-panel');
+  if(excuse && !main.querySelector('.p46-excuse-head')){
+   const head=excuse.querySelector('.panel-head');
+   if(head){
+    const title=head.querySelector('h3')?.textContent||'🕊️ No Task Today / Excused';
+    const count=head.querySelector('.chip')?.outerHTML||'';
+    const desc=head.querySelector('.p2-muted')?.textContent||'';
+    const outer=document.createElement('div'); outer.className='p46-excuse-head';
+    outer.innerHTML=`<div class="p46-excuse-title-row"><h3>${title}</h3>${count}</div>${desc?`<p class="p2-muted">${desc}</p>`:''}`;
+    excuse.before(outer);
+    head.remove();
+   }
+  }
+  // Ask Someone to Confirm: full-width groups with 2-card columns on large screens.
+  const create=main.querySelector('#p37-create');
+  if(create){
+   create.querySelectorAll('.p2-fieldset').forEach(fs=>fs.classList.add('p46-confirm-fieldset'));
+   create.querySelectorAll('.p37-items').forEach(items=>items.classList.add('p46-choice-grid'));
+  }
+  // Settings: ensure Reset progress, keep setup appears for owner/offline settings too.
+  if((state.guardianTab==='settings' || /Settings & Backup/i.test(main.textContent||'')) && !main.querySelector('[data-p40-action="reset-open"]')){
+   const stack=main.querySelector('.layout-stack')||main;
+   const section=document.createElement('section');section.className='panel p46-reset-panel';
+   section.innerHTML=`<div class="panel-head"><div><p class="eyebrow">New beginning</p><h3>🌱 Reset progress, keep setup</h3></div></div><p class="muted sm">Clear stars, completions, vouchers and requests without losing your created tasks, rules and rewards. A safety backup is required first.</p><div class="actions" style="margin-top:14px"><button type="button" class="btn btn-danger" data-p40-action="reset-open">Review Reset Options</button></div>`;
+   stack.append(section);
+  }
+ }
+};
+
+const P46_STYLES=String.raw`
+/* Word Garden uses a single consistent reading width across all four steps. */
+#app .p46-word-layout{display:block!important;max-width:1000px;margin-inline:auto}
+#app .p46-word-layout .p22-practice{width:100%}
+#app .p46-word-layout .panel{max-width:100%}
+#app .p46-inline-step-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}
+#app .p46-inline-step-actions .btn{min-width:0;white-space:normal}
+#app .p46-fil-hint{margin-bottom:12px}
+/* Voucher detail / child ticket refinements */
+#app .p46-ticket-ask-wrap{margin-top:12px}
+#app .p46-ticket-ask-wrap .btn{width:100%;justify-content:center;min-height:48px}
+#app .p46-gift-banner{margin-top:14px!important;padding:13px 15px;border-radius:14px;background:#fff4f8;border:1px solid #efd2e1;color:#87556f;font-weight:800;text-align:left}
+/* Share My Achievement modal + preview */
+#app .p46-ach-dialog{width:min(100%,740px)!important;padding:clamp(18px,3vw,30px)!important;text-align:left!important}
+#app .p46-ach-top{text-align:center;margin-bottom:14px}
+#app .p46-ach-top h2{margin-bottom:8px;font-size:clamp(2rem,4.8vw,3.3rem);line-height:1.05;letter-spacing:-.04em}
+#app .p46-ach-top p{max-width:26ch;margin:0 auto;color:#82697d}
+#app .p46-ach-card{margin:16px 0 18px;padding:15px;border:2px dashed #e3b8cf;border-radius:20px;background:#fff}
+#app .p46-ach-card-label{font-size:.84rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9a7387;margin-bottom:10px;text-align:center}
+#app .p46-ach-card-preview{background:linear-gradient(180deg,#fffdfd,#fff6fa);border:1px solid #f0d6e2;border-radius:16px;padding:20px 18px;font-size:1.12rem;line-height:1.7;box-shadow:inset 0 1px 0 #fff}
+#app .p46-ach-form{max-width:100%}
+#app .p46-ach-pin-row{display:grid;gap:8px}
+#app .p46-ach-pin-row label{font-weight:800;color:#6d5267}
+#app .p46-ach-pin-row input{width:100%;padding:13px 15px;border:1.5px solid #ddc3d3;border-radius:14px;background:#fff;font:inherit}
+#app .p46-ach-actions{justify-content:flex-start!important;gap:12px;margin-top:16px}
+#app .p46-ach-actions .btn{min-width:170px}
+#app .p46-ach-note{text-align:center}
+/* Review date card matching Daily Rules Check-in visual weight */
+#app #p2-review-form .p46-review-date-card{padding:18px;border:1px solid #ead4e2;border-radius:20px;background:#fff8fc;margin-bottom:12px}
+#app #p2-review-form .p46-review-date-card label{font-size:1rem;font-weight:800;color:#654d61}
+#app #p2-review-form .p46-review-date-card input[type="date"]{display:block;width:100%;margin-top:12px;padding:14px 15px;border:1.5px solid #ddc8d6;border-radius:16px;background:#fff;font:inherit;box-sizing:border-box}
+/* Excused block heading outside of the container */
+#app .p46-excuse-head{margin:20px 0 10px}
+#app .p46-excuse-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#app .p46-excuse-title-row h3{margin:0}
+#app .p32-excuse-panel{padding-top:18px}
+/* Ask Someone to Confirm */
+#app #p37-create .p46-confirm-fieldset{grid-column:1/-1}
+#app #p37-create .p46-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-height:none!important;overflow:visible!important;padding:0!important}
+#app #p37-create .p37-check{height:100%;min-width:0}
+/* Keep buttons on one row in child detail areas where space allows. */
+#app .p45-detail-actions{justify-content:space-between}
+#app .p46-reset-panel{margin-top:16px}
+@media(max-width:760px){
+ #app .p46-inline-step-actions{display:grid;grid-template-columns:1fr}
+ #app #p37-create .p46-choice-grid{grid-template-columns:1fr}
+ #app .p46-ach-actions{display:grid!important;grid-template-columns:1fr 1fr}
+}
+@media(max-width:560px){
+ #app .p46-ach-actions{grid-template-columns:1fr}
+}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P46_BUILD}">${P46_STYLES}</style>`);
+/* ===== End Phase 6D.7 ===== */
+
+/* Phase 6D.8 — Individual Achievement Keepsake redesign.
+   Only the existing guardian-approved achievement PNG export changes.
+   The saved completion, voucher, star, sharing, and Family Sync logic remains unchanged. */
+p68DrawCard=function(record,guardianName){
+ const {obj,kind,date}=record;
+ const pal=state.p35CardTheme==='stars'?
+  {bg:'#f0eef9',paper:'#fffefd',ink:'#5f5575',accent:'#81759c',soft:'#eeebfa',soft2:'#f6f4fc',line:'#ddd7ed',leaf:'#b8c3d9',glint:'#aa9ac8',gold:'#bd9b5b',glow:'rgba(184,162,219,.18)'}:
+  state.p35CardTheme==='meadow'?
+  {bg:'#f9f5e9',paper:'#fffefa',ink:'#6f604c',accent:'#9d8667',soft:'#fbf0dc',soft2:'#f8f5ea',line:'#e7d9bf',leaf:'#a9b99d',glint:'#b8a373',gold:'#a58952',glow:'rgba(223,198,143,.20)'}:
+  {bg:'#fdf0f5',paper:'#fffdfa',ink:'#7c5870',accent:'#a6849c',soft:'#fae7ef',soft2:'#fbf4f6',line:'#efd0dc',leaf:'#b3c4a4',glint:'#c7a7bb',gold:'#b5965b',glow:'rgba(221,182,205,.18)'};
+ const canvas=document.createElement('canvas');canvas.width=2400;canvas.height=1600;
+ const ctx=canvas.getContext('2d');if(!ctx)throw Error('This browser cannot create the achievement card.');
+ const rr=(x,y,w,h,r,fill,stroke=pal.line,lw=2)=>{
+  ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
+  if(stroke){ctx.lineWidth=lw;ctx.strokeStyle=stroke;ctx.stroke();}
+ };
+ const text=(t,x,y,size=32,color=pal.ink,weight=400,opts={})=>{
+  ctx.save();ctx.fillStyle=color;ctx.textAlign=opts.align||'left';ctx.textBaseline='alphabetic';
+  ctx.font=`${opts.italic?'italic ':''}${weight} ${size}px ${opts.serif?'Georgia, Times New Roman, serif':'system-ui, sans-serif'}`;
+  ctx.fillText(String(t||''),x,y);ctx.restore();
+ };
+ // Wrap long activity names without ellipses or spilling out of their panel.
+ const linesFor=(raw,size,width)=>{
+  ctx.font=`800 ${size}px system-ui, sans-serif`;
+  const lines=[];let current='';
+  for(const word of String(raw||'A little achievement').split(/\s+/)){
+   if(!word)continue;
+   const possible=current?current+' '+word:word;
+   if(current&&ctx.measureText(possible).width>width){lines.push(current);current=word;}
+   else current=possible;
+   if(ctx.measureText(current).width>width){
+    let part='';for(const char of Array.from(current)){
+     if(part&&ctx.measureText(part+char).width>width){lines.push(part);part=char;}else part+=char;
+    }current=part;
+   }
+  }
+  if(current)lines.push(current);return lines;
+ };
+ const name=String(obj?.name||'My little victory');
+ let fontSize=82,nameLines=linesFor(name,fontSize,1110);
+ while((nameLines.length>4||nameLines.length*fontSize*1.18>430)&&fontSize>47){fontSize-=3;nameLines=linesFor(name,fontSize,1110);}
+ const dateLabel=p2ValidDate(date)?new Date(date+'T12:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}):String(date||'');
+ const child=String(state.profile?.nickname||'Little Star').slice(0,32);
+ const icon=obj?.icon||(kind==='challenge'?'🏆':kind==='routine'?'📋':'🌸');
+ let metaLabel='A QUEST COMPLETED',metricLabel='STARS EARNED',metricValue='',metricSub='A little reward for her effort';
+ if(kind==='task'){
+  const completions=p11SavedTaskCompletions(date).filter(c=>c.taskId===obj.id);
+  const stars=completions.reduce((sum,c)=>sum+Math.max(0,Number(c.starsAwarded)||0),0);
+  metricValue=`${stars} ★`;
+  metricSub=`${completions.length} recorded completion${completions.length===1?'':'s'} on this date`;
+ }else if(kind==='routine'){
+  metaLabel='A ROUTINE COMPLETED';metricLabel='STEPS COMPLETED';
+  const r=p45RoutineState(obj,date),satisfied=r.done+r.excused;
+  metricValue=`${satisfied} / ${r.total}`;
+  metricSub=r.excused?`${r.done} completed · ${r.excused} excused · no extra routine stars`:'Stars belong to the individual steps';
+ }else{
+  metaLabel='A CHALLENGE COMPLETED';metricLabel='LITTLE MILESTONE';metricValue='✓ Done';metricSub='A challenge worth celebrating';
+ }
+ ctx.fillStyle=pal.bg;ctx.fillRect(0,0,2400,1600);
+ rr(42,40,2316,1520,48,pal.paper,pal.line,4);
+ rr(66,64,2268,1472,37,pal.paper,pal.line,2);
+ function sprig(x,y,scale=1){
+  ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ctx.strokeStyle=pal.leaf;ctx.lineWidth=4;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(0,245);ctx.bezierCurveTo(72,184,75,90,167,4);ctx.stroke();
+  for(const [xx,yy,rot,w] of [[35,188,-.6,24],[77,133,.56,26],[108,75,-.48,24],[155,13,.54,26]]){
+   ctx.save();ctx.translate(xx,yy);ctx.rotate(rot);ctx.beginPath();ctx.ellipse(0,0,w,41,0,0,Math.PI*2);ctx.fillStyle=pal.leaf;ctx.globalAlpha=.72;ctx.fill();ctx.restore();
+  }ctx.restore();
+ }
+ sprig(70,80,1.05);
+ // Quiet stardust, matching the Lifetime Stars keepsake treatment.
+ const star=(x,y,r,opacity=1)=>{
+  ctx.save();ctx.translate(x,y);ctx.globalAlpha=opacity;ctx.fillStyle=pal.glint;
+  ctx.beginPath();ctx.moveTo(-r,0);ctx.quadraticCurveTo(-r*.18,-r*.18,0,-r);
+  ctx.quadraticCurveTo(r*.18,-r*.18,r,0);ctx.quadraticCurveTo(r*.18,r*.18,0,r);
+  ctx.quadraticCurveTo(-r*.18,r*.18,-r,0);ctx.closePath();ctx.fill();ctx.restore();
+ };
+ [[2118,197,18,.73],[2192,252,11,.52],[2050,267,8,.37],[1786,1215,15,.38],[1955,1305,10,.38]].forEach(v=>star(...v));
+ const halo=ctx.createRadialGradient(470,715,35,470,715,410);halo.addColorStop(0,pal.glow);halo.addColorStop(1,'rgba(255,255,255,0)');ctx.fillStyle=halo;ctx.fillRect(150,405,700,700);
+ text('M Y  L I T T L E  S T A R  G A R D E N',1200,153,23,pal.accent,750,{align:'center'});
+ text('A Little Victory',1200,252,83,pal.ink,500,{align:'center',serif:true});
+ text(`${child}'s keepsake · ${dateLabel}`,1200,302,27,pal.accent,450,{align:'center'});
+ ctx.strokeStyle=pal.line;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(145,341);ctx.lineTo(2255,341);ctx.stroke();
+ // Main hero: the child's icon and real activity, not a generic trophy illustration.
+ rr(150,390,2100,736,42,pal.soft2,pal.line,2);
+ rr(209,447,620,620,40,pal.soft,pal.line,2);
+ ctx.save();ctx.fillStyle=pal.paper;ctx.beginPath();ctx.arc(519,728,225,0,Math.PI*2);ctx.fill();ctx.strokeStyle=pal.line;ctx.lineWidth=3;ctx.stroke();ctx.restore();
+ text(String(icon),519,814,210,pal.ink,600,{align:'center'});
+ star(320,523,17,.57);star(738,949,14,.44);star(722,533,8,.48);
+ text(metaLabel,891,520,24,pal.accent,800);
+ text('I did it!',891,627,76,pal.ink,780);
+ const lineGap=fontSize*1.20,startY=725;
+ nameLines.forEach((line,i)=>text(line,891,startY+i*lineGap,fontSize,pal.ink,800));
+ const kindLabel=kind==='routine'?'Every little step counts':kind==='challenge'?'Practice makes progress':'A lovely achievement to remember';
+ text(kindLabel,891,1044,29,pal.accent,500);
+ // Bottom: useful verified detail without clutter or an inflated star award.
+ rr(150,1150,1340,225,36,pal.paper,pal.line,2);
+ text('A LITTLE MOMENT TO REMEMBER',202,1216,24,pal.accent,750);
+ text('Small steps make a beautiful garden grow.',202,1290,36,pal.ink,530);
+ rr(1518,1150,732,225,36,pal.soft,pal.line,2);
+ text(metricLabel,1563,1217,23,pal.accent,800);
+ text(metricValue,1563,1318,73,pal.ink,700,{serif:true});
+ ctx.save();ctx.font='22px system-ui, sans-serif';ctx.fillStyle=pal.accent;ctx.textAlign='left';
+ p10TextLine(ctx,metricSub,1563,1352,650,28,1);ctx.restore();
+ ctx.strokeStyle=pal.line;ctx.beginPath();ctx.moveTo(145,1430);ctx.lineTo(2255,1430);ctx.stroke();
+ text('A little keepsake from our garden',160,1490,23,pal.accent,450);
+ text(`Approved for sharing by ${String(guardianName||'Guardian').slice(0,42)}`,2240,1490,23,pal.accent,500,{align:'right'});
+ return canvas;
+};
+// Let the child choose the same three approved themes before the PIN approval.
+// The existing Phase 6D.7 render pass creates the approval dialog after child(),
+// so the selector is mounted after render rather than into the earlier HTML string.
+const p47PriorRender=render;
+render=function(){
+ p47PriorRender();
+ if(state.view!=='child'||!state.p67ShareOpen)return;
+ const form=app.querySelector('.p46-ach-dialog .p46-ach-form');
+ if(!form||app.querySelector('.p47-theme-choose'))return;
+ const section=document.createElement('section');section.className='p47-theme-choose';
+ section.setAttribute('aria-label','Achievement card design');
+ section.innerHTML='<strong>🎀 Choose a keepsake theme</strong><div class="p35-theme-options">'+Object.entries(p35Themes).map(([id,t])=>`<button class="p35-theme ${state.p35CardTheme===id?'p35-selected':''}" type="button" data-p35-theme="${id}" aria-pressed="${state.p35CardTheme===id}"><span aria-hidden="true">${t.icon}</span><span>${t.label}</span></button>`).join('')+'</div>';
+ form.before(section);
+};
+const P47_STYLES=String.raw`
+#app .p47-theme-choose{border:1px solid #efdae5;border-radius:16px;background:#fffafd;padding:15px;margin:14px 0 20px;text-align:left}
+#app .p47-theme-choose>strong{display:block;margin-bottom:11px;font-size:.9rem;color:#78576d}
+#app .p47-theme-choose .p35-theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+#app .p47-theme-choose .p35-theme{min-width:0;overflow-wrap:anywhere;white-space:normal}
+@media(max-width:600px){#app .p47-theme-choose .p35-theme-options{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d8-individual-card">${P47_STYLES}</style>`);
+/* End Phase 6D.8 */
+
 </script>
 </body>
 </html>
