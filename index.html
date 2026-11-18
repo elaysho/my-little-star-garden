@@ -151,6 +151,7 @@ function fallbackTransaction(stores,callback){
    return {
      add(value){if(rows.some(x=>x[key]===value[key]))throw new Error('This operation was already recorded.');rows.push(structuredClone(value));},
      put(value){const index=rows.findIndex(x=>x[key]===value[key]);if(index>=0)rows[index]=structuredClone(value);else rows.push(structuredClone(value));},
+     delete(id){const index=rows.findIndex(x=>x[key]===id);if(index>=0)rows.splice(index,1);},
      clear(){rows.length=0;}
    };
  };
@@ -12740,6 +12741,277 @@ const P38_STYLE=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d2-refinements">${P38_STYLE}</style>`);
 /* End Phase 6D.2 */
+
+
+/* Phase 6D.3 — mobile polish, honest guest-request eligibility, guest test cleanup,
+   unified Review Center refresh, and percentage-based bulk flash sales.
+   Reuses existing reward, record, transaction, Family Sync & Guardian stores. */
+state.p39={deletedIds:new Set(),bulkBusy:false,bulkNotice:'',bulkReturn:'manage'};
+const P39_DELETED='p39-guest-deleted:';
+const p39OriginalRefresh=refresh;
+refresh=async function(){await p39OriginalRefresh();
+ const markerRows=(await getAll('records')).filter(x=>String(x.key||'').startsWith(P39_DELETED));
+ state.p39.deletedIds=new Set(markerRows.map(x=>x.id));
+ state.p37.requests=state.p37.requests.filter(x=>!state.p39.deletedIds.has(x.id));
+ state.p37.responses=state.p37.responses.filter(x=>!state.p39.deletedIds.has(x.id));
+};
+// The source's old any-completion check misclassified recurring multi/check-in quests.
+// Use their actual earning eligibility, not a blanket existence test.
+p37Awarded=function(item,date){
+ if(item.kind==='rule')return p41RuleFollowed(item.id,date);
+ const task=p2Task(item.id);if(!task)return false;
+ const eligibility=p2CompletionEligibility(task,date,item.slot||'',item.stepIndex??null);
+ return !eligibility.ok&&/already awarded|limit reached|cooldown has not finished/i.test(eligibility.reason||'');
+};
+function p39GuestEligible(item,date){
+ if(item.kind==='rule')return !p41RuleFollowed(item.id,date);
+ const task=p2Task(item.id);return !!task&&p2CompletionEligibility(task,date,item.slot||'',item.stepIndex??null).ok;
+}
+// Never re-offer a used daily rule or an exhausted quest. Multiple-award tasks
+// continue to be offered while their configured slots/limits permit another award.
+const p39PreviousCreate=p37CreatePage;
+p37CreatePage=function(){
+ const root=document.createElement('div');root.innerHTML=p39PreviousCreate();
+ const date=state.p37.date||p2Date(),eligible=[...p37TaskRows(date),...p37RuleRows()].filter(x=>p39GuestEligible(x,date)),keys=new Set(eligible.map(x=>x.key));
+ root.querySelectorAll('#p37-create .p37-items').forEach(section=>{
+  section.querySelectorAll('input[name="item"]').forEach(input=>{if(!keys.has(input.value))input.closest('.p37-check')?.remove();});
+  if(!section.querySelector('.p37-check'))section.innerHTML='<p class="p39-quiet-empty">Nothing left to confirm for this date in this group.</p>';
+ });
+ const first=root.querySelector('#p37-create .p2-fieldset .p2-muted');
+ if(first)first.textContent='Only activities with an available earning opportunity appear here. Multi-completion quests stay available until their daily limit is reached.';
+ return root.innerHTML;
+};
+const p39PreviousGenerate=p37Generate;
+p37Generate=async function(form){
+ const fd=new FormData(form),date=String(fd.get('date')||''),rows=[...p37TaskRows(date),...p37RuleRows()];
+ for(const key of fd.getAll('item')){const row=rows.find(x=>x.key===key);if(!row||!p39GuestEligible(row,date))throw Error('An activity is already confirmed or no longer eligible. Refresh the checklist and select available items.');}
+ return p39PreviousGenerate(form);
+};
+// A tombstone propagates through the existing records sync and helps prevent an
+// older synced snapshot from reintroducing deleted test items into this version.
+async function p39DeleteGuest(id){
+ if(!safeGuardian())throw Error('Guardian authentication required.');
+ const request=p37Request(id),response=p37Response(id);
+ if(!request&&!response)throw Error('This guest confirmation is unavailable.');
+ const approved=response?.items?.filter(x=>x.status==='approved').length||0;
+ const message='Delete this guest confirmation and its original request from your Review Center?'+(approved?'\n\nThis confirmation has '+approved+' Guardian-approved item(s). Existing stars, rule check-ins, transactions, and approval audit records will NOT be reversed or deleted.':'')+'\n\nThe deletion will be shared through Family Sync when possible. Already-shared links cannot be remotely erased.';
+ if(!await p38Confirm(message))return;
+ const stamp=p37Now();
+ await atomic(['records'],tx=>{
+  const records=tx.objectStore('records');records.delete(P37_REQ+id);records.delete(P37_RES+id);
+  records.put({key:P39_DELETED+id,id,deletedAt:stamp,deletedBy:p37Actor(),approvedItems:approved});
+ });
+ await refresh();state.p37.selected=null;state.guardianTab='p61-review-center';render();
+ notice('Guest confirmation removed from your Review Center. Previously earned stars and audit history were preserved.');
+}
+const p39PriorImport=p37Import;
+p37Import=async function(link){
+ const r=p37ValidResponse(p37Extract(link,'response'));
+ if(state.p39.deletedIds.has(r.rid)||(await get('records',P39_DELETED+r.rid)))throw Error('This guest request was deleted. Create a new guest request instead of importing its old response.');
+ return p39PriorImport(link);
+};
+// Refresh the review center hierarchy: one primary action area, smaller pending
+// sections, horizontal filters on mobile, and collapsed housekeeping/history.
+const p39PreviousReviewCenter=p37ReviewCenter;
+p37ReviewCenter=function(){
+ const root=document.createElement('div');root.innerHTML=p39PreviousReviewCenter();
+ const pendingChild=p31Pending().length,pendingGuest=state.p37.responses.filter(r=>r.items.some(i=>i.status==='pending')).length;
+ const header=root.querySelector('.p37-header');
+ if(header){header.classList.add('p39-review-heading');const info=header.querySelector(':scope > div:first-child');
+  if(info){info.querySelector('.lead')?.replaceChildren(document.createTextNode('One calm place for requests, guest confirmations, and review history.'));
+   const stats=document.createElement('div');stats.className='p39-review-summary';stats.innerHTML=`<span><strong>${pendingChild}</strong> child request${pendingChild===1?'':'s'}</span><span><strong>${pendingGuest}</strong> guest confirmation${pendingGuest===1?'':'s'}</span>`;info.append(stats);
+  }
+ }
+ const sections=[...root.querySelectorAll('section.panel')];
+ const inbox=sections.find(s=>s.querySelector('.p37-tabs'));
+ if(inbox){inbox.classList.add('p39-review-inbox');
+  if(state.p37.filter==='all'||!state.p37.filter){
+   const pendingTitles=[...inbox.querySelectorAll('.p37-section-title')];
+   for(const h of pendingTitles){let needs=!h.textContent.includes('Child Requests')?pendingGuest:pendingChild;
+    if(needs)continue;let node=h.nextElementSibling;while(node&&!node.classList.contains('p37-section-title')){const next=node.nextElementSibling;node.remove();node=next;}h.remove();
+   }
+   if(!pendingChild&&!pendingGuest){const empty=document.createElement('div');empty.className='p39-review-empty';empty.innerHTML='<div class="p39-review-empty-icon">🌱</div><strong>All caught up!</strong><p>Nothing needs approval right now. Guest responses and past decisions are still available in Review History.</p>';inbox.append(empty);}
+  }
+ }
+ const requests=sections.find(s=>s.querySelector('h3')?.textContent.includes("Guest Requests You've Created"));
+ if(requests){const body=requests.querySelectorAll('.p37-request-row');
+  body.forEach(row=>{const source=state.p37.requests.find(r=>row.querySelector('[data-p37-action="reshare"]')?.dataset.id===r.id||row.querySelector('[data-p37-action="cancel-request"]')?.dataset.id===r.id);if(source){const actions=row.querySelector('.p2-actions');actions?.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-plain p2-mini p39-delete-link" data-p39-action="delete-guest" data-id="${esc(source.id)}">Delete</button>`);} });
+  // For requests with no other actions, identify by their sorted DOM order.
+  const ordered=state.p37.requests.slice(0,40);requests.querySelectorAll('.p37-request-row').forEach((row,i)=>{if(!row.querySelector('.p39-delete-link')&&ordered[i]){const b=document.createElement('button');b.type='button';b.className='btn btn-plain p2-mini p39-delete-link';b.dataset.p39Action='delete-guest';b.dataset.id=ordered[i].id;b.textContent='Delete';let a=row.querySelector('.p2-actions');if(!a){a=document.createElement('div');a.className='p2-actions';row.append(a);}a.append(b);}});
+  const entries=[...requests.querySelectorAll('.p37-request-row')];
+  requests.innerHTML=`<details class="p39-fold"><summary><span>🔗 Guest requests you've created</span><span class="p39-count">${state.p37.requests.length}</span></summary><div class="p39-fold-body">${entries.length?entries.map(x=>x.outerHTML).join(''):'<p class="p39-quiet-empty">No guest requests yet.</p>'}</div></details>`;
+  requests.classList.add('p39-collapsible-panel');
+ }
+ const more=sections.find(s=>s.querySelector('h3')?.textContent==='More Guardian Reviews');
+ if(more){const inside=more.innerHTML.replace(/^<h3>More Guardian Reviews<\/h3>/,'');more.innerHTML=`<details class="p39-fold"><summary><span>📖 More ways to review</span></summary><div class="p39-fold-body">${inside}</div></details>`;more.classList.add('p39-collapsible-panel');}
+ return root.innerHTML;
+};
+const p39PreviousGuestDetail=p37DetailPage;
+p37DetailPage=function(){const root=document.createElement('div');root.innerHTML=p39PreviousGuestDetail();
+ const id=state.p37.selected;if(id){const header=root.querySelector('.p37-header');if(header){const b=document.createElement('button');b.type='button';b.className='btn btn-plain p39-detail-delete';b.textContent='🗑 Delete Confirmation';b.dataset.p39Action='delete-guest';b.dataset.id=id;const actions=header.querySelector('.p2-actions');if(actions)actions.append(b);else header.append(b);}}
+ return root.innerHTML;
+};
+// Sale calculations in whole stars, using normal rounding. A discounted item
+// must be cheaper than base price; a 1-star item can therefore become free.
+function p39BulkPrice(base,percent){return Math.min(base-1,Math.max(0,Math.round(base*(100-percent)/100)));}
+function p39BulkEligibleRewards(){return state.p4Rewards.filter(r=>!r.archived&&!r.draft&&Number.isSafeInteger(Number(r.price))&&Number(r.price)>0).sort((a,b)=>a.name.localeCompare(b.name));}
+function p39BulkPage(){const rewards=p39BulkEligibleRewards(),start=p38Datetime(new Date().toISOString()),end=p38Datetime(new Date(Date.now()+24*3600e3).toISOString());
+ return `<section class="p39-bulk-heading"><div><p class="eyebrow">Guardian · Reward Shop</p><h1 class="page-title">✨ Bulk Flash Sale</h1><p class="lead">Choose rewards and apply one percentage discount. Individual star prices are rounded to whole stars.</p></div><button class="btn btn-plain" type="button" data-p39-action="bulk-back">← Back</button></section>
+ <section class="panel"><form id="p39-bulk-form" class="form-grid"><fieldset class="p2-fieldset"><legend>01 · Choose rewards</legend><p class="p2-muted">Existing vouchers stay at the prices already paid. Existing sale schedules on selected rewards will be replaced.</p>
+ ${rewards.length?`<label class="p39-bulk-all"><input type="checkbox" id="p39-select-all"> Select all ${rewards.length} eligible rewards</label><div class="p39-bulk-list">${rewards.map(r=>`<label class="p39-bulk-row"><input type="checkbox" name="rewardId" value="${esc(r.id)}"><span class="p39-bulk-icon">${esc(r.icon||'🎁')}</span><span class="grow"><strong>${esc(r.name)}</strong><small>${money(r.price)} stars${r.flashSale?' · Existing sale will be replaced':''}</small></span><span class="p39-price-preview" data-p39-price="${esc(r.id)}">—</span></label>`).join('')}</div>`:'<p class="p39-quiet-empty">No published rewards with a positive star price are available.</p>'}</fieldset>
+ <fieldset class="p2-fieldset"><legend>02 · Sale settings</legend><div class="p39-bulk-percent-row"><label class="field">Discount percentage<input name="percent" type="number" min="1" max="99" step="1" value="25" required></label><div class="p39-bulk-percentage-badge"><strong>25%</strong><span>off selected rewards</span></div></div><div class="grid2 p39-bulk-dates"><label class="field">Starts<input type="datetime-local" name="starts" value="${start}" required><small>Tap to choose date and time</small></label><label class="field">Ends<input type="datetime-local" name="ends" value="${end}" required><small>Tap to choose date and time</small></label></div><p class="field-help">Sale ends automatically at the selected time. Device time affects display; existing Family Sync shares saved reward settings.</p></fieldset>
+ <div class="p39-bulk-total" aria-live="polite">Choose rewards to preview their discounted prices.</div><div class="p2-actions"><button type="submit" class="btn btn-primary" ${rewards.length?'':'disabled'}>✨ Schedule Flash Sale</button><button type="button" class="btn btn-plain" data-p39-action="bulk-back">Cancel</button></div></form></section>`;
+}
+function p39UpdateBulkPreview(){const form=app.querySelector('#p39-bulk-form');if(!form)return;const pct=Number(form.elements.percent.value),chosen=new Set([...form.querySelectorAll('input[name="rewardId"]:checked')].map(x=>x.value));
+ const valid=Number.isInteger(pct)&&pct>=1&&pct<=99,rewards=p39BulkEligibleRewards();form.querySelectorAll('[data-p39-price]').forEach(node=>{const r=rewards.find(x=>x.id===node.dataset.p39Price);node.textContent=r&&chosen.has(r.id)&&valid?`${money(r.price)} → ${money(p39BulkPrice(Number(r.price),pct))} ⭐`:'—';});
+ const badge=form.querySelector('.p39-bulk-percentage-badge strong');if(badge)badge.textContent=valid?pct+'%':'—';
+ const total=form.querySelector('.p39-bulk-total');if(total)total.textContent=chosen.size?`${chosen.size} reward${chosen.size===1?'':'s'} selected · ${valid?pct+'% off':'Enter a percentage from 1 to 99'} · Whole-star prices shown above.`:'Choose rewards to preview their discounted prices.';
+ const all=form.querySelector('#p39-select-all');if(all){all.checked=!!rewards.length&&chosen.size===rewards.length;all.indeterminate=chosen.size>0&&chosen.size<rewards.length;}
+}
+async function p39ApplyBulk(form){if(!safeGuardian())throw Error('Unlock Guardian Mode first.');const fd=new FormData(form),percent=Number(fd.get('percent')),ids=[...new Set(fd.getAll('rewardId'))],start=Date.parse(fd.get('starts')),end=Date.parse(fd.get('ends'));
+ if(!Number.isSafeInteger(percent)||percent<1||percent>99)throw Error('Discount must be a whole percentage between 1 and 99.');
+ if(!ids.length)throw Error('Choose at least one reward.');if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end<=Date.now())throw Error('Choose a valid sale window ending in the future.');
+ const available=p39BulkEligibleRewards();const chosen=ids.map(id=>available.find(r=>r.id===id));if(chosen.some(r=>!r))throw Error('A selected reward is unavailable. Refresh the reward list.');
+ if(!await p38Confirm(`Schedule ${percent}% off ${ids.length} selected reward${ids.length===1?'':'s'}? This replaces any existing sale on those rewards but will not change previously purchased vouchers.`))return;
+ const isoStart=new Date(start).toISOString(),isoEnd=new Date(end).toISOString(),updatedAt=p37Now();
+ await atomic(['rewards'],tx=>{for(const r of chosen){tx.objectStore('rewards').put({...r,flashSale:{price:p39BulkPrice(Number(r.price),percent),starts:isoStart,ends:isoEnd},updatedAt});}});
+ await refresh();state.p2ManageTab='upcoming';state.guardianTab='manage';render();notice(`Flash sale scheduled for ${ids.length} reward${ids.length===1?'':'s'}.`);
+}
+// Attach bulk sale action to the existing Reward Shop and reorder controls so
+// Archive is always LAST, even at 390 px mobile width.
+const p39PreviousRewardManager=p4RewardManager;
+p4RewardManager=function(){const root=document.createElement('div');root.innerHTML=p39PreviousRewardManager();const row=[...root.querySelectorAll('.p2-row')].find(x=>x.querySelector('h3')?.textContent.includes('Reward Shop'));const actions=row?.querySelector('.p62-reward-menu-items')||row?.querySelector('.p2-actions');if(actions){const button=document.createElement('button');button.type='button';button.className='btn btn-soft p39-bulk-launch';button.dataset.p39Action='bulk-open';button.textContent='✨ Bulk Flash Sale';actions.append(button);}
+ root.querySelectorAll('.p2-list article.p2-card').forEach(card=>{const controls=card.querySelector('.p2-task-actions');if(!controls)return;
+  const buttons=[...controls.querySelectorAll('button')],archive=buttons.find(b=>b.dataset.p4Action==='reward-archive');if(!archive)return;
+  const primary=buttons.filter(b=>['reward-claim-direct','reward-edit'].includes(b.dataset.p4Action));
+  const secondary=buttons.filter(b=>['toggle-hide','toggle-pause'].includes(b.dataset.p38Action));
+  controls.innerHTML='';controls.classList.add('p39-reward-controls');
+  for(const [className,set] of [['p39-reward-main',primary],['p39-reward-secondary',secondary],['p39-reward-final',[archive]]]){if(!set.length)continue;const wrap=document.createElement('div');wrap.className=className;for(const b of set)wrap.append(b);controls.append(wrap);}
+  archive.classList.add('p39-archive-action');
+ });return root.innerHTML;};
+const p39PreviousGuardian=guardian;
+guardian=function(){if(safeGuardian()&&state.guardianTab==='p39-bulk-sale')return shell(p39BulkPage(),true);return p39PreviousGuardian();};
+// Review Center top bar uses its own compact header rather than legacy family
+// status/profile pills, while retaining the real wallet and lock action.
+const p39PreviousRender=render;
+render=function(){p39PreviousRender();if(!safeGuardian()||state.view!=='guardian')return;
+ const main=app.querySelector('main');if(!main)return;
+ const review=state.guardianTab==='p61-review-center';main.classList.toggle('p39-review-view',review);
+ if(review){const top=main.querySelector(':scope > .topbar');if(top){const oldLock=top.querySelector('[data-action="lock"]')||[...top.querySelectorAll('button')].find(b=>/Lock/.test(b.textContent));
+  top.classList.add('p39-review-topbar');top.innerHTML=`<div class="p39-topbar-brand"><span>🌷</span><span>Guardian workspace</span></div><div class="p39-topbar-end"><span class="p39-topbar-wallet" aria-label="${money(state.summary.wallet)} stars available">⭐ ${money(state.summary.wallet)}</span></div>`;
+  const end=top.querySelector('.p39-topbar-end');if(oldLock){oldLock.classList.add('p39-topbar-lock');end?.append(oldLock);}else end?.insertAdjacentHTML('beforeend','<button type="button" class="btn btn-plain p39-topbar-lock" data-action="lock">🔒 Lock</button>');
+ }}
+ if(state.guardianTab==='p39-bulk-sale')p39UpdateBulkPreview();
+};
+app.addEventListener('input',e=>{if(e.target.closest('#p39-bulk-form')&&e.target.id!=='p39-select-all')p39UpdateBulkPreview();},true);
+app.addEventListener('change',e=>{const form=e.target.closest('#p39-bulk-form');if(!form)return;
+ if(e.target.id==='p39-select-all'){form.querySelectorAll('input[name="rewardId"]').forEach(b=>b.checked=e.target.checked);}p39UpdateBulkPreview();
+},true);
+app.addEventListener('submit',async e=>{if(e.target.id!=='p39-bulk-form')return;e.preventDefault();e.stopImmediatePropagation();if(state.p39.bulkBusy)return;state.p39.bulkBusy=true;
+ try{await p39ApplyBulk(e.target);}catch(err){notice(err.message||'Unable to schedule the sale.',true);}finally{state.p39.bulkBusy=false;}
+},true);
+app.addEventListener('click',async e=>{const b=e.target.closest('[data-p39-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();
+ try{if(!safeGuardian())throw Error('Unlock Guardian Mode first.');touchSession();
+  if(b.dataset.p39Action==='delete-guest'){await p39DeleteGuest(b.dataset.id);return;}
+  if(b.dataset.p39Action==='bulk-open'){state.guardianTab='p39-bulk-sale';render();return;}
+  if(b.dataset.p39Action==='bulk-back'){state.guardianTab='manage';state.p2ManageTab='upcoming';render();return;}
+ }catch(err){notice(err.message||'Action could not be completed.',true);}
+},true);
+const P39_STYLE=String.raw`
+/* Compact Review Center header */
+#app .p39-review-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:24px;padding:10px 0;flex-wrap:nowrap}
+#app .p39-topbar-brand{display:flex;align-items:center;gap:8px;font-size:.82rem;font-weight:800;color:#8d6d82;white-space:nowrap;min-width:0}
+#app .p39-topbar-brand>span:first-child{font-size:1.25rem}
+#app .p39-topbar-end{display:flex;align-items:center;gap:9px;flex:none;min-width:0}
+#app .p39-topbar-wallet{background:#fffdfd;border:1px solid #eddbe5;border-radius:30px;padding:9px 14px;color:#8b5875;font-weight:800;white-space:nowrap}
+#app .p39-topbar-lock{padding:8px 12px;border-radius:13px;white-space:nowrap;font-size:.82rem}
+#app .p39-review-heading{background:linear-gradient(135deg,#fceaf2,#f8f3fb 75%);border:1px solid #f0dbe7;border-radius:22px;padding:24px 25px;margin-bottom:17px;align-items:flex-end}
+#app .p39-review-heading .page-title{font-size:clamp(1.45rem,2.4vw,2.15rem)}
+#app .p39-review-heading .lead{max-width:540px;margin-top:7px;font-size:.92rem;line-height:1.6}
+#app .p39-review-heading .p2-actions{gap:8px;max-width:100%}
+#app .p39-review-heading .p2-actions .btn{font-size:.88rem;white-space:normal;text-align:center}
+#app .p39-review-summary{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}
+#app .p39-review-summary span{display:inline-flex;align-items:baseline;gap:6px;font-size:.79rem;background:#fffdfa;border:1px solid #eddae4;border-radius:24px;padding:8px 12px;color:#806a7e}
+#app .p39-review-summary strong{color:#81526d;font-size:1rem}
+#app .p39-review-inbox .p37-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:8px;scrollbar-width:thin;padding:2px 2px 11px;margin-bottom:8px;max-width:100%}
+#app .p39-review-inbox .p37-tabs .btn{white-space:nowrap;flex:none;font-size:.82rem}
+#app .p39-review-inbox .p37-section-title{margin-top:15px;gap:10px}
+#app .p39-review-inbox .p37-section-title h3{font-size:1.15rem}
+#app .p39-review-inbox .p37-inbox-item{padding:15px 8px;gap:12px;min-width:0}
+#app .p39-review-inbox .p37-inbox-item strong{overflow-wrap:anywhere;font-size:.95rem}
+#app .p39-review-inbox .p37-inbox-item .p2-muted{line-height:1.55}
+#app .p39-review-empty{text-align:center;padding:30px 16px;color:#8c768b}
+#app .p39-review-empty>strong{display:block;font-size:1.15rem;color:#735871;margin:8px 0}
+#app .p39-review-empty>p{max-width:450px;margin:auto;line-height:1.6;font-size:.89rem}
+#app .p39-review-empty-icon{font-size:2rem}
+#app .p39-collapsible-panel{padding:0!important;overflow:hidden}
+#app .p39-fold>summary{cursor:pointer;list-style:none;display:flex;gap:12px;justify-content:space-between;align-items:center;padding:19px 22px;font-size:1rem;font-weight:800;color:#6d526b}
+#app .p39-fold>summary::-webkit-details-marker{display:none}
+#app .p39-fold>summary::after{content:'⌄';font-size:1.2rem;color:#997b91;margin-left:auto}
+#app .p39-fold[open]>summary::after{transform:rotate(180deg)}
+#app .p39-fold-body{padding:0 20px 19px;min-width:0}
+#app .p39-count{background:#f9e9f1;color:#865975;border-radius:30px;padding:4px 10px;font-size:.78rem;margin-left:4px}
+#app .p39-quiet-empty{padding:14px 5px;color:#917b90;font-size:.86rem}
+#app .p39-delete-link,#app .p39-detail-delete{color:#9c526f!important;border-color:#ebcfdd!important;font-weight:650}
+#app .p39-detail-delete{align-self:flex-start;margin-left:auto}
+/* Rewards: two tidy action tiers, destructive/archive last */
+#app .p39-reward-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:13px}
+#app .p39-reward-controls>div{display:flex;gap:8px;flex-wrap:wrap}
+#app .p39-reward-controls .btn{white-space:nowrap;padding:9px 13px;min-height:42px}
+#app .p39-reward-final{margin-left:auto}
+#app .p39-archive-action{background:#fff!important;color:#936b7e!important;border:1px solid #efdce5!important}
+#app .p39-bulk-launch{white-space:nowrap}
+/* Bulk flash-sale planner */
+#app .p39-bulk-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:19px}
+#app .p39-bulk-list{display:grid;gap:9px;margin-top:14px}
+#app .p39-bulk-all{display:flex;align-items:center;gap:10px;padding:10px 5px;font-weight:750;color:#73566a}
+#app .p39-bulk-row{display:flex;align-items:center;gap:12px;background:#fffbfc;border:1px solid #ecdde8;border-radius:14px;padding:13px;min-width:0;cursor:pointer}
+#app .p39-bulk-row input,#app .p39-bulk-all input{width:19px;height:19px;flex:none;accent-color:#ab698b}
+#app .p39-bulk-row .grow{min-width:0}
+#app .p39-bulk-row strong{display:block;color:#684d63;font-size:.92rem;overflow-wrap:anywhere}
+#app .p39-bulk-row small{display:block;color:#927e8d;line-height:1.5;margin-top:4px}
+#app .p39-bulk-icon{width:40px;height:40px;display:grid;place-items:center;background:#faeaf2;border-radius:12px;font-size:1.4rem;flex:none}
+#app .p39-price-preview{white-space:nowrap;font-weight:800;font-size:.84rem;color:#946979;flex:none}
+#app .p39-bulk-percent-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+#app .p39-bulk-percent-row .field{flex:1 1 180px;max-width:340px}
+#app .p39-bulk-percentage-badge{display:grid;gap:4px;background:#fff2da;border:1px solid #eddab4;border-radius:18px;padding:15px 22px;color:#896539}
+#app .p39-bulk-percentage-badge strong{font-size:1.45rem}
+#app .p39-bulk-percentage-badge span{font-size:.77rem}
+#app .p39-bulk-dates>label{min-width:0;max-width:100%}
+#app .p39-bulk-dates small{display:block;font-size:.75rem;color:#937f8a;font-weight:400;margin-top:6px}
+#app .p39-bulk-total{padding:13px 15px;border:1px solid #ecd8e3;background:#faf0f6;border-radius:15px;color:#76536b;font-weight:700;font-size:.9rem}
+/* iOS date/time native controls: constrain intrinsic WebKit width to cell. */
+#app :is(input[type="date"],input[type="datetime-local"],input[type="time"]){box-sizing:border-box!important;display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;inline-size:100%!important;min-inline-size:0!important;max-inline-size:100%!important;min-height:46px;line-height:1.45;font-size:16px!important;padding:10px 12px;overflow:hidden}
+#app :is(input[type="date"],input[type="datetime-local"],input[type="time"])::-webkit-date-and-time-value{min-width:0;max-width:100%;text-align:left}
+#app :is(input[type="date"],input[type="datetime-local"],input[type="time"])::-webkit-datetime-edit{min-width:0;max-width:100%;flex:1;text-align:left}
+#app :is(.grid2,.grid3,.form-grid,.field,.p2-fieldset,.p38-sale-fields,.panel){min-width:0;max-width:100%;box-sizing:border-box}
+#app .grid2>*{min-width:0;max-width:100%;box-sizing:border-box}
+@media(max-width:680px){
+ #app .p39-review-topbar{margin-bottom:15px;gap:6px}
+ #app .p39-topbar-brand{font-size:.72rem}
+ #app .p39-topbar-wallet{font-size:.88rem;padding:8px 10px}
+ #app .p39-topbar-lock{padding:8px 10px}
+ #app .p39-review-heading{padding:18px 17px;gap:14px}
+ #app .p39-review-heading .p2-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+ #app .p39-review-heading .p2-actions .btn{min-width:0;padding:12px 10px;font-size:.85rem}
+ #app .p39-review-inbox .p37-section-title{flex-wrap:wrap}
+ #app .p39-review-inbox .p37-section-title .btn{margin-left:auto}
+ #app .p39-review-inbox .p37-inbox-item{gap:9px}
+ #app .p39-reward-controls{display:grid;gap:9px}
+ #app .p39-reward-controls>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;width:100%}
+ #app .p39-reward-controls .btn{font-size:.84rem;padding:11px 6px;min-width:0;white-space:normal;text-align:center;line-height:1.35}
+ #app .p39-reward-controls .p39-reward-final{grid-template-columns:1fr}
+ #app .p39-reward-controls .p39-archive-action{width:100%}
+ #app .p39-bulk-row{gap:9px;padding:11px}
+ #app .p39-price-preview{white-space:normal;text-align:right;font-size:.74rem;max-width:94px}
+ #app .p39-bulk-dates{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:12px}
+ #app .p38-sale-fields .grid2{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:12px}
+ #app .p39-bulk-heading .btn{margin-left:auto}
+}
+@media(max-width:360px){#app .p39-topbar-brand>span:last-child{display:none}#app .p39-review-heading .p2-actions{grid-template-columns:1fr}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d3-refinements">${P39_STYLE}</style>`);
+/* End Phase 6D.3 */
 
 </script>
 </body>
