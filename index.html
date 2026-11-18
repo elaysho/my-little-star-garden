@@ -13251,6 +13251,271 @@ const P42_CSS=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d4-consistency">${P42_CSS}</style>`);
 /* End Phase 6D.4 */
 
+
+/* ===== Phase 6D.5 — consistent guardian workspace & workflow polish =====
+   UI refinements reuse existing state, reward, voucher and sync operations. */
+const p43={};
+
+// All Guardian pages use the same decorated header, navigation and sidebar.
+// This also fixes the Bulk Flash Sale page, which previously returned raw shell().
+const p43PriorRender=render;
+render=function(){p43PriorRender();if(state.view!=='guardian'||!safeGuardian())return;
+ const main=app.querySelector('main');if(!main)return;
+ if(['p61-review-center','p39-bulk-sale'].includes(state.guardianTab)){
+  const reference=document.createElement('div');reference.innerHTML=p19GuardianDecorate(shell('<section></section>',true));
+  const top=reference.querySelector('main > header.topbar');const nav=reference.querySelector('.sidebar nav.nav');
+  if(top){main.querySelector(':scope > header.topbar')?.replaceWith(top);top.classList.add('p43-standard-header');}
+  if(nav){app.querySelector('.sidebar nav.nav')?.replaceWith(nav);}
+  main.classList.remove('p39-review-view');
+ }
+ app.querySelectorAll('.sidebar [data-guardian-tab="dashboard"]').forEach(b=>{
+  const text=b.querySelector('span:last-child');if(text)text.textContent='Dashboard';
+ });
+ app.querySelectorAll('[data-p68-action="navigate"][data-kind="guardian"][data-tab="dashboard"]').forEach(b=>{
+  const label=b.querySelector('small');if(label)label.textContent='Dashboard';b.setAttribute('aria-label','Dashboard');
+ });
+ if(state.guardianTab==='vouchers'){
+  // Legacy v6D.1–6D.4 render decorators can move Print back to the header.
+  // Enforce final placement *after* those decorators have finished.
+  const top=main.querySelector('.layout-stack > section:first-child');
+  const row=main.querySelector('.layout-stack > section.panel .p2-row');
+  const print=main.querySelector('[data-p4-action="print-unused"]');
+  if(row&&print){print.textContent='🖨️ Print Unused Vouchers';print.classList.add('p43-voucher-print');row.append(print);}
+  if(top&&!top.querySelector('[data-p19-action="go-back"]')){
+   const back=document.createElement('button');back.type='button';back.className='btn btn-plain p19-back p43-voucher-back';back.dataset.p19Action='go-back';back.textContent='← Back';top.append(back);
+  }
+ }
+ // For every Guardian page, prevent a stale one-off button row from reintroducing
+ // double navigation labels.
+};
+
+// Daily Review: a single date controls everything; communicate clearly why a
+// task is unavailable, while respecting multiple, weekly and cooldown awards.
+const p43PriorReview=p2ReviewPage;
+p2ReviewPage=function(){const host=document.createElement('div');host.innerHTML=p43PriorReview();
+ const form=host.querySelector('#p2-review-form');if(!form)return host.innerHTML;
+ const day=state.p2ReviewDate||p2Date();
+ const field=form.querySelector('.p42-shared-date');if(field){field.classList.add('p43-review-date');const caption=form.querySelector('.p42-date-caption');if(caption){caption.textContent='One date for every section below · any completion already recorded for this day is checked against its earning rules.';}}
+ const groups=form.querySelector('.p32-review-groups');if(groups){groups.classList.add('p43-daily-groups');
+  const individual=groups.querySelector('.p42-independent,.p32-review-independent');if(individual)individual.classList.add('p43-independent');
+  for(const row of groups.querySelectorAll('.p32-review-task')){
+   const input=row.querySelector('input[name="taskIds"]');if(!input)continue;
+   const task=p2Task(input.value);if(!task)continue;
+   const eligible=p2CompletionEligibility(task,day,'',null);
+   const already=p2TaskCompletions(task.id,day).filter(x=>!x.correctedAt&&Number(x.starsAwarded)>0).length;
+   // A single-award task cannot be marked a second time merely because it
+   // appears in both a routine and the standalone list. Multi retains slots.
+   if(!eligible.ok){input.checked=false;input.disabled=true;}
+   const small=row.querySelector('small');if(small){
+    if(!eligible.ok){small.textContent=eligible.reason||'Already recorded for this earning period';}
+    else if(task.frequency==='multi')small.textContent=`${already} of ${Number(task.maxPerDay)||1} earned today · another completion available`;
+    else if(already&&task.frequency==='cooldown')small.textContent='Another award is available after the configured waiting period';
+   }
+   row.classList.toggle('p43-awarded-task',!eligible.ok);
+  }
+ }
+ const header=form.querySelector('.p42-award-heading');if(header)header.querySelector('p')?.replaceChildren(document.createTextNode('Choose only newly verified completions. A shared task cannot earn twice for the same daily or weekly allowance.'));
+ const note=form.querySelector('.p2-note');if(note&&/shared task|routine step|choose completed/i.test(note.textContent||''))note.textContent='Routine steps and standalone appearances use the same task award limits. Multiple-completion tasks remain available only while an eligible award is left.';
+ return host.innerHTML;
+};
+
+// Rules: the chosen day is full-width and confirmed rules are useful rows rather
+// than an unbroken text paragraph.
+const p43PriorRuleCheckin=p31RulePage;
+p31RulePage=function(){const host=document.createElement('div');host.innerHTML=p43PriorRuleCheckin();
+ const toolbar=host.querySelector('.p62-checkin-toolbar');if(toolbar){toolbar.classList.add('p43-rule-toolbar');const back=toolbar.querySelector('button');if(back)back.textContent='← Back';}
+ const form=host.querySelector('#p31-rules-form,#p41-zero-rule-form');
+ const box=form?.querySelector('.p31-summary');if(box){
+  const day=state.p2ReviewDate||p2Date();const zero=state.p62RulesTab==='zero';
+  const completed=state.p2Rules.filter(r=>!r.archived&&(zero?Number(r.earnStars||0)===0:Number(r.earnStars||0)>0)).filter(r=>zero?p41RuleFollowed(r.id,day):p31RuleEarned(r.id,day));
+  const section=document.createElement('section');section.className='p43-confirmed-rules';section.innerHTML=`<div class="p43-confirmed-head"><strong>✓ Already confirmed</strong><span>${completed.length} on ${esc(day)}</span></div><div class="p43-confirmed-grid">${completed.map(r=>`<div class="p43-confirmed-item"><span aria-hidden="true">${esc(r.icon||'🛡️')}</span><span class="grow">${esc(r.name)}</span><span class="p43-confirmed-check">✓ Recorded</span></div>`).join('')}</div>`;
+  box.replaceWith(section);
+ }
+ return host.innerHTML;
+};
+
+// Invitation setup: one numbered group for date/recipient/expiration/message,
+// then quests and rules side by side on large screens.
+const p43PriorGuestCreate=p37CreatePage;
+p37CreatePage=function(){const host=document.createElement('div');host.innerHTML=p43PriorGuestCreate();const form=host.querySelector('#p37-create');if(!form)return host.innerHTML;
+ const first=form.querySelector('.grid2');const expiry=form.querySelector('select[name="expiry"]')?.closest('.field');const message=form.querySelector('.p38-guest-message');
+ if(first){const settings=document.createElement('fieldset');settings.className='p2-fieldset p43-guest-settings';settings.innerHTML='<legend>01 · Invitation details</legend><p class="p2-muted">Choose one activity date, how to address the guest, and when the link expires.</p>';
+  first.before(settings);settings.append(first);if(expiry)settings.append(expiry);if(message)settings.append(message);
+ }
+ const choices=[...form.querySelectorAll('fieldset.p2-fieldset')].filter(x=>x!==form.querySelector('.p43-guest-settings'));
+ if(choices.length>=2){const wrap=document.createElement('div');wrap.className='p43-guest-choices';choices[0].before(wrap);choices.slice(0,2).forEach((choice,i)=>{const leg=choice.querySelector('legend');if(leg)leg.textContent=`0${i+2} · Choose ${i?'rules':'quests'}`;wrap.append(choice);});}
+ return host.innerHTML;
+};
+
+// Checklist routine button layout and consistent Rules controls; both preserve
+// the existing button actions and the shared paginator.
+const p43PriorTaskCard=p5aTaskCard;
+p5aTaskCard=function(task){const host=document.createElement('div');host.innerHTML=p43PriorTaskCard(task);const card=host.firstElementChild;
+ if(task.type==='checklist'&&card){const actions=card.querySelector('.p2-task-actions');actions?.classList.add('p43-routine-actions');const primary=actions?.querySelector('[data-p2-action="routine-manage-steps"]');primary?.classList.add('p43-routine-primary');}
+ return host.innerHTML;
+};
+const p43PriorManage=guardianManage;
+guardianManage=function(){const host=document.createElement('div');host.innerHTML=p43PriorManage();
+ if(state.p2ManageTab==='routines'){
+  host.querySelectorAll('.p5a-task-grid .p2-card').forEach(card=>{
+   const actions=card.querySelector('.p2-task-actions');const award=actions?.querySelector('.p33-routine-award');
+   if(actions&&award){actions.classList.add('p43-routine-actions');award.classList.add('p43-routine-primary');}
+  });
+ }
+ if(state.p2ManageTab==='rules'){
+  const section=[...host.querySelectorAll('section.panel')].find(s=>s.querySelector('[data-p2-action="rule-edit"],[data-p2-action="rule-new"]'));
+  if(section){section.classList.add('p43-rule-manager');const list=section.querySelector('.p2-list');if(list){list.style.maxHeight='none';list.style.overflow='visible';list.classList.add('p43-rule-list');
+    list.querySelectorAll('.p2-card .p2-task-actions').forEach(actions=>{actions.classList.add('p43-rule-actions');const archives=[...actions.querySelectorAll('button')].filter(b=>/archive/i.test(b.dataset.p2Action||''));archives.forEach(b=>actions.append(b));});
+    p42Pager(list,'manage:rules',8);
+  }}
+ }
+ return host.innerHTML;
+};
+
+// Reward fields: separate optional promotion from visibility. Use sequential
+// group numbers without altering the submitted field names or price validation.
+const p43PriorRewardEditor=p4RewardEditor;
+p4RewardEditor=function(){const host=document.createElement('div');host.innerHTML=p43PriorRewardEditor();const form=host.querySelector('#p4-reward-form');if(!form)return host.innerHTML;
+ const visibility=form.querySelector('.p38-reward-availability');if(visibility){
+  const sale=visibility.querySelector('.p38-sale-fields');const saleNote=[...visibility.querySelectorAll('.field-help')].find(x=>/sale/i.test(x.textContent||''));
+  const groups=[...form.querySelectorAll('fieldset.p2-fieldset')];const index=groups.indexOf(visibility),n=index>=0?index+1:groups.length;
+  visibility.querySelector('legend').textContent=String(n).padStart(2,'0')+' · Visibility';
+  if(sale){const promo=document.createElement('fieldset');promo.className='p2-fieldset p43-sale-group';promo.innerHTML=`<legend>${String(n+1).padStart(2,'0')} · Flash Sale (Optional)</legend><p class="p2-muted">Set a temporary discounted star price. Existing vouchers keep the price they were purchased at.</p>`;
+   visibility.after(promo);promo.append(sale);if(saleNote)promo.append(saleNote);
+  }
+  const publish=[...form.querySelectorAll('fieldset.p2-fieldset')].find(f=>/Publish/.test(f.querySelector('legend')?.textContent||''));if(publish)publish.querySelector('legend').textContent=String(n+2).padStart(2,'0')+' · Publish';
+ }
+ return host.innerHTML;
+};
+
+// Manage vouchers: a navigation-aware Back control belongs in the page header,
+// and the print action belongs beside the section title.
+const p43PriorVoucherManager=p4VoucherManager;
+p4VoucherManager=function(){const host=document.createElement('div');host.innerHTML=p43PriorVoucherManager();const panel=host.querySelector('section.panel');const row=panel?.querySelector('.p2-row');
+ const print=row?.querySelector('[data-p4-action="print-unused"]');const back=row?.querySelector('[data-p4-action="reward-manage-back"]');back?.remove();if(print){print.textContent='🖨️ Print Unused Vouchers';print.classList.add('p43-voucher-print');row.append(print);}
+ const head=host.querySelector('section:first-child');if(head&&!head.querySelector('.p43-nav-back')){const nav=document.createElement('button');nav.className='btn btn-plain p19-back p43-nav-back';nav.dataset.p19Action='go-back';nav.type='button';nav.textContent='← Back';head.append(nav);}
+ return host.innerHTML;
+};
+
+// Voucher details: a balanced desktop information/actions layout, a simple
+// single-column phone view, and action text explaining 'delivered' vs past use.
+const p43PriorVoucherPage=p4VoucherPage;
+p4VoucherPage=function(){const host=document.createElement('div');host.innerHTML=p43PriorVoucherPage();const voucher=p4Voucher(state.p4SelectedVoucherId);if(!voucher)return host.innerHTML;
+ const panel=host.querySelector('.p4-ticket-preview');if(!panel)return host.innerHTML;
+ panel.classList.add('p43-voucher-page');
+ const ticket=panel.querySelector('.p4-ticket,.p4-ticket-sheet,.p4-voucher-ticket')||panel.firstElementChild;
+ const actions=panel.querySelector('.p2-actions');if(!actions)return host.innerHTML;
+ const left=document.createElement('div');left.className='p43-voucher-preview';const right=document.createElement('div');right.className='p43-voucher-actions';
+ if(ticket)left.append(ticket);
+ // Timer / clock stays with the ticket preview for timed vouchers.
+ const timer=panel.querySelector('.p2-timer');if(timer)left.append(timer);
+ const status=String(p4Status(voucher)[0]||'');
+ right.innerHTML=`<div class="p43-voucher-how"><p class="eyebrow">GUARDIAN · TICKET ACTIONS</p><h3>${voucher.type==='timed'?'Manage this time voucher':'Give or record this reward'}</h3><p>${voucher.type==='timed'?'Start the timer when the activity begins, then pause to record actual use. For time already used elsewhere, choose Record Past Use.':'Choose Confirm Reward Delivered when you give this gift now. If it was already used outside the app, choose Record Past Use instead.'}</p><span class="p43-voucher-status">Status: ${esc(status)}</span></div>`;
+ actions.classList.add('p43-voucher-actions-row');
+ const fulfill=actions.querySelector('[data-p4-action="voucher-fulfill"]');if(fulfill){fulfill.textContent='✓ Confirm Reward Delivered';actions.prepend(fulfill);}
+ const start=actions.querySelector('[data-p4-action="session-start"]');if(start)actions.prepend(start);
+ const manual=actions.querySelector('[data-pc-action="voucher-used-open"]');if(manual)manual.textContent='↺ Record Past Use';
+ actions.querySelector('[data-p4-action="vouchers-manage"]')?.remove();
+ right.append(actions);
+ const form=panel.querySelector('#pc-manual-use-form');if(form)right.append(form);
+ const other=[...panel.children].filter(x=>x!==ticket&&x!==timer&&x!==actions&&x!==form);
+ other.forEach(x=>{if(x.classList.contains('info')||x.classList.contains('p2-notice')||x.classList.contains('p2-muted'))right.append(x);});
+ panel.replaceChildren(left,right);
+ // The normal header back control already navigates via the page stack.
+ return host.innerHTML;
+};
+
+// Normalize draft status as one visually consistent checkbox in all editors.
+const p43PriorGuardian=guardian;
+guardian=function(){const html=p43PriorGuardian();if(!safeGuardian()||state.view!=='guardian'||typeof html!=='string')return html;
+ const host=document.createElement('div');host.innerHTML=html;
+ for(const label of host.querySelectorAll('form label.inline-check')){
+  const box=label.querySelector('input[name="draft"]');if(!box)continue;
+  label.classList.add('p43-draft-choice');label.innerHTML='';label.append(box);const content=document.createElement('span');content.innerHTML='<strong>Save as draft</strong><small>Not visible in Child Mode until published.</small>';label.append(content);
+ }
+ return host.innerHTML;
+};
+
+const P43_STYLES=String.raw`
+/* Consistent Guardian menus — same header, status, account and sidebar */
+#app .p43-standard-header{margin-bottom:20px!important}
+#app main:not(.p39-review-view) > .topbar{min-height:58px}
+/* Daily Review: one workspace and clear earned-state behavior */
+#app .p43-review-date{max-width:none!important;width:100%;box-sizing:border-box;background:#fbf5f9;border:1px solid #ebdce7;display:grid;grid-template-columns:minmax(0,1fr);gap:5px}
+#app .p43-review-date input[type=date]{width:min(100%,410px)!important}
+#app .p43-daily-groups{gap:17px!important}
+#app .p43-daily-groups .p32-review-routine{min-width:0;display:flex;flex-direction:column;gap:11px;padding:19px!important;border:1px solid #eddae6;border-radius:20px;background:#fff}
+#app .p43-daily-groups .p32-review-routine-head{margin-bottom:3px}
+#app .p43-daily-groups .p32-review-task{align-items:center;min-width:0;padding:10px 6px;border-radius:10px}
+#app .p43-daily-groups .p43-awarded-task{opacity:.68;background:#f8f4f7}
+#app .p43-awarded-task .p32-task-detail small{color:#7e6e7b}
+#app .p43-independent{grid-column:1/-1}
+/* Daily rule date and recorded state */
+#app .p43-rule-toolbar{display:flex;align-items:flex-end;gap:15px;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
+#app .p43-rule-toolbar>.field{flex:1 1 300px;max-width:none!important;min-width:0;background:#fbf5f9;padding:13px 16px;border-radius:16px;border:1px solid #eddae6}
+#app .p43-rule-toolbar>.field input[type=date]{display:block;width:100%!important;max-width:none!important;margin-top:9px}
+#app .p43-confirmed-rules{background:#faf8fa;border:1px solid #e9dce7;border-radius:17px;padding:16px;margin:10px 0}
+#app .p43-confirmed-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;color:#6f536a}
+#app .p43-confirmed-head>span{color:#977c8c;font-size:.82rem}
+#app .p43-confirmed-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#app .p43-confirmed-item{display:flex;align-items:center;gap:10px;padding:11px;background:#fff;border:1px solid #eee1e9;border-radius:12px;min-width:0;font-size:.88rem;color:#715668}
+#app .p43-confirmed-item>.grow{overflow-wrap:anywhere;min-width:0}
+#app .p43-confirmed-check{font-size:.77rem;color:#51765e;white-space:nowrap}
+/* Guest invitation layout */
+#app .p43-guest-settings{min-width:0}
+#app .p43-guest-settings>.grid2{align-items:start}
+#app .p43-guest-settings>.field{margin-top:13px}
+#app .p43-guest-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px}
+#app .p43-guest-choices>fieldset{min-width:0;margin:0;height:100%;box-sizing:border-box}
+#app .p43-guest-choices .p37-items{max-height:480px;overflow-y:auto}
+/* Task/routine/rules controls */
+#app .p43-routine-actions{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+#app .p43-routine-actions>.p43-routine-primary,#app .p43-routine-actions>.p33-routine-award{grid-column:1/-1;width:100%!important;max-width:none!important;min-height:45px;justify-self:stretch;white-space:normal}
+#app .p43-routine-actions>.btn{min-width:0;width:100%;white-space:normal}
+#app .p43-rule-manager .p43-rule-list{max-height:none!important;overflow:visible!important;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+#app .p43-rule-manager .p43-rule-list>.p2-card{margin:0;min-width:0}
+#app .p43-rule-actions{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+#app .p43-rule-actions>.btn{min-width:0;width:100%;white-space:normal}
+/* Native selects must stay at form-control height, not stretch to fill a grid row */
+#app .p2-fieldset .grid2{align-items:start}
+#app .p2-fieldset :is(.field, label.field){align-self:start;min-height:0}
+#app :is(.field select,.p2-fieldset select){height:auto!important;min-height:46px;max-height:58px!important;display:block;width:100%;max-width:100%;box-sizing:border-box;line-height:1.35;padding:10px 36px 10px 13px;flex:none}
+#app .p43-sale-group .p38-sale-fields{margin-top:10px}
+#app .p43-sale-group .p38-sale-fields>.p2-muted{display:none}
+#app .p43-sale-group .p38-sale-fields .grid2{align-items:start}
+/* Vouchers: predictable header and wide two-column detail */
+#app .p43-voucher-print{margin-left:auto}
+#app .p43-voucher-page{width:100%;max-width:none!important;display:grid;grid-template-columns:minmax(290px,.95fr) minmax(320px,1.05fr);gap:clamp(20px,3vw,42px);align-items:start;padding:clamp(18px,3vw,32px)}
+#app .p43-voucher-preview{min-width:0;width:100%;display:grid;gap:16px;justify-items:center}
+#app .p43-voucher-preview>.p4-ticket{width:min(100%,440px)}
+#app .p43-voucher-preview>:first-child{max-width:100%}
+#app .p43-voucher-actions{min-width:0;display:grid;gap:18px}
+#app .p43-voucher-how{background:#f9f2f7;border:1px solid #ecd9e5;padding:20px;border-radius:18px}
+#app .p43-voucher-how h3{font-size:1.22rem;color:#694d63;margin:6px 0 12px}
+#app .p43-voucher-how p:not(.eyebrow){font-size:.9rem;line-height:1.6;color:#806a7a;margin:0 0 11px}
+#app .p43-voucher-status{font-size:.81rem;font-weight:700;color:#805970}
+#app .p43-voucher-actions-row{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;justify-items:stretch}
+#app .p43-voucher-actions-row>.btn{min-width:0;width:100%;padding:12px;white-space:normal;line-height:1.35;text-align:center}
+#app .p43-voucher-actions-row>[data-p4-action="voucher-fulfill"],#app .p43-voucher-actions-row>[data-p4-action="session-start"]{grid-column:1/-1}
+#app #pc-manual-use-form{max-width:100%;box-sizing:border-box}
+/* Unified Save as draft choice */
+#app .p43-draft-choice{display:flex;align-items:flex-start;gap:12px;background:#fcf6fa;border:1px solid #ead7e4;border-radius:15px;padding:13px 15px;margin:10px 0;max-width:100%}
+#app .p43-draft-choice input{margin-top:4px;flex:none}
+#app .p43-draft-choice span{display:grid;gap:3px;color:#73556a}
+#app .p43-draft-choice small{color:#947d8e;font-size:.8rem}
+@media(max-width:760px){
+ #app .p43-guest-choices{grid-template-columns:1fr}
+ #app .p43-confirmed-grid{grid-template-columns:1fr}
+ #app .p43-rule-manager .p43-rule-list{grid-template-columns:1fr}
+ #app .p43-voucher-page{grid-template-columns:1fr}
+ #app .p43-voucher-actions-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #app .p43-routine-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:400px){#app .p43-routine-actions{grid-template-columns:repeat(2,minmax(0,1fr))}#app .p43-routine-actions>.p43-routine-primary{grid-column:1/-1}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="mlsg-phase-6d5-guardian-ux">${P43_STYLES}</style>`);
+/* End Phase 6D.5 */
+
 </script>
 </body>
 </html>
