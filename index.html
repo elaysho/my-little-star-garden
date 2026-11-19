@@ -416,7 +416,7 @@ async function handleAction(action){
  if(action==='forgot-pin'){state.view='recover';state.notice='';render();return;}
  if(action==='cancel-login'){state.p2PendingTaskId=null;state.view='child';state.notice='';render();return;}
  if(action==='lock'){lockGuardian();return;}
- if(action==='go-quests'){state.childTab='quests';render();return;}
+ if(action==='go-quests'){p51CloseChildDetail();state.childTab='quests';render();return;}
  if(action==='go-world'){state.childTab='world';render();return;}
  if(action==='go-history'&&safeGuardian()){state.guardianTab='history';render();return;}
  if(action==='open-bonus'&&safeGuardian()){state.bonusOperationId=bonusOperationId();state.guardianTab='bonus';render();return;}
@@ -442,7 +442,10 @@ app.addEventListener('click',async e=>{
  const n=e.target.closest('[data-child-tab],[data-guardian-tab],[data-world],[data-action]');if(!n)return;
  if(state.unlocked)touchSession();
  try{
-  if(n.dataset.childTab){state.view='child';state.childTab=n.dataset.childTab;render();return;}
+  if(n.dataset.childTab){
+   // Main navigation always leaves a routine/quest/challenge detail view.
+   p51CloseChildDetail();
+   state.view='child';state.childTab=n.dataset.childTab;render();return;}
   if(n.dataset.guardianTab&&safeGuardian()){state.guardianTab=n.dataset.guardianTab;render();return;}
   if(n.dataset.world){state.worldArea=n.dataset.world;render();return;}
   if(n.dataset.action)await handleAction(n.dataset.action);
@@ -4629,7 +4632,7 @@ document.addEventListener('click',async event=>{
  event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
  const action=node.dataset.p68Action;
  try{
-  if(action==='navigate'){state.p68MoreOpen=false;if(node.dataset.kind==='guardian'){if(node.dataset.tab==='p64-guardians')state.guardianTab='p64-guardians';else state.guardianTab=node.dataset.tab;}else{state.childTab=node.dataset.tab;state.p2ChildTask=null;state.p64FullTimer=null;}render();return;}
+  if(action==='navigate'){state.p68MoreOpen=false;if(node.dataset.kind==='guardian'){if(node.dataset.tab==='p64-guardians')state.guardianTab='p64-guardians';else state.guardianTab=node.dataset.tab;}else{p51CloseChildDetail();state.childTab=node.dataset.tab;state.p64FullTimer=null;}render();return;}
   if(action==='more'){state.p68MoreOpen=!state.p68MoreOpen;render();return;}
   if(action==='more-close'){state.p68MoreOpen=false;render();return;}
   if(action==='share-cancel'){state.p67ShareOpen=false;render();return;}
@@ -14372,7 +14375,9 @@ p33RoutinePending=function(r,date=p2Date()){
 const p48PriorRoutineDetail=p3ChildTaskDetail;
 p3ChildTaskDetail=function(task,date){const html=p48PriorRoutineDetail(task,date);
  if(task?.type!=='checklist'||!Array.isArray(task.routineItems))return html;
- const root=document.createElement('div');root.innerHTML=html,p=p45RoutineState(task,date);
+ const root=document.createElement('div');
+ root.innerHTML=html;
+ const p=p45RoutineState(task,date);
  const cards=[...root.querySelectorAll('section.panel .p2-list > .p2-card')];
  p.members.forEach((m,i)=>{
   const card=cards[i];if(!card)return;
@@ -15069,6 +15074,23 @@ const P50_STYLE=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P50_BUILD}">${P50_STYLE}</style>`);
 /* End Phase 6G.1 */
+/* Phase 6G.2: Strict-mode routine-detail variable correction and Quests navigation reset. */
+
+
+/* Phase 6G.3 — centralize Child Mode top-level navigation reset.
+   The app has separate desktop sidebar and mobile bottom-tab routers.
+   Clear nested quest/routine/challenge detail state in both, without touching
+   completion records, stars, timers, or Family Sync. */
+function p51CloseChildDetail(){
+ state.p2ChildTask=null;
+ state.p3ReturnRoutine=null;
+ state.p63ChallengeView=null;
+ state.p6FocusTask=null;
+ state.p6Immediate=null;
+ state.p67ShareOpen=false;
+ state.p50ChallengeShare=null;
+}
+/* End Phase 6G.3 */
 
 </script>
 </body>
