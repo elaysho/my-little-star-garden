@@ -10224,7 +10224,7 @@ initialize();
 
 
 /* ===== Phase 6C.2B.2E: Smart Sync + Guardian Learning Center ===== */
-const P28_QUIET_MS=120000,P28_MAX_MS=600000;
+const P28_QUIET_MS=5*60*1000,P28_MAX_MS=20*60*1000;
 const p28Sync={timer:0, lastProbe:0, probing:false, meta:null};
 function p28SyncKey(){const c=state.p8Cloud||{};return `mlsg-smart-sync-v1:${c.config?.projectId||'offline'}:${c.familyId||'local'}:${c.user?.uid||'unsigned'}`;}
 function p28ReadPending(){const k=p28SyncKey();if(p28Sync.meta?.key===k)return p28Sync.meta.value;
@@ -10262,7 +10262,7 @@ function p28UpdateSyncLabels(){const tag=document.querySelector('[data-p28-sync-
    Remote revision HEAD checks continue during the waiting period; no outgoing snapshot is created. */
 const p28OldCloudPage=p8CloudPage;
 p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p28OldCloudPage();
- const overview=root.querySelector('.p17-cloud-state');if(overview)overview.insertAdjacentHTML('beforeend',`<div class="p28-sync-explain"><strong>🌷 Gentle Family Sync</strong><p data-p28-sync-timer>Checking local changes…</p><small>Local progress saves immediately. Cloud sharing waits 2 minutes after the latest change (10-minute maximum during continued activity). Sync Now uploads without waiting. Keep this page open until Shared with family appears.</small></div>`);
+ const overview=root.querySelector('.p17-cloud-state');if(overview)overview.insertAdjacentHTML('beforeend',`<div class="p28-sync-explain"><strong>🌷 Gentle Family Sync</strong><p data-p28-sync-timer>Checking local changes…</p><small>Local progress saves immediately. Cloud sharing waits 5 minutes after the latest change (20-minute maximum during continued activity). Sync Now uploads without waiting. Keep this page open until Shared with family appears.</small></div>`);
  root.querySelectorAll('.p17-cloud-state .btn').forEach(button=>{if(button.dataset.p17Action==='retry')button.textContent='☁️ Sync Now';});
  return root.innerHTML;
 };
@@ -10280,12 +10280,12 @@ const p28Lessons=[
  {icon:'🛡️',title:'Check Rules and Excused Days',short:'Know when to confirm rules or mark No Task Today.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="daily-review"]',details:'An Excused day means there was no required task today; it is not a completed quest and awards no stars. Use the Daily Star Review to check what was recorded.',tip:'Explain an excused day before confirming it.'},
  {icon:'⭐',title:'Understand Star Changes',short:'See earnings, deductions, and corrections in history.',tab:'history',focus:'.page-title',details:'Completed activities award the stars configured for each task. Deductions and corrections should have a clear child-friendly explanation. Never award the same routine steps twice.',tip:'Review a transaction before editing or correcting it.'},
  {icon:'🎁',title:'Handle Wishes and Rewards',short:'Check reward requests, voucher requirements, and sponsors.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="requests"]',details:'Approving a reward request is different from marking the voucher used. Check its cost, requirements, and how often it may be used.',tip:'If in doubt, check with the family owner before approving.'},
- {icon:'☁️',title:'Share Changes Safely',short:'Learn Saved Here, Sharing, Shared, and Waiting for Owner.',tab:'p8-cloud',focus:'.p17-cloud-state',details:'Progress is saved locally immediately. The garden usually shares changes after two quiet minutes; select Sync Now to share sooner. If edits conflict, the owner may need to review them.',tip:'On a phone, wait until Shared with family before closing the browser when possible.'},
+ {icon:'☁️',title:'Share Changes Safely',short:'Learn Saved Here, Sharing, Shared, and Waiting for Owner.',tab:'p8-cloud',focus:'.p17-cloud-state',details:'Progress is saved locally immediately. The garden usually shares changes after five quiet minutes; select Sync Now to share sooner. If edits conflict, the owner may need to review them.',tip:'On a phone, wait until Shared with family before closing the browser when possible.'},
  {icon:'🔒',title:'Finish Your Guardian Session',short:'Check the sharing status and lock Guardian Mode.',tab:'dashboard',focus:'.guardian-heading',details:'Once your work is saved, check the sync status. Lock Guardian Mode to protect approvals and star changes. You can still use Child Mode afterward.',tip:'The tour never approves a real request or deducts real stars.'}
 ];
 const p28Faqs=[
  ['How do I approve a completed quest?','Open Review Center, then Daily Star Review or Requests. Read the activity details, confirm it happened, and approve. Its configured stars appear in the real ledger.'],
- ['Why has progress not synced?','Edits are stored locally straight away. The app waits 2 minutes after the last change (up to 10 minutes during continuous edits). Use Sync Now for an immediate check. If offline, reconnect. If Waiting for Owner, the owner must review differences.'],
+ ['Why has progress not synced?','Edits are stored locally straight away. The app waits 5 minutes after the last change (up to 20 minutes during continuous edits). Use Sync Now for an immediate check. If offline, reconnect. If Waiting for Owner, the owner must review differences.'],
  ['What is No Task Today / Excused?','It records a day when an activity was not expected. It does not award stars. It should be used intentionally, with a clear reason, rather than approving unfinished work.'],
  ['Why are routine stars shown twice in the Journal?','The routine summary lists stars from its member tasks for context. Those stars are already included in the daily total; a routine does not award a second set of stars.'],
  ['I forgot my Firebase password.','Choose Forgot Password on the sign-in screen and follow the email instructions. A Firebase password is separate from the device Guardian PIN.'],
@@ -10298,7 +10298,7 @@ const p28Screens=['data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAsHCA
 const p28GuideData=[
  {title:'Everyday Guardian Guide',subtitle:'The six steps you will use most often',emoji:'🌷',cards:[['🔐','1. Sign in','Choose your Guardian profile. Use your Firebase password if asked, then your six-digit PIN.'],['🏡','2. Open Dashboard','Check the star wallet and pending reviews.'],['📬','3. Check Review Center','Review quests, requests, and Quest Notes before awarding stars.'],['🛡️','4. Record Rules','Confirm rule check-ins or mark No Task Today only when appropriate.'],['🎁','5. Review Rewards','Check star cost, vouchers, and requirements before approving.'],['☁️','6. Share and Lock','Wait for Shared with family or use Sync Now, then lock Guardian Mode.']]},
  {title:'Stars & Special Situations',subtitle:'What to do when something needs attention',emoji:'⭐',cards:[['✅','Task completed','Check the task and approve once. The award appears in the star ledger.'],['📖','Routine completed','Routine summaries group completed steps. Do not award its stars a second time.'],['🛡️','Rule deduction','Choose the correct rule, enter a clear reason for the child, and check the amount.'],['🌤️','No Task Today / Excused','This is not a task completion. No stars are awarded for the excused day.'],['↩️','Correct an error','Use the correction flow instead of creating an unrelated bonus.'],['📝','Review a note','Read your child’s note and respond warmly and clearly.']]},
- {title:'Family Sync & Troubleshooting',subtitle:'Keep everyone’s progress safe',emoji:'☁️',cards:[['💾','Saved on this device','The change is safe locally. Cloud sharing starts after a quiet period.'],['⏳','Wait 2 minutes','The timer restarts after each change, up to 10 minutes of continuous editing.'],['☁️','Sync Now','Use this to share sooner. Keep the browser open until a result appears.'],['💌','Waiting for Owner','Local changes are preserved; the owner reviews conflicting edits.'],['📴','Offline?','Carry on locally and reopen this device when internet returns.'],['🔑','Password help','Use Forgot Password for Firebase login; the Guardian PIN is different.']]}
+ {title:'Family Sync & Troubleshooting',subtitle:'Keep everyone’s progress safe',emoji:'☁️',cards:[['💾','Saved on this device','The change is safe locally. Cloud sharing starts after a quiet period.'],['⏳','Wait 5 minutes','The timer restarts after each change, up to 20 minutes of continuous editing.'],['☁️','Sync Now','Use this to share sooner. Keep the browser open until a result appears.'],['💌','Waiting for Owner','Local changes are preserved; the owner reviews conflicting edits.'],['📴','Offline?','Carry on locally and reopen this device when internet returns.'],['🔑','Password help','Use Forgot Password for Firebase login; the Guardian PIN is different.']]}
 ];
 const p28Help={search:'',faqOpen:-1,guide:-1,practice:false,tourReturn:'dashboard',welcome:false,locate:false};
 function p28GuideHtml(index,print=false){const g=p28GuideData[index];if(!g)return '';
@@ -10645,7 +10645,7 @@ p28GuideData.splice(0,p28GuideData.length,
  ['📝','Review a note','Read the child’s note carefully and respond clearly.']]},
  {title:'Check Family Sync',subtitle:'A simple guide to sharing progress',emoji:'☁️',cards:[
  ['💾','Saved on this device','New activity is saved immediately on the current device.'],
- ['⏳','Sharing automatically','The garden waits about two quiet minutes, up to ten minutes if changes continue.'],
+ ['⏳','Sharing automatically','The garden waits about five quiet minutes, up to twenty minutes if changes continue.'],
  ['☁️','Sync Now from Dashboard','Open Check Family Sync and tap Sync Now to share sooner. Keep the page open for the result.'],
  ['✅','Shared with family','The latest changes have been shared successfully.'],
  ['📴','Offline','Changes remain on this device. Reopen it when internet access returns.'],
@@ -10660,7 +10660,7 @@ p28Lessons.splice(0,p28Lessons.length,
  {icon:'📋',title:'Record Today’s Activities',short:'Use Daily Review even when there is no child request.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="daily-review"]',details:'If you personally saw a task completed, open Daily Review and record it even when your child forgot to submit a request. Use Daily Rules Check-in to record rule observations.',where:'Open Daily Review here when you need to record an activity yourself. You do not have to wait for a request.'},
  {icon:'⭐',title:'Understand Star Changes',short:'Check how stars were earned, spent, or corrected.',tab:'history',focus:'.page-title',details:'Daily Journey and History show task awards, rule deductions, reward spending, and corrections. Completed routines group task activity without awarding extra stars.',where:'History & Reports shows recorded star changes. You can filter records to find the reason for an award, deduction, or correction.'},
  {icon:'🎁',title:'Manage Rewards and Vouchers',short:'Know the difference between a reward request and using a voucher.',tab:'p61-review-center',focus:'[data-p61-action="review-page"][data-id="requests"]',details:'Approving a reward request and marking a voucher Used are two different actions. Check its star cost, any requirements, and whether the reward was actually delivered.',where:'Start with Review Requests to check a reward request. Manage Activities → Rewards is where the rewards themselves are created.'},
- {icon:'☁️',title:'Check Family Sync',short:'See whether this device’s changes were shared.',tab:'dashboard',focus:'.pc-sync-card',details:'Changes are saved on this device immediately. Automatic sharing waits about two minutes after the last change. Use Check Family Sync on Dashboard to see progress or tap Sync Now.',where:'This Check Family Sync button expands a simple sharing panel with status, a countdown when relevant, and a Sync Now button. You do not need technical settings.'},
+ {icon:'☁️',title:'Check Family Sync',short:'See whether this device’s changes were shared.',tab:'dashboard',focus:'.pc-sync-card',details:'Changes are saved on this device immediately. Automatic sharing waits about five minutes after the last change. Use Check Family Sync on Dashboard to see progress or tap Sync Now.',where:'This Check Family Sync button expands a simple sharing panel with status, a countdown when relevant, and a Sync Now button. You do not need technical settings.'},
  {icon:'🔒',title:'Finish Safely',short:'Check sharing status and lock Guardian Mode.',tab:'dashboard',focus:'.guardian-heading',details:'After reviewing or recording activities, check whether changes are waiting to share. Use Sync Now if you need to close the browser immediately, then lock Guardian Mode.',where:'The Guardian Dashboard is your starting and finishing point. Use the lock control when your session is complete.'},
  {icon:'📖',title:'Create a Task',short:'Choose the name, star value, frequency, and visibility.',tab:'manage',subtab:'tasks',focus:'[data-p5a-action="new-task"][data-type="habit"]',details:'Open Manage Activities → Tasks → Add Task. Choose a simple name and task type, set the stars and award frequency, review visibility, then save.',where:'This Add Task button opens the task editor. It will show extra fields only for the award frequency you choose.'},
  {icon:'📋',title:'Create a Checklist Routine',short:'A routine groups existing tasks into steps.',tab:'manage',subtab:'routines',focus:'[data-p5a-action="new-task"][data-type="checklist"]',details:'To create a routine, open Manage Activities → Routines → New Routine. Give it a name, link the tasks that make up its steps, then save. Stars are earned through the individual tasks.',where:'This New Routine button opens the routine editor. Link the individual tasks that should be part of the checklist.'},
@@ -10676,7 +10676,7 @@ p28Faqs.splice(0,p28Faqs.length,
  ['How do I create a checklist routine?','Open Manage Activities → Routines → New Routine. Link individual tasks as its steps; each task keeps its own star settings.'],
  ['How do I create a rule?','Open Manage Activities → Rules → Add Rule. Add a clear expectation, optional deduction, and save.'],
  ['How do I create a reward?','Open Manage Activities → Rewards → Create Reward. Choose its name, type, price, schedule, limits, and any requirements.'],
- ['Why has progress not been shared yet?','Progress saves on this device immediately. Automatic sharing starts about two minutes after the last edit (ten-minute maximum while editing continues). On the Guardian Dashboard, expand Check Family Sync and tap Sync Now to share sooner.'],
+ ['Why has progress not been shared yet?','Progress saves on this device immediately. Automatic sharing starts about five minutes after the last edit (twenty-minute maximum while editing continues). On the Guardian Dashboard, expand Check Family Sync and tap Sync Now to share sooner.'],
  ['What does Waiting for Owner mean?','Changes from two devices need the family owner to review them. Your progress stays saved here. Ask the owner to review; you do not need to change technical settings.'],
  ['What is No Task Today / Excused?','It means an activity was not expected that day. It is not a completion and does not award stars.'],
  ['Why do routines show earned stars?','Routine summaries show stars already awarded for completed steps. The garden does not award those stars a second time.'],
@@ -10719,7 +10719,7 @@ function p30SyncState(){const c=state.p8Cloud||{},p=state.p17||{},m=p28ReadPendi
  if(status==='shared')return {icon:'☁️',title:'Shared with family',message:p.lastSuccess?`Last successful sharing: ${new Date(p.lastSuccess).toLocaleString()}.`:'The latest changes are shared.',type:'shared',ready:true,wait:0};
  return {icon:'☁️',title:'Checking sharing status',message:'Select Sync Now to check this device against the family garden.',type:'unknown',ready:true,wait:0};
 }
-function p30SyncPanelHtml(){const v=p30SyncState(),isOwner=p30IsOwner();return `<div class="p30-sync-panel" id="p30-dashboard-sync-panel" role="region" aria-label="Family sharing status"><div class="p30-sync-status"><span class="p30-sync-emoji" aria-hidden="true">${v.icon}</span><div><strong data-p30-state-title>${esc(v.title)}</strong><p data-p30-state-message>${esc(v.message)}</p></div></div><p class="p30-sync-explainer">Progress saves on this device immediately. Automatic sharing waits two minutes after the last change, or up to ten minutes during continuous editing.</p><div class="p30-sync-actions"><button class="btn btn-primary" type="button" data-p30-action="sync-now" ${!v.ready||p30SyncBusy?'disabled':''}>${p30SyncBusy?'Sharing…':'☁️ Sync Now'}</button>${isOwner?'<button class="btn btn-soft" type="button" data-p30-action="owner-sync">Advanced Family Sync</button>':''}</div>${p30SyncResult?`<p class="p30-sync-result" role="status">${esc(p30SyncResult)}</p>`:''}${!isOwner?'<p class="p30-sync-soft-note">If your changes need owner review, ask the family owner. You don’t need to manage any technical settings.</p>':''}</div>`;}
+function p30SyncPanelHtml(){const v=p30SyncState(),isOwner=p30IsOwner();return `<div class="p30-sync-panel" id="p30-dashboard-sync-panel" role="region" aria-label="Family sharing status"><div class="p30-sync-status"><span class="p30-sync-emoji" aria-hidden="true">${v.icon}</span><div><strong data-p30-state-title>${esc(v.title)}</strong><p data-p30-state-message>${esc(v.message)}</p></div></div><p class="p30-sync-explainer">Progress saves on this device immediately. Automatic sharing waits five minutes after the last change, or up to twenty minutes during continuous editing.</p><div class="p30-sync-actions"><button class="btn btn-primary" type="button" data-p30-action="sync-now" ${!v.ready||p30SyncBusy?'disabled':''}>${p30SyncBusy?'Sharing…':'☁️ Sync Now'}</button>${isOwner?'<button class="btn btn-soft" type="button" data-p30-action="owner-sync">Advanced Family Sync</button>':''}</div>${p30SyncResult?`<p class="p30-sync-result" role="status">${esc(p30SyncResult)}</p>`:''}${!isOwner?'<p class="p30-sync-soft-note">If your changes need owner review, ask the family owner. You don’t need to manage any technical settings.</p>':''}</div>`;}
 guardian=function(){
  if(state.view==='guardian'&&safeGuardian()&&state.guardianTab==='p8-cloud'&&!p30IsOwner())return shell(`<section class="p28-help-top"><div><p class="eyebrow">Guardian · Sharing status</p><h1 class="page-title">☁️ Check Family Sync</h1><p class="lead">See whether your changes have reached the family garden.</p></div><button class="btn btn-plain" type="button" data-p30-action="back-dashboard">← Back to Dashboard</button></section><section class="panel">${p30SyncPanelHtml()}</section>`,true);
  const html=p30EarlierGuardian();if(state.view!=='guardian'||!safeGuardian())return html;
@@ -10787,7 +10787,7 @@ const p31LessonsNew=[
   'If a voucher was already used outside the app, use Mark Voucher as Used to record the real use and close the ticket. Do not record it as used before the child receives the reward.'
  ],where:'This Manage Vouchers list contains issued tickets. Select Manage on the appropriate ticket. From its detail page you can fulfill an item, run a timer, or record actual use.',absent:''},
  {icon:'⭐',title:'Understand Star Changes',tab:'history',focus:'#p5b-history-filter',fallbackFocus:'.page-title',details:'History & Reports shows why stars were earned, spent, deducted, or corrected. Rewards spend stars when a voucher is claimed—not when that same voucher is later marked used. A completed routine summarizes stars already earned by its tasks without adding them again.',where:'Use the History & Reports filters to find a particular task award, rule award, reward purchase, deduction, or correction.'},
- {icon:'☁️',title:'Check Family Sync',tab:'dashboard',focus:'.pc-sync-card',fallbackFocus:'.quick-actions',details:'Changes are saved on the current device immediately. The garden normally waits about two quiet minutes to share them, or up to ten minutes while edits continue. You can check sharing progress or tap Sync Now from the Dashboard.',where:'Select Check Family Sync to open the sharing status and countdown. Use Sync Now if you want to share pending changes sooner.'},
+ {icon:'☁️',title:'Check Family Sync',tab:'dashboard',focus:'.pc-sync-card',fallbackFocus:'.quick-actions',details:'Changes are saved on the current device immediately. The garden normally waits about five quiet minutes to share them, or up to twenty minutes while edits continue. You can check sharing progress or tap Sync Now from the Dashboard.',where:'Select Check Family Sync to open the sharing status and countdown. Use Sync Now if you want to share pending changes sooner.'},
  {icon:'🔒',title:'Finish Safely',tab:'dashboard',focus:'.topbar [data-action="lock"]',fallbackFocus:'.topbar',details:'Before leaving, check the Dashboard’s Family Sync status. If changes are waiting and you need to close the browser, select Sync Now and check the result. Then select Lock to return to Child Mode.',where:'The Lock button in the top-right header closes Guardian Mode when you are finished.'}
 ];
 p28Lessons.splice(0,p28Lessons.length,...p31LessonsNew);
@@ -14770,8 +14770,8 @@ function p49InventoryPanel(){
  <div class="p49-recovery-list">${all.filter(s=>s.archived).slice(0,12).map(m=>`<div class="p49-recovery-row"><span>Revision ${money(m.revision)} · ${Number(m.chunks||0)} chunks</span><strong>${p49InventoryEligible(m)?'Eligible for individual review':'Protected / not eligible'}</strong></div>`).join('')}</div>
  ${readiness}<p class="p2-muted">To reclaim storage, archive an older owner-created revision in Snapshot History, then use its individual Delete action only after checking other family devices and saving its backup. No automatic mass deletion is performed.</p>`:
  `<p class="p2-muted">Scan live snapshot manifests and pending proposal references before considering permanent deletion. This does not modify cloud data.</p>`;
- return `<section class="panel p49-recovery-panel"><div class="panel-head"><div><p class="eyebrow">Owner · recovery management</p><h3>☁️ Family Storage & Snapshot Safety</h3></div></div>${body}${state.p49.inventoryError?`<p class="p49-error" role="alert">${esc(state.p49.inventoryError)}</p>`:''}
- <div class="p2-actions"><button class="btn btn-soft" data-p49-action="inventory-scan" ${state.p49.inventoryLoading?'disabled':''}>${state.p49.inventoryLoading?'Checking cloud…':scan?'↻ Recheck Cloud Inventory':'🔎 Inspect Cloud Storage'}</button></div></section>`;
+ return `<section class="panel p49-recovery-panel"><div class="panel-head"><div><p class="eyebrow">Owner · recovery management</p><h3>☁️ Firestore Snapshots & Recovery Safety</h3></div></div>${body}${state.p49.inventoryError?`<p class="p49-error" role="alert">${esc(state.p49.inventoryError)}</p>`:''}
+ <div class="p2-actions"><button class="btn btn-soft" data-p49-action="inventory-scan" ${state.p49.inventoryLoading?'disabled':''}>${state.p49.inventoryLoading?'Checking cloud…':scan?'↻ Recheck Cloud Inventory':'🔎 Inspect Firestore Snapshots'}</button></div></section>`;
 }
 // The existing one-by-one hard delete is retained but must pass a live
 // dependency scan, a 10-snapshot recovery floor, and device awareness gate.
@@ -15300,8 +15300,8 @@ p49ScanInventory=async function(){
  try{const result=await p51PreviousSnapshotScan();state.p51.storageNote='';return result;}
  catch(e){const code=String(e?.code||'').toLowerCase(),msg=String(e?.message||e);
   if(code.includes('permission-denied')||/missing or insufficient permissions/i.test(msg)){
-   state.p49.inventory=null;state.p51.storageNote='Cloud inventory access was denied. This may require owner account access and Firestore rules permitting the snapshot/proposal LIST operations. Existing Family Sync can work while this separate inventory query is denied. No data was deleted; hard-delete controls remain blocked.';
-   throw Error('Cloud inventory permission denied. Your family data is unchanged. Review the owner account and Firestore read rules; do not make the database public.');
+   state.p49.inventory=null;state.p51.storageNote='Firestore inventory was denied. The additional snapshots/proposals LIST queries may require owner access or different Firestore get/list rules. Existing Family Sync can work while this separate inventory query is denied. No data was deleted; hard-delete controls remain blocked.';
+   throw Error('Firestore snapshot inventory permission denied. Your family data is unchanged. Run Firestore Access Check to find which query was denied; do not make your database public.');
   }
   state.p51.storageNote='';throw e;
  }
@@ -15380,6 +15380,164 @@ const P51_STYLE=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P51_BUILD}">${P51_STYLE}</style>`);
 /* ===== End Phase 6G.4 ===== */
+
+
+/* ===== Phase 6F.2 — Firestore-only Sync Stabilization =====
+   This patch does NOT use Firebase Storage, alter Firestore security rules,
+   delete any snapshot, or modify the star ledger. Automatic publishing now
+   follows the five-minute quiet / twenty-minute continuous-edit cap above.
+*/
+const P52_BUILD='mlsg-phase-6f2-firestore-sync-stabilization-20261119';
+state.p52={checking:false,access:null,healthBusy:false,health:null,stage:'',lastInventoryFailure:null};
+function p52PermissionError(error){
+ const code=String(error?.code||'').toLowerCase(),msg=String(error?.message||error||'');
+ return code.includes('permission-denied')||/missing or insufficient permissions|permission.denied/i.test(msg);
+}
+function p52StageLabel(stage){return ({
+ 'head':'Reading the current revision pointer',
+ 'manifest':'Reading the published snapshot manifest',
+ 'chunks':'Reading current snapshot chunks',
+ 'snapshots':'Listing snapshot manifests',
+ 'proposals':'Listing proposal metadata'
+ })[stage]||stage;}
+function p52FailureLabel(stage,error){
+ const denied=p52PermissionError(error),action=p52StageLabel(stage);
+ return denied?`${action} was denied by Cloud Firestore security rules. This is a Firestore database operation, NOT Firebase Storage. Existing sync can still work if its individual reads are permitted. Cleanup stays disabled.`:
+ `${action} failed: ${String(error?.message||error)}. No changes were made.`;
+}
+function p52StepStatus(s){return s?.ok?'Readable':s?.denied?'Permission denied':s?.skipped?'Not checked':s?.error?'Failed':'Not checked';}
+// A read-only operator-friendly check. It never publishes, archives, or deletes.
+async function p52CheckAccess(){
+ if(!p14OwnerVerified())throw Error('Sign in as the verified family owner and unlock Guardian Mode first.');
+ if(!navigator.onLine)throw Error('Internet access is required for a live Firestore permission check.');
+ const family=p8FamilyRef(),out={checkedAt:Date.now(),steps:{},projectId:String(state.p8Cloud?.config?.projectId||''),revision:null};
+ let head=null;
+ async function attempt(step,fn){try{const result=await fn();out.steps[step]={ok:true};return result;}
+  catch(e){out.steps[step]={ok:false,denied:p52PermissionError(e),error:String(e?.message||e).slice(0,240)};return null;}}
+ const doc=await attempt('head',()=>p8CloudSyncDoc().get({source:'server'}));
+ if(doc?.exists){head=doc.data();out.revision=Number(head?.revision||0);}
+ else if(doc){out.steps.head={ok:false,error:'No published revision was found.'};}
+ if(head?.snapshotId){
+  const ref=family.collection('snapshots').doc(head.snapshotId);
+  await attempt('manifest',()=>ref.get({source:'server'}));
+  // This query matches the existing snapshot-fetch path; it is not Storage.
+  await attempt('chunks',()=>ref.collection('chunks').get({source:'server'}));
+ }else{out.steps.manifest={skipped:true};out.steps.chunks={skipped:true};}
+ await attempt('snapshots',()=>family.collection('snapshots').orderBy('revision','desc').limit(1).get({source:'server'}));
+ await attempt('proposals',()=>family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId()).limit(1).get({source:'server'}));
+ state.p52.access=out;
+ return out;
+}
+// Keep normal owner-only hard-deletion safeguards, but identify the exact
+// Firestore operation that blocks the snapshot inventory.
+const p52EarlierInventory=p49ScanInventory;
+p49ScanInventory=async function(){
+ state.p52.lastInventoryFailure=null;
+ let stage='head';
+ if(!p14OwnerVerified())throw Error('Only the verified owner can inspect the Firestore snapshot inventory.');
+ if(!navigator.onLine)throw Error('Connect to the internet before inspecting Firestore snapshots.');
+ try{
+  const family=p8FamilyRef();
+  const headSnap=await p8CloudSyncDoc().get({source:'server'});
+  if(!headSnap.exists)throw Error('No published family revision exists.');
+  const head=headSnap.data(),all=[];let cursor=null;
+  stage='snapshots';
+  for(let round=0;round<10;round++){
+   let query=family.collection('snapshots').orderBy('revision','desc').limit(50);
+   if(cursor)query=query.startAfter(cursor);
+   const page=await query.get({source:'server'});
+   all.push(...page.docs.map(d=>({id:d.id,...d.data()})));
+   if(page.size<50)break;
+   cursor=page.docs[page.docs.length-1];
+   if(round===9)throw Error('More than 500 snapshots found; an inventory safety review is required.');
+  }
+  stage='proposals';
+  const dependencies=new Set();let pcursor=null;
+  for(let round=0;round<10;round++){
+   let q=family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId()).limit(50);
+   if(pcursor)q=q.startAfter(pcursor);
+   const page=await q.get({source:'server'});
+   for(const doc of page.docs){const p=doc.data();if(p.status==='pending')for(const rev of [p.baseRevision,p.remoteRevision]){
+    const n=Number(rev);if(Number.isSafeInteger(n)&&n>0)dependencies.add(n);
+   }}
+   if(page.size<50)break;
+   pcursor=page.docs[page.docs.length-1];
+   if(round===9)throw Error('More than 500 proposals found; cleanup requires a separate review.');
+  }
+  stage='head';
+  if(!all.some(s=>s.id===head.snapshotId))throw Error('The current published revision is missing from snapshot history. Cleanup is blocked.');
+  state.p49.readiness=null;state.p49.measure=null;
+  state.p49.inventory={snapshots:all.sort((a,b)=>Number(b.revision)-Number(a.revision)),headId:head.snapshotId,headRevision:Number(head.revision||0),dependencies:[...dependencies],loadedAt:Date.now()};
+  state.p51.storageNote='';
+  return state.p49.inventory;
+ }catch(e){
+  // Never preserve a stale inventory after permission or connectivity failures.
+  state.p49.inventory=null;state.p49.readiness=null;state.p49.measure=null;
+  state.p52.lastInventoryFailure={stage,denied:p52PermissionError(e),at:Date.now()};
+  state.p51.storageNote=p52FailureLabel(stage,e);
+  throw Error(p52FailureLabel(stage,e));
+ }
+};
+async function p52CheckHealth(){
+ if(!navigator.onLine)throw Error('This device is offline. Local progress is still saved here.');
+ const baseline=p8GetBaseline(),data=await getBackupData(),hash=await p8LocalHash(data);
+ const head=await p8CloudSyncDoc().get({source:'server'});
+ if(!head.exists)throw Error('No published family garden found on Cloud Firestore.');
+ const remoteRevision=Number(head.data()?.revision||0),localRevision=Number(baseline?.revision||0);
+ const dirty=baseline?hash!==baseline.hash:null;
+ const gap=remoteRevision>localRevision;
+ const pending=p28ReadPending(),last=state.p17?.lastSuccess||null;
+ const report={checkedAt:Date.now(),remoteRevision,localRevision,dirty,remoteAhead:gap,
+  elapsed:pending?Math.max(0,p28SyncDue(pending)-Date.now()):0,hasBaseline:!!baseline,last};
+ state.p52.health=report;return report;
+}
+function p52AccessPanel(){
+ const a=state.p52.access,h=state.p52.health;
+ const rows=a?['head','manifest','chunks','snapshots','proposals'].map(k=>{
+  const value=a.steps?.[k]||{},status=p52StepStatus(value);
+  return `<div class="p52-check-row"><span>${esc(p52StageLabel(k))}</span><span class="${value.ok?'ok':value.denied?'error':'neutral'}">${esc(status)}</span></div>`;
+ }).join(''):'';
+ const health=h?`<div class="p52-health"><strong>Current Cloud Firestore revision: ${money(h.remoteRevision)}</strong><p>Last synced on this device: ${h.hasBaseline?'Revision '+money(h.localRevision):'No verified baseline'}</p><p>Local changes: ${h.dirty===null?'Unknown (no baseline)':h.dirty?'Awaiting sharing or review':'No changes since the device baseline'}</p><p>${h.remoteAhead?'A newer cloud revision exists. Conflict-aware Sync Now will compare changes.':'The cloud revision is not ahead of this device baseline.'}</p>${h.elapsed>0?`<p>Next automatic attempt in about ${esc(p28WaitDescription(h.elapsed))}.</p>`:''}</div>`:'';
+ return `<section class="p52-panel" aria-label="Cloud Firestore diagnostics"><div class="p52-head"><div><strong>☁️ Cloud Firestore diagnostics</strong><p>Family Sync uses <strong>Cloud Firestore</strong>, not Firebase Storage. Reading snapshot history requires more permissions than reading the current published revision. This tool is read-only.</p></div></div><div class="p52-actions"><button class="btn btn-soft btn-small" data-p52-action="access" ${state.p52.checking?'disabled':''}>${state.p52.checking?'Checking…':'Check Firestore Access'}</button><button class="btn btn-plain btn-small" data-p52-action="health" ${state.p52.healthBusy?'disabled':''}>${state.p52.healthBusy?'Checking…':'Check This Device’s Sync Health'}</button></div>${rows?`<div class="p52-checks">${rows}</div>`:''}${a?.steps?.snapshots?.denied||a?.steps?.proposals?.denied?'<p class="p52-caution">Full inventory is not authorized. Existing sync may still be functional, but no archived revisions can be marked safe for permanent deletion.</p>':''}${health}${state.p52.accessError?`<p class="p49-error" role="alert">${esc(state.p52.accessError)}</p>`:''}${state.p52.healthError?`<p class="p49-error" role="alert">${esc(state.p52.healthError)}</p>`:''}<p class="p52-caption">This never uploads a snapshot. A complete live inventory and recovery checks remain necessary before individual permanent deletion.</p></section>`;
+}
+const p52PriorCloudPage=p8CloudPage;
+p8CloudPage=function(){
+ const root=document.createElement('div');root.innerHTML=p52PriorCloudPage();
+ const panel=root.querySelector('.p49-recovery-panel');
+ if(panel){const heading=panel.querySelector('.panel-head');const help=document.createElement('div');help.innerHTML=p52AccessPanel();
+  (heading||panel.firstChild)?.after(help.firstElementChild);
+ }
+ return root.innerHTML;
+};
+app.addEventListener('click',event=>{
+ const button=event.target.closest('[data-p52-action]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(button.dataset.p52Action==='access'){
+  if(state.p52.checking)return;state.p52.checking=true;state.p52.accessError='';state.p52.access=null;render();
+  p52CheckAccess().catch(e=>{state.p52.accessError=String(e?.message||e);}).finally(()=>{state.p52.checking=false;render();});
+ }else if(button.dataset.p52Action==='health'){
+  if(state.p52.healthBusy)return;state.p52.healthBusy=true;state.p52.healthError='';render();
+  p52CheckHealth().catch(e=>{state.p52.healthError=p52FailureLabel('head',e);}).finally(()=>{state.p52.healthBusy=false;render();});
+ }
+},true);
+const P52_STYLES=String.raw`
+#app .p52-panel{margin:17px 0 20px;padding:17px;border:1px solid #e9d5e3;background:#fffbfd;border-radius:18px;display:grid;gap:12px}
+#app .p52-head p{color:#876d7f;font-size:.86rem;line-height:1.55;margin:5px 0 0}
+#app .p52-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#app .p52-actions>.btn{min-height:43px}
+#app .p52-checks{border:1px solid #ead9e4;border-radius:13px;overflow:hidden;background:white}
+#app .p52-check-row{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:11px 13px;font-size:.85rem;border-top:1px solid #f2e8ee}
+#app .p52-check-row:first-child{border:0}
+#app .p52-check-row>span:last-child{text-align:right;white-space:nowrap;font-weight:750}
+#app .p52-check-row .ok{color:#40734e}#app .p52-check-row .error{color:#a64d61}#app .p52-check-row .neutral{color:#897481}
+#app .p52-health{padding:13px 15px;background:#f5f3fb;border-radius:12px}
+#app .p52-health p{margin:5px 0 0;font-size:.84rem;line-height:1.45}
+#app .p52-caution{padding:12px 14px;background:#fff1f2;border:1px solid #ecd8dc;border-radius:12px;color:#914e67;font-size:.84rem}
+#app .p52-caption{font-size:.79rem;color:#91778b;margin:0}
+@media(max-width:560px){#app .p52-actions{display:grid;grid-template-columns:1fr}#app .p52-actions>.btn{width:100%}#app .p52-check-row{align-items:flex-start;flex-wrap:wrap}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P52_BUILD}">${P52_STYLES}</style>`);
+/* ===== End Phase 6F.2 ===== */
 
 </script>
 </body>
