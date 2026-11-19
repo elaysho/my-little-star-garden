@@ -671,7 +671,7 @@ async function p2SaveTask(form){
  await put('tasks',record);await refresh();state.guardianTab='manage';state.p2ManageTab='tasks';notice(`Task “${record.name}” saved.`);
 }
 async function p2SaveRule(form){const v=Object.fromEntries(new FormData(form));const name=String(v.name||'').trim().slice(0,90),expected=String(v.expected||'').trim().slice(0,400);if(!name||!expected)throw new Error('Add a rule name and expected behavior.');const stars=Number(v.stars),dailyMax=Number(v.dailyMax);if(!Number.isSafeInteger(stars)||stars<1||stars>p27RuleCap()||!Number.isSafeInteger(dailyMax)||dailyMax<0||dailyMax>10000)throw new Error('Check the deduction values and daily limit.');const old=p2Rule(v.editId);const row={id:old?.id||uniqueId(),name,expected,why:String(v.why||'').trim().slice(0,400),reminder:String(v.reminder||'').trim().slice(0,400),consequence:['reminder','repair','deduction'].includes(v.consequence)?v.consequence:'reminder',stars,dailyMax,earnStars:Number(v.earnStars||0),repair:String(v.repair||'').trim().slice(0,400),archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};await put('rules',row);await refresh();state.guardianTab='manage';state.p2ManageTab='rules';notice(`Rule “${row.name}” saved.`);}
-async function p2SaveChallenge(form){const v=Object.fromEntries(new FormData(form));const task=p2Task(v.taskId);if(!task)throw new Error('Choose an existing task.');const name=String(v.name||'').trim().slice(0,90);const targetCount=Number(v.targetCount),stars=Number(v.stars);if(!name||!Number.isSafeInteger(targetCount)||targetCount<1||targetCount>100||!Number.isSafeInteger(stars)||stars<0||stars>500)throw new Error('Check your challenge settings.');const old=state.p2Challenges.find(c=>c.id===v.editId);const row={id:old?.id||uniqueId(),name,taskId:task.id,targetCount,stars,period:v.period==='all'?'all':'weekly',distinctDays:v.distinctDays==='on',archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString()};await put('challenges',row);await refresh();state.guardianTab='manage';state.p2ManageTab='challenges';notice('Challenge saved.');}
+async function p2SaveChallenge(form){const v=Object.fromEntries(new FormData(form));const task=p2Task(v.taskId);if(!task)throw new Error('Choose an existing task.');const name=String(v.name||'').trim().slice(0,90);const targetCount=Number(v.targetCount),stars=Number(v.stars);if(!name||!Number.isSafeInteger(targetCount)||targetCount<1||targetCount>100||!Number.isSafeInteger(stars)||stars<0)throw new Error('Check your challenge settings.');const old=state.p2Challenges.find(c=>c.id===v.editId);const row={id:old?.id||uniqueId(),name,taskId:task.id,targetCount,stars,period:v.period==='all'?'all':'weekly',distinctDays:v.distinctDays==='on',archived:old?.archived||false,createdAt:old?.createdAt||new Date().toISOString()};await put('challenges',row);await refresh();state.guardianTab='manage';state.p2ManageTab='challenges';notice('Challenge saved.');}
 async function p2SaveCompletion(task,date,slot,stepIndex,support,note,noStars=false){
  if(!task||!p2ValidDate(date))throw new Error('Select an existing task and a valid date.');
  const dateToday=p2Date();if(date>dateToday)throw new Error('You cannot record a future completion.');
@@ -3442,7 +3442,7 @@ p2ChallengeEditor=function(){const ch=state.p2Challenges.find(c=>c.id===state.p2
 async function p64SaveChallenge(form){if(!safeGuardian())throw new Error('Guardian Mode must be unlocked.');const fd=new FormData(form),raw=[...new Set(fd.getAll('linkedItems').map(String))],entries=raw.map(v=>{const ix=v.indexOf(':');return {kind:v.slice(0,ix),id:v.slice(ix+1)};});
  if(!entries.length)throw new Error('Select at least one task, routine, or rule.');
  if(entries.some(e=>!['task','routine','rule'].includes(e.kind)||!(e.kind==='rule'?p2Rule(e.id)&&!p2Rule(e.id).archived:p2Task(e.id)&&!p2Task(e.id).archived&&(e.kind==='routine'?(p2Task(e.id).type==='checklist'):(p2Task(e.id).type!=='checklist')))))throw new Error('One or more linked activities are unavailable.');
- const old=state.p2Challenges.find(c=>c.id===String(fd.get('editId')||'')),name=String(fd.get('name')||'').trim(),stars=Number(fd.get('stars')),targetCount=Number(fd.get('targetCount'));if(!name||name.length>90||!p4Whole(stars,0,500)||!p4Whole(targetCount,1,100))throw new Error('Check the challenge title, bonus, and target.');
+ const old=state.p2Challenges.find(c=>c.id===String(fd.get('editId')||'')),name=String(fd.get('name')||'').trim(),stars=Number(fd.get('stars')),targetCount=Number(fd.get('targetCount'));if(!name||name.length>90||!Number.isSafeInteger(stars)||stars<0||!p4Whole(targetCount,1,100))throw new Error('Check the challenge title, bonus, and target.');
  const tasks=entries.filter(e=>e.kind==='task').map(x=>x.id),first=tasks[0]||entries.find(e=>e.kind==='routine')?.id||state.p2Tasks[0]?.id||'';
  const row={...old,id:old?.id||uniqueId(),name,icon:p2Icon(String(fd.get('icon')||'🏆')),taskId:first,taskIds:tasks.length?tasks:undefined,linkedItems:entries,matchMode:fd.get('matchMode')==='any'?'any':'all',targetCount,stars,period:fd.get('period')==='all'?'all':'weekly',distinctDays:fd.has('distinctDays'),archived:old?.archived||false,createdAt:old?.createdAt||iso(),updatedAt:iso()};
  await put('challenges',row);await refresh();state.guardianTab='manage';state.p2ManageTab='challenges';state.p2ChallengeId=null;state.p64ChallengeTab='tasks';state.p64ChallengeSearch='';render();notice('🏆 Challenge saved.');
@@ -9159,7 +9159,7 @@ p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p
   }
   const history=admin.querySelector('.p19-history-section');const queue=admin.querySelector('.p19-owner-queue');
   if(history)admin.append(history);if(queue)admin.append(queue);
-  admin.querySelectorAll('.p19-owner-warning').forEach(x=>{x.textContent='Owner controls: archiving keeps recovery data. Permanent deletion is only available for your own old, archived snapshots. Do not delete revisions needed by offline devices.';});
+  admin.querySelectorAll('.p19-owner-warning').forEach(x=>{x.textContent='Owner controls: archiving keeps recovery data. Permanent deletion can be requested by the verified owner for eligible older archived family snapshots, regardless of the creating Guardian. Cloud Firestore rules still control permission. Do not delete revisions needed by offline devices.';});
   if(history){history.querySelectorAll('.p14-snapshot').forEach(card=>{
    const archive=card.querySelector('[data-p19-action="snapshot-archive"]');if(archive){archive.classList.toggle('p22-archive-danger',archive.dataset.archived!=='1');archive.setAttribute('aria-label',archive.dataset.archived==='1'?'Unarchive snapshot':'Archive snapshot');}
    const id=card.querySelector('[data-p14-action="snapshot-preview"]')?.dataset.id;const record=state.p14History.find(x=>x.id===id);
@@ -9170,7 +9170,7 @@ p8CloudPage=function(){const root=document.createElement('div');root.innerHTML=p
 };
 function p22DeleteDialog(){const id=state.p22.deleteId;if(!id)return '';const m=state.p14History.find(r=>r.id===id),eligible=p22OwnerSnapshot(m);
  if(!eligible)return p14DialogShell('Snapshot Cannot Be Deleted','It may be current, too recent, or owned by another account.','<div class="p14-dialog-body"><button class="btn btn-soft" data-p22-action="delete-cancel">Close</button></div>');
- return p14DialogShell('🗑 Permanently Delete Snapshot','This is irreversible and may prevent older offline devices from merging.',`<div class="p14-dialog-body"><p class="p22-deletion-alert">Revision ${money(m.revision)} will be permanently removed along with its stored cloud chunks. A copy will download to this browser before deletion. The shared garden's current progress will NOT be removed.</p><ul><li>This snapshot was created by your owner account.</li><li>The snapshot is already archived and is not among the three newest revisions.</li><li>Devices that have not synced for a long time may need owner recovery.</li></ul><label class="p22-confirm-label" for="p22-delete-word">Type <strong>DELETE</strong> to confirm</label><input id="p22-delete-word" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="DELETE" value="${esc(state.p22.deleteWord||'')}"><div class="actions"><button class="btn p22-delete-danger" data-p22-action="delete-confirm" ${state.p22.deleting?'disabled':''}>${state.p22.deleting?p16Spinner()+' Deleting…':'Permanently Delete Snapshot'}</button><button class="btn btn-plain" data-p22-action="delete-cancel" ${state.p22.deleting?'disabled':''}>Cancel</button></div>${state.p22.deleteError?`<p class="info error">${esc(state.p22.deleteError)}</p>`:''}</div>`).replace('data-p14-action="close-dialog"','data-p22-action="delete-cancel"');
+ return p14DialogShell('🗑 Permanently Delete Snapshot','This is irreversible and may prevent older offline devices from merging.',`<div class="p14-dialog-body"><p class="p22-deletion-alert">Revision ${money(m.revision)} will be permanently removed along with its stored cloud chunks. A copy will download to this browser before deletion. The shared garden's current progress will NOT be removed.</p><ul><li>This revision may have been created by a different Guardian; owner authorization and Firestore rules are still required.</li><li>The snapshot is already archived and is not among the three newest revisions.</li><li>Devices that have not synced for a long time may need owner recovery.</li></ul><label class="p22-confirm-label" for="p22-delete-word">Type <strong>DELETE</strong> to confirm</label><input id="p22-delete-word" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="DELETE" value="${esc(state.p22.deleteWord||'')}"><div class="actions"><button class="btn p22-delete-danger" data-p22-action="delete-confirm" ${state.p22.deleting?'disabled':''}>${state.p22.deleting?p16Spinner()+' Deleting…':'Permanently Delete Snapshot'}</button><button class="btn btn-plain" data-p22-action="delete-cancel" ${state.p22.deleting?'disabled':''}>Cancel</button></div>${state.p22.deleteError?`<p class="info error">${esc(state.p22.deleteError)}</p>`:''}</div>`).replace('data-p14-action="close-dialog"','data-p22-action="delete-cancel"');
 }
 async function p22PermanentlyDelete(id){if(!p14OwnerVerified())throw Error('Only the verified owner can delete their own archived snapshot.');
  const record=state.p14History.find(x=>x.id===id);if(!p22OwnerSnapshot(record))throw Error('Only your own old, archived snapshots can be permanently deleted.');
@@ -9178,7 +9178,7 @@ async function p22PermanentlyDelete(id){if(!p14OwnerVerified())throw Error('Only
  const family=p8FamilyRef(),head=await family.collection('sync').doc('current').get({source:'server'});
  if(!head.exists||head.data().snapshotId===id||Number(record.revision)>=Number(head.data().revision)-2)throw Error('This revision is still needed by the current cloud or recent recovery history.');
  const manifestRef=family.collection('snapshots').doc(id),manifest=await manifestRef.get({source:'server'});
- if(!manifest.exists||manifest.data().sourceUid!==state.p8Cloud.user.uid||manifest.data().archived!==true)throw Error('The snapshot is no longer eligible for deletion.');
+ if(!manifest.exists||manifest.data().archived!==true)throw Error('The snapshot is no longer eligible for deletion.');
  const proposals=await family.collection('proposals').limit(25).get({source:'server'});
  if(proposals.size>=25)throw Error('Too many proposals to safely check; resolve or archive older proposals before deleting snapshots.');
  if(proposals.docs.some(d=>d.data().status==='pending'&&[d.data().baseRevision,d.data().remoteRevision].some(v=>Number(v)===Number(record.revision))))throw Error('An unresolved Guardian proposal still depends on this revision. Review it first.');
@@ -14695,7 +14695,7 @@ function p49InventoryEligible(m){
  if(protectedIds.has(m.id)||m.id===scan.headId)return false;
  const baseline=p8GetBaseline();if(Number(baseline?.revision)===Number(m.revision))return false;
  if(scan.dependencies.includes(Number(m.revision)))return false;
- return Boolean(m.archived===true&&m.sourceUid===state.p8Cloud?.user?.uid&&Number(m.revision)<Number(scan.headRevision));
+ return Boolean(p14OwnerVerified()&&m.archived===true&&Number(m.revision)<Number(scan.headRevision));
 }
 async function p49ScanInventory(){
  if(!p14OwnerVerified())throw Error('Only the authenticated owner can inspect family snapshot cleanup.');
@@ -14768,7 +14768,7 @@ function p49InventoryPanel(){
  <button type="button" class="btn btn-soft btn-small p49-measure-btn" data-p49-action="measure-current" ${state.p49.measureBusy?'disabled':''}>${state.p49.measureBusy?'Measuring…':'Measure Latest Snapshot Size'}</button>
  <p class="p49-storage-caution">This counts snapshot documents and chunks, not Firebase's billed storage bytes. It cannot detect unsynchronized offline family devices. <strong>Never assume all older snapshots are safe just because their revision numbers are small.</strong></p>
  <div class="p49-recovery-list">${all.filter(s=>s.archived).slice(0,12).map(m=>`<div class="p49-recovery-row"><span>Revision ${money(m.revision)} · ${Number(m.chunks||0)} chunks</span><strong>${p49InventoryEligible(m)?'Eligible for individual review':'Protected / not eligible'}</strong></div>`).join('')}</div>
- ${readiness}<p class="p2-muted">To reclaim storage, archive an older owner-created revision in Snapshot History, then use its individual Delete action only after checking other family devices and saving its backup. No automatic mass deletion is performed.</p>`:
+ ${readiness}<p class="p2-muted">To reclaim storage, archive an eligible older family revision in Snapshot History, then use its individual Delete action only after checking other family devices and saving its backup. No automatic mass deletion is performed.</p>`:
  `<p class="p2-muted">Scan live snapshot manifests and pending proposal references before considering permanent deletion. This does not modify cloud data.</p>`;
  return `<section class="panel p49-recovery-panel"><div class="panel-head"><div><p class="eyebrow">Owner · recovery management</p><h3>☁️ Firestore Snapshots & Recovery Safety</h3></div></div>${body}${state.p49.inventoryError?`<p class="p49-error" role="alert">${esc(state.p49.inventoryError)}</p>`:''}
  <div class="p2-actions"><button class="btn btn-soft" data-p49-action="inventory-scan" ${state.p49.inventoryLoading?'disabled':''}>${state.p49.inventoryLoading?'Checking cloud…':scan?'↻ Recheck Cloud Inventory':'🔎 Inspect Firestore Snapshots'}</button></div></section>`;
@@ -15578,7 +15578,7 @@ function p53SnapshotReason(m,scan){
  if(Number(p8GetBaseline()?.revision)===Number(m.revision))return 'This device’s sync baseline';
  if(scan.dependencies.includes(Number(m.revision)))return 'Required by a pending proposal';
  if(!m.archived)return 'Archive first';
- if(m.sourceUid!==state.p8Cloud?.user?.uid)return 'Created by another Guardian';
+ if(m.sourceUid!==state.p8Cloud?.user?.uid&&!p14OwnerVerified())return 'Owner verification required';
  if(p49InventoryEligible(m))return 'Eligible for individual review';
  return 'Protected by cleanup safeguards';
 }
@@ -15673,11 +15673,11 @@ p22PermanentlyDelete=async function(id){
  if(!navigator.onLine)throw Error('Connect to Firestore before attempting snapshot cleanup.');
  const scan=await p49ScanInventory(),record=scan.snapshots.find(x=>x.id===id);
  if(!record||!p49InventoryEligible(record))throw Error('This snapshot is protected, unarchived, or needed for recovery. Nothing was deleted.');
- if(record.sourceUid!==state.p8Cloud?.user?.uid||record.archived!==true)throw Error('Only your own archived snapshots can be deleted.');
+ if(record.archived!==true)throw Error('Only archived and unprotected snapshots can be deleted.');
  const family=p8FamilyRef(),head=await p8CloudSyncDoc().get({source:'server'});
  if(!head.exists||head.data()?.snapshotId===id||Number(head.data()?.revision)!==scan.headRevision)throw Error('The cloud revision changed during cleanup. Please inspect again.');
  const ref=family.collection('snapshots').doc(id),manifest=await ref.get({source:'server'});
- if(!manifest.exists||!manifest.data().archived||manifest.data().sourceUid!==state.p8Cloud.user.uid||Number(manifest.data().revision)!==Number(record.revision))throw Error('The archived snapshot changed. No deletion occurred.');
+ if(!manifest.exists||!manifest.data().archived||Number(manifest.data().revision)!==Number(record.revision))throw Error('The archived snapshot changed. No deletion occurred.');
  const chunks=await ref.collection('chunks').get({source:'server'});
  if(chunks.size!==Number(manifest.data().chunks))throw Error('Snapshot data chunks are incomplete; deletion is blocked.');
  if(chunks.size>450)throw Error('Too many chunks for a safe single-browser batch. No deletion occurred.');
@@ -15751,7 +15751,7 @@ const P54_BUILD='mlsg-phase-6f2.3-bulk-snapshot-cleanup-20261119';
 state.p54={mode:'delete',selected:[],dialog:'',busy:false,error:'',progress:'',results:[],prepared:null,zipBlob:null,downloaded:false,backupAck:false,devicesAck:false,limit:15};
 function p54Scan(){const scan=state.p49.inventory;return scan&&p49InventoryAge()<=15*60*1000?scan:null;}
 function p54ArchiveEligible(m,scan=p54Scan()){
- if(!scan||!p14OwnerVerified()||!m||m.archived||m.sourceUid!==state.p8Cloud?.user?.uid)return false;
+ if(!scan||!p14OwnerVerified()||!m||m.archived)return false;
  const newest=new Set(scan.snapshots.slice(0,10).map(x=>x.id));
  const baseline=Number(p8GetBaseline()?.revision||0);
  return !newest.has(m.id)&&m.id!==scan.headId&&Number(m.revision)<Number(scan.headRevision)&&Number(m.revision)!==baseline&&!scan.dependencies.includes(Number(m.revision));
@@ -15776,7 +15776,7 @@ function p54Toolbar(){
  const label=mode==='delete'?'Archived revisions ready for safe deletion':'Older revisions available for archiving';
  const disabled=state.p54.busy?'disabled':'';
  return `<div class="p54-toolbar" aria-label="Batch snapshot management">
-  <div class="p54-toolbar-top"><div><strong>🧺 Manage multiple snapshots</strong><p>Choose revisions across history pages. Only owner-created, unprotected revisions can be selected.</p></div><span class="p54-selection-chip">${n} selected · up to ${state.p54.limit}</span></div>
+  <div class="p54-toolbar-top"><div><strong>🧺 Manage multiple snapshots</strong><p>Choose revisions across history pages. The verified owner can select unprotected revisions created by any Guardian.</p></div><span class="p54-selection-chip">${n} selected · up to ${state.p54.limit}</span></div>
   <div class="p54-mode-row"><button type="button" data-p54-action="mode" data-mode="delete" class="btn btn-small ${mode==='delete'?'btn-primary':'btn-plain'}" ${disabled}>🗑 Delete archived</button><button type="button" data-p54-action="mode" data-mode="archive" class="btn btn-small ${mode==='archive'?'btn-primary':'btn-plain'}" ${disabled}>📦 Archive old revisions</button></div>
   <div class="p54-actions"><small>${scan?`${available} ${label.toLowerCase()}`:'Inspect snapshots first to unlock eligible selections.'}</small><div><button class="btn btn-plain btn-small" type="button" data-p54-action="select-page" ${!scan||state.p54.busy||!available?'disabled':''}>Select eligible on this page</button><button class="btn btn-plain btn-small" type="button" data-p54-action="select-all" ${!scan||state.p54.busy||!available?'disabled':''}>Select up to ${state.p54.limit}</button><button class="btn btn-plain btn-small" type="button" data-p54-action="clear" ${!n||state.p54.busy?'disabled':''}>Clear</button></div></div>
   <button type="button" class="btn ${mode==='delete'?'p54-delete-button':'btn-soft'}" data-p54-action="open" ${!n||state.p54.busy?'disabled':''}>${mode==='delete'?`Review & Back Up ${n} for Deletion`:`Archive ${n} Selected Revision${n===1?'':'s'}`}</button>
@@ -15836,7 +15836,7 @@ async function p54Prepare(){
   for(let i=0;i<rows.length;i++){
    const m=rows[i];s.progress=`Reading backup ${i+1} of ${rows.length} · revision ${m.revision}`;render();
    const found=await p14SnapshotFetch(m.id);
-   if(Number(found.manifest.revision)!==Number(m.revision)||!found.manifest.archived||found.manifest.sourceUid!==state.p8Cloud.user.uid)throw Error(`Revision ${m.revision} changed during backup preparation.`);
+   if(Number(found.manifest.revision)!==Number(m.revision)||!found.manifest.archived)throw Error(`Revision ${m.revision} changed during backup preparation.`);
    const filename=`My-Little-Star-Garden-Revision-${m.revision}.json`;
    entries.push({name:filename,text:JSON.stringify(found.backup,null,2)});
    info.push({id:m.id,revision:Number(m.revision),chunks:Number(m.chunks||0),filename});
@@ -15861,7 +15861,7 @@ async function p54Archive(){
    const head=await p8CloudSyncDoc().get({source:'server'});
    if(!head.exists||head.data()?.snapshotId===m.id||Number(head.data()?.revision)!==Number(scan.headRevision))throw Error('Published revision changed; refresh and try again.');
    const ref=p8FamilyRef().collection('snapshots').doc(m.id),doc=await ref.get({source:'server'});
-   if(!doc.exists||doc.data()?.archived||doc.data()?.sourceUid!==state.p8Cloud.user.uid||Number(doc.data()?.revision)!==Number(m.revision))throw Error('Snapshot changed on server.');
+   if(!doc.exists||doc.data()?.archived||Number(doc.data()?.revision)!==Number(m.revision))throw Error('Snapshot changed on server.');
    await ref.update({archived:true,archivedAt:window.firebase.firestore.FieldValue.serverTimestamp(),archivedByUid:state.p8Cloud.user.uid});
    s.results.push({revision:m.revision,mode:'archive',ok:true});done++;
    s.selected=s.selected.filter(id=>id!==m.id);
@@ -15883,7 +15883,7 @@ async function p54Delete(){
    if(scan.headId!==prepared.headId||Number(scan.headRevision)!==Number(prepared.headRevision))throw Error('Published cloud revision changed since backup.');
    if(!p49InventoryEligible(m)||Number(m.revision)!==entry.revision||Number(m.chunks)!==entry.chunks)throw Error('Snapshot no longer passes live safety checks.');
    const ref=p8FamilyRef().collection('snapshots').doc(entry.id),doc=await ref.get({source:'server'});
-   if(!doc.exists||!doc.data()?.archived||doc.data()?.sourceUid!==state.p8Cloud.user.uid||Number(doc.data()?.revision)!==entry.revision||Number(doc.data()?.chunks)!==entry.chunks)throw Error('Manifest changed since backup was prepared.');
+   if(!doc.exists||!doc.data()?.archived||Number(doc.data()?.revision)!==entry.revision||Number(doc.data()?.chunks)!==entry.chunks)throw Error('Manifest changed since backup was prepared.');
    const head=await p8CloudSyncDoc().get({source:'server'});
    if(!head.exists||head.data()?.snapshotId!==prepared.headId||Number(head.data()?.revision)!==Number(prepared.headRevision))throw Error('Cloud revision changed during cleanup.');
    const chunks=await ref.collection('chunks').get({source:'server'});
@@ -16018,6 +16018,164 @@ const P54_CSS=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P54_BUILD}">${P54_CSS}</style>`);
 /* ===== End Phase 6F.2.3 ===== */
+
+
+/* ===== Phase 6F.2.4 — award integrity and owner recovery ===== */
+const P55_BUILD='mlsg-6f24-award-safety-owner-recovery';
+const P55_CHALLENGE_MAX=Number.MAX_SAFE_INTEGER;
+// Challenge motivation bonuses have no arbitrary 500-star limit. Integers must
+// still be safe representable numbers; avoid corrupting wallet arithmetic.
+const p55OldChallengeEditor=p2ChallengeEditor;
+p2ChallengeEditor=function(){const root=document.createElement('div');root.innerHTML=p55OldChallengeEditor();const input=root.querySelector('#p2-challenge-form [name="stars"]');if(input){input.removeAttribute('max');input.min='0';input.step='1';input.placeholder='Any whole-star bonus';input.setAttribute('aria-describedby','p55-challenge-hint');input.insertAdjacentHTML('afterend','<small id="p55-challenge-hint" class="p2-muted">Set any non-negative whole-star bonus; this does not award stars until Guardian approval.</small>');}return root.innerHTML;};
+const p55OldSaveChallenge=p64SaveChallenge;
+p64SaveChallenge=async function(form){
+ const raw=String(new FormData(form).get('stars')??'').trim(),amount=Number(raw);
+ if(!/^\d+$/.test(raw)||!Number.isSafeInteger(amount)||amount<0)throw Error('Challenge bonus must be a non-negative whole number that can be safely recorded.');
+ // Save using the existing validated workflow, with the previous per-field
+ // 500 ceiling changed only for the explicit challenge reward.
+ return p55OldSaveChallenge(form);
+};
+// The legacy editor is not the active editor, but retain a consistent limit
+// for callers that invoke the earlier save function directly.
+// ------ Award review integrity ------
+const p55OldBatchReview=p2BatchReview;
+let p55ReviewBusy=false;
+function p55SelectedAwards(form){
+ const inputs=[...form.querySelectorAll('input[name="taskIds"]:checked:not(:disabled)')];
+ const found=[];const seen=new Set();
+ for(const input of inputs){
+  const t=p2Task(input.value),rid=String(input.dataset.routineId||'');
+  if(!t)throw Error('One selected quest no longer exists. Please refresh.');
+  const key=t.id+'|'+rid;
+  if(seen.has(key))throw Error(`“${t.name}” appears checked twice in the same place. Uncheck duplicates before awarding.`);
+  seen.add(key);found.push({id:t.id,name:t.name,routineId:rid,task:t});
+ }
+ return found;
+}
+p2BatchReview=async function(form){
+ if(!form)throw Error('Review form unavailable.');
+ if(form.id!=='p2-review-form'){for(const input of form.querySelectorAll('input[name="taskIds"]')){if(input.type==='text'){input.type='checkbox';input.checked=true;}}return p55OldBatchReview(form);}
+ if(p55ReviewBusy)throw Error('An award review is already being saved.');
+ if(!safeGuardian())throw Error('Guardian Mode must be unlocked.');
+ const day=String(new FormData(form).get('date')||state.p2ReviewDate||p2Date());
+ const chosen=p55SelectedAwards(form);
+ if(!chosen.length)throw Error('Select a completed quest first.');
+ // Require a concise explicit list of exactly what the batch will record.
+ // This catches accidental checked copies of the same multi-completion quest.
+ const lines=chosen.map((x,i)=>`${i+1}. ${x.name}${x.routineId?' · '+(p2Task(x.routineId)?.name||'Routine'):' · Individual Tasks'} (+${Number(x.task.stars)||0} stars)`);
+ const total=chosen.reduce((n,x)=>n+(Number(x.task.stars)||0),0);
+ if(!await p38Confirm(`Award ${chosen.length} quest completion${chosen.length===1?'':'s'} on ${day}?\n\n${lines.join('\n')}\n\nTotal: ${total} stars.\n\nIf you intended one quest, cancel and leave only that occurrence checked.`))throw Error('Award canceled. Nothing was recorded.');
+ if(!document.contains(form))throw Error('Daily Star Review was closed before approval. Nothing was saved.');
+ if(chosen.map(x=>x.id+'|'+x.routineId).join('~')!==p55SelectedAwards(form).map(x=>x.id+'|'+x.routineId).join('~'))throw Error('Selection changed during confirmation. Please review again.');
+ p55ReviewBusy=true;
+ try{return await p55OldBatchReview(form);}finally{p55ReviewBusy=false;}
+};
+// Children may request a single quest; never allow that approval to create
+// extra completions silently. Existing p31Approve already saves only targetId.
+const p55OldApprove=p31Approve;
+let p55ChildRequestBusy=false;
+p31Approve=async function(req){
+ if(p55ChildRequestBusy)throw Error('Another child request is being reviewed.');
+ if(!req?.id||req.status!=='pending')throw Error('This request has already been resolved.');
+ const live=(await get('records',req.key||`guardian-request:${req.id}`));
+ if(live && live.status!=='pending')throw Error('This request was already reviewed on this device.');
+ p55ChildRequestBusy=true;
+ try{return await p55OldApprove(live||req);}finally{p55ChildRequestBusy=false;}
+};
+// ------ Reward duplication ------
+const p55OldRewardManager=p4RewardManager;
+p4RewardManager=function(){const root=document.createElement('div');root.innerHTML=p55OldRewardManager();
+ root.querySelectorAll('.p2-list article.p2-card').forEach(card=>{
+  const edit=card.querySelector('[data-p4-action="reward-edit"]');if(!edit||card.querySelector('[data-p55-action="reward-duplicate"]'))return;
+  const r=p4Reward(edit.dataset.id);if(!r)return;
+  const duplicate=document.createElement('button');duplicate.type='button';duplicate.className='btn btn-soft p2-mini p55-reward-duplicate';duplicate.dataset.p55Action='reward-duplicate';duplicate.dataset.id=r.id;duplicate.textContent='⧉ Duplicate';duplicate.setAttribute('aria-label',`Duplicate reward ${r.name}`);
+  const controls=card.querySelector('.p42-reward-actions,.p39-reward-controls,.p2-task-actions')||edit.parentElement;
+  const archive=controls.querySelector('[data-p4-action="reward-archive"]');
+  if(archive)archive.before(duplicate);else controls.append(duplicate);
+ });return root.innerHTML;
+};
+app.addEventListener('click',async event=>{const button=event.target.closest('[data-p55-action="reward-duplicate"]');if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(!safeGuardian()){notice('Unlock Guardian Mode first.',true);return;}
+ if(button.disabled)return;button.disabled=true;
+ try{const original=p4Reward(button.dataset.id);if(!original)throw Error('The original reward is no longer available.');
+  const at=iso(),row={...structuredClone(original),id:uniqueId(),name:('Copy of '+original.name).slice(0,90),draft:true,archived:false,hidden:true,paused:false,flashSale:null,createdAt:at,updatedAt:at};
+  // Existing vouchers always retain their original rewardId; duplicate only
+  // the editable reward definition, never a voucher or star transaction.
+  delete row.claimedAt;delete row.redeemedAt;delete row.lastClaimedAt;
+  await put('rewards',row);await refresh();state.p4SelectedRewardId=row.id;state.guardianTab='reward-editor';render();notice('Draft copy created. Review its details before publishing.');
+ }catch(e){button.disabled=false;notice(e?.message||'Could not duplicate this reward.',true);}
+},true);
+// ------ Guardian timer navigation: use the standard shell for sidebar AND header ------
+const p55OldRender=render;
+render=function(){p55OldRender();
+ if(state.view!=='guardian'||!safeGuardian()||state.guardianTab!=='p47-timer')return;
+ const ref=document.createElement('div');ref.innerHTML=p19GuardianDecorate(shell('<section></section>',true));
+ const main=app.querySelector('main'),sidebar=app.querySelector('.sidebar');
+ const top=ref.querySelector('main > header.topbar'),nav=ref.querySelector('.sidebar nav.nav');
+ if(main&&top){const old=main.querySelector(':scope > header.topbar');if(old)old.replaceWith(top);else main.prepend(top);}
+ if(sidebar&&nav){const dashboard=nav.querySelector('[data-guardian-tab="dashboard"] span:last-child');if(dashboard)dashboard.textContent='Dashboard';const current=sidebar.querySelector('nav.nav');if(current)current.replaceWith(nav);else sidebar.append(nav);
+  if(!nav.querySelector('[data-guardian-tab="p47-timer"]')){const b=document.createElement('button');b.type='button';b.className='nav-btn active';b.dataset.guardianTab='p47-timer';b.setAttribute('aria-current','page');b.innerHTML='<span class="nav-icon" aria-hidden="true">⏳</span><span>Fullscreen Timer</span>';nav.querySelector('[data-guardian-tab="settings"]')?.before(b)||nav.append(b);}
+  nav.querySelectorAll('button[data-guardian-tab]').forEach(b=>{const active=b.dataset.guardianTab==='p47-timer';b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
+ }
+};
+// ------ Owner snapshot cleanup across authors ------
+// The owner is permitted to select snapshots irrespective of their author,
+// but Firestore rules remain authoritative and may deny writes.
+p22OwnerSnapshot=function(m){return !!(p14OwnerVerified()&&m&&m.archived&&p49InventoryEligible(m));};
+function p55LatestCloudPlan(submission,current){
+ const stores=DATA_STORES,combined={},conflicts=[];
+ for(const store of stores){
+  if(!Array.isArray(submission[store])||!Array.isArray(current[store]))throw Error('Submitted data and published data use different storage schemas.');
+  const key=store==='records'?'key':'id';
+  const device=new Map(submission[store].map(v=>[v[key],v]));
+  const cloud=new Map(current[store].map(v=>[v[key],v]));
+  const same=[];
+  for(const id of new Set([...device.keys(),...cloud.keys()])){
+   const dv=device.get(id),cv=cloud.get(id);
+   if(p15Same(dv,cv)){if(cv!==undefined)same.push(cv);}
+   else conflicts.push({key:store+'|'+id,store,id,base:cv??null,local:dv??null,cloud:cv??null});
+  }
+  combined[store]=same;
+ }
+ if(conflicts.length>250)throw Error('More than 250 record differences need manual owner decisions. Keep both backups and review this larger recovery separately.');
+ return {base:current,local:submission,cloud:current,combined,conflicts,auto:[],sensitive:[],localChanges:p15Changes(current,submission),cloudChanges:[],latestOnly:true};
+}
+const p55OldOpenProposal=p17OpenProposal;
+p17OpenProposal=async function(id){
+ await p55OldOpenProposal(id);
+ const problem=state.p17.review?.error||'';
+ // Fallback ONLY if an archived ancestor is genuinely missing, never for
+ // permission denied, hash mismatch, or failed integrity validation.
+ if(!/Cloud revision \d+ is not available in snapshot history/i.test(problem))return;
+ state.p17.review={loading:true,id};state.p17.preview=null;state.p17.decisions={};render();
+ try{
+  const proposal=await p17FetchProposal(id),remote=await p8CloudFetchSnapshot();
+  if(!remote.snapshot)throw Error('No published cloud garden is available.');
+  if(remote.snapshot.data.records.some(r=>r.kind==='p17-proposal-merge'&&r.proposalId===id))throw Error('This proposal has already been published.');
+  const plan=p55LatestCloudPlan(proposal.data,remote.snapshot.data);
+  state.p17.review={id,proposal,remote,plan,remoteHash:await p8LocalHash(remote.snapshot.data),errors:'',loading:false,latestCloudRecovery:true};
+ }catch(error){state.p17.review={id,error:String(error.message||error)};}
+ render();
+};
+const p55OldReviewHtml=p17ReviewHtml;
+p17ReviewHtml=function(){const html=p55OldReviewHtml();if(!state.p17.review?.latestCloudRecovery)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const safe=root.querySelector('.p14-safe-note');
+ if(safe){const warning=document.createElement('p');warning.className='p55-manual-recovery';warning.setAttribute('role','status');warning.textContent='The original common snapshot was deleted. This is a manual comparison against the CURRENT published cloud revision—not an automatic merge. Every difference requires an owner decision. Selecting the submitted version may overwrite a newer cloud record; downloading both copies before publishing is recommended.';safe.before(warning);}
+ return root.innerHTML;
+};
+// For a long-offline device, normal Family Sync already downloads the latest
+// cloud directly when its local data equals its saved baseline. Dirty devices
+// keep their offline work and enter owner review; no silent overwriting.
+const P55_STYLES=String.raw`
+#app .p55-reward-duplicate{min-height:42px;white-space:normal}
+#app .p42-reward-actions .p55-reward-duplicate{width:auto}
+#app .p55-manual-recovery{background:#fff2df;color:#7e5837;border:1px solid #edd6aa;padding:15px;border-radius:14px;line-height:1.55;font-weight:650}
+@media(max-width:650px){#app .p55-reward-duplicate{min-width:0;width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P55_BUILD}">${P55_STYLES}</style>`);
+/* ===== End Phase 6F.2.4 ===== */
 
 </script>
 </body>
