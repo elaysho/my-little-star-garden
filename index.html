@@ -15092,6 +15092,295 @@ function p51CloseChildDetail(){
 }
 /* End Phase 6G.3 */
 
+
+/* ===== Phase 6G.4 · Challenge, child and Guardian UX refinements ===== */
+const P51_BUILD='mlsg-phase-6g4-20261119';
+state.p51={randomMessage:'',storageNote:'',storageBusy:false,headSize:null};
+
+// Home already has Today's Rules: make it a meaningful, compact reminder, not a duplicate page.
+state.p6RulePreviewLimit=4;
+const p51PreviousHome=childHome;
+childHome=function(){
+ const root=document.createElement('div');root.innerHTML=p51PreviousHome();
+ const list=root.querySelector('.p61-today-overview .p61-overview-list');
+ if(list){
+  const date=p2Date(),all=p61DailyQuests(date),pending=all.filter(t=>p61Status(t,date)!=='done'),ordered=[...pending,...all.filter(t=>p61Status(t,date)==='done')];
+  // Keep the same sorting as the original overview, increasing only the visible cap.
+  if(ordered.length>3){list.innerHTML=ordered.slice(0,4).map(t=>p61OverviewCard(t,date)).join('');const count=root.querySelector('.p61-today-overview .p61-more');if(count){if(all.length>4)count.textContent=`+ ${all.length-4} more scheduled adventures`;else count.remove();}}
+ }
+ const rules=root.querySelector('.p6-home-rules');
+ if(rules){
+  rules.classList.add('p51-home-reminders');
+  const title=rules.querySelector('h3');if(title)title.textContent='🌷 Little Reminders for Today';
+  const head=rules.querySelector('.panel-head');if(head&&!rules.querySelector('.p51-home-rule-hint'))head.insertAdjacentHTML('afterend','<p class="p2-muted p51-home-rule-hint">Some little promises to keep in mind today. You can practice them before your Guardian checks in.</p>');
+  const parent=rules.querySelector('.p6-rules-compact');
+  if(parent){const rows=p6VisibleRules().slice(0,4);parent.innerHTML=rows.map(r=>`<div class="p51-home-rule"><span class="p51-home-rule-icon">${esc(r.icon||'🌷')}</span><span class="grow"><strong>${esc(r.childFriendly||r.name)}</strong><small>${p6RuleStatus(r)?'✓ Guardian confirmed':'Keep practicing today'}</small></span><span class="p51-home-rule-state" aria-hidden="true">${p6RuleStatus(r)?'✅':'🌱'}</span></div>`).join('')||'<p class="p2-muted">Your Guardian can add reminders here.</p>';}
+ }
+ return root.innerHTML;
+};
+
+// A challenge sharing invitation belongs before the achievement figures;
+// completed routine dates should read as a calendar timeline instead of a list of dates.
+const p51PreviousChallengeDetail=p63ChallengeDetail;
+p63ChallengeDetail=function(ch){
+ const root=document.createElement('div');root.innerHTML=p51PreviousChallengeDetail(ch);
+ if(state.view!=='child'||!ch)return root.innerHTML;
+ const panel=root.querySelector('.p63-challenge-detail');if(!panel)return root.innerHTML;
+ const share=panel.querySelector('.p50-challenge-share-entry');
+ const figures=panel.querySelector(':scope > .p2-row');
+ if(share&&figures)figures.before(share);
+ const routineItems=p64ChallengeItems(ch).filter(x=>x.kind==='routine');
+ if(routineItems.length){
+  const note=panel.querySelector('.p29-challenge-explanation');
+  if(note&&figures){figures.after(note);note.classList.add('p51-challenge-note');}
+  panel.querySelectorAll('.p29-challenge-history,.p35-challenge-explainer').forEach(node=>node.remove());
+  const today=p2Date(),start=ch.period==='weekly'?p2WeekStart(today):null;
+  const days=[];
+  for(let i=(ch.period==='weekly'?6:13);i>=0;i--){
+   const base=new Date((start||today)+'T12:00:00+08:00');base.setDate(base.getDate()+(start?6-i:-i));
+   const day=dateStamp(base);
+   if(day>today)continue;
+   const qualifying=routineItems.filter(x=>p35RoutineEvidence(p2Task(x.id),day).qualified).length;
+   days.push({day,qualifying});
+  }
+  const timeline=document.createElement('section');timeline.className='p51-challenge-timeline';
+  timeline.innerHTML=`<div class="p51-timeline-heading"><div><h3>📅 Routine Progress by Date</h3><p class="p2-muted">A ✓ marks a qualifying day. Other dates are simply not yet counted.</p></div><span class="chip">${days.filter(d=>d.qualifying).length} qualifying</span></div><div class="p51-timeline-days">${days.map(d=>{const label=new Date(d.day+'T12:00:00+08:00').toLocaleDateString('en-PH',{month:'short',day:'numeric'});return `<div class="p51-timeline-day ${d.qualifying?'is-done':''}" title="${esc(d.day)}: ${d.qualifying} completed routine(s)"><strong>${d.qualifying?'✓':'·'}</strong><small>${esc(label)}</small></div>`;}).join('')}</div>`;
+  const taskList=panel.querySelector('.p63-task-list');if(taskList)taskList.after(timeline);
+ }
+ if(figures){figures.classList.add('p51-challenge-figures');figures.querySelector('.chip')?.classList.add('p51-star-count');}
+ return root.innerHTML;
+};
+
+// Share My Day/Share Today's Progress: keep the dialog header and footer visible;
+// scroll the form content, not the whole modal. The form and existing handlers remain intact.
+const p51PreviousDailyModal=p8DailyModal;
+p8DailyModal=function(){
+ const html=p51PreviousDailyModal();if(!html)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const dlg=root.querySelector('.p12-share-dialog');const form=dlg?.querySelector('.p12-share-form');
+ if(!dlg||!form)return root.innerHTML;
+ dlg.classList.add('p51-day-modal');
+ const footer=form.querySelector('.p12-dialog-footer');
+ const body=document.createElement('div');body.className='p51-day-scroll';
+ for(const node of [...form.children])if(node!==footer)body.append(node);
+ // Theme selection is content, not a fixed action. Earlier layers placed it in
+ // the footer above the buttons, so move it into the scrolling body as well.
+ const theme=footer?.querySelector('.p35-theme-choose,.p47-theme-choose');
+ if(theme)body.append(theme);
+ form.prepend(body);
+ return root.innerHTML;
+};
+
+// Guest links should not solicit a rule report if a same-date incident already exists.
+// Quest eligibility continues to use existing frequencies/limits, including multi-awards.
+const p51PreviousGuestEligibility=p39GuestEligible;
+p39GuestEligible=function(item,date){
+ if(!p51PreviousGuestEligibility(item,date))return false;
+ if(item.kind==='rule')return !(state.p2Incidents||[]).some(i=>i.date===date&&!i.reversedAt&&(i.ruleId===item.id||(Array.isArray(i.ruleIds)&&i.ruleIds.includes(item.id))));
+ return true;
+};
+// The original invitation generator validates against *available* rows; the
+// existing p39 wrapper rechecks this eligibility before saving the request.
+
+// Guardian task manager: make timed-task action a separate row; prevent detached buttons.
+const p51PreviousTaskCard=p2TaskCard;
+p2TaskCard=function(task,guardianMode=false,day=p2Date()){
+ const root=document.createElement('div');root.innerHTML=p51PreviousTaskCard(task,guardianMode,day);
+ if(guardianMode){const card=root.querySelector('.p2-card');if(card)card.classList.add('p51-task-card');
+  const actions=root.querySelector('.p2-task-actions');if(actions){actions.classList.add('p51-task-actions');const timer=actions.querySelector('[data-p48-action="task-open"]');if(timer){timer.classList.add('p51-full-task-timer');timer.textContent='⏳ Start Task Timer';}}
+ }
+ return root.innerHTML;
+};
+
+// The timer is not a completion. Place its panel at page level above the form,
+// not inside the Completed Tasks block.
+const p51PreviousReview=p2ReviewPage;
+p2ReviewPage=function(){
+ const root=document.createElement('div');root.innerHTML=p51PreviousReview();
+ const timer=root.querySelector('.p48-daily-timers');const form=root.querySelector('#p2-review-form');
+ if(timer&&form){const section=document.createElement('section');section.className='panel p51-review-timer-section';section.append(timer);form.closest('section.panel')?.before(section);}
+ return root.innerHTML;
+};
+
+// Guardian challenge editor: select a random number of existing tasks, routines,
+// or rules. This only checks form options; nothing is awarded or saved until Save.
+const p51PreviousChallengeEditor=p2ChallengeEditor;
+p2ChallengeEditor=function(){
+ const root=document.createElement('div');root.innerHTML=p51PreviousChallengeEditor();
+ const form=root.querySelector('#p2-challenge-form');if(!form)return root.innerHTML;
+ const icon=form.querySelector('.p64-ch-icon');
+ if(icon){icon.classList.add('p51-challenge-icon-editor');const value=icon.querySelector('#p64-ch-icon')?.value||'🏆';
+  icon.querySelectorAll('.p64-emoji').forEach(btn=>{const on=btn.dataset.value===value;btn.classList.toggle('p51-selected-icon',on);btn.setAttribute('aria-pressed',String(on));});
+ }
+ const panel=form.querySelector('.p64-ch-choices');
+ if(panel){const block=document.createElement('div');block.className='p51-challenge-random';block.innerHTML=`<div class="p51-random-heading"><strong>🎲 Pick a surprise set</strong><p class="p2-muted">Randomly select existing activities to build a challenge. You can adjust the selection afterward.</p></div><div class="p51-random-controls"><label>Activity type<select id="p51-random-type"><option value="task">📖 Tasks</option><option value="routine">📋 Routines</option><option value="rule">🛡️ Rules</option></select></label><label>How many?<input id="p51-random-count" type="number" min="1" max="100" value="3" inputmode="numeric"></label><button type="button" class="btn btn-soft" data-p51-action="random-challenge">🎲 Choose Randomly</button></div><p class="p51-random-feedback" role="status"></p>`;panel.before(block);}
+ return root.innerHTML;
+};
+// Keep the existing challenge icon picker handlers authoritative; update only visual selection.
+document.addEventListener('click',event=>{
+ const picked=event.target.closest('[data-p64-action="challenge-icon"]');if(!picked)return;
+ const form=picked.closest('#p2-challenge-form');if(!form)return;
+ form.querySelectorAll('.p64-emoji').forEach(b=>{const on=b===picked;b.classList.toggle('p51-selected-icon',on);b.setAttribute('aria-pressed',String(on));});
+},false);
+document.addEventListener('click',event=>{
+ const btn=event.target.closest('[data-p51-action="random-challenge"]');if(!btn)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const form=btn.closest('form'),kind=form?.querySelector('#p51-random-type')?.value,count=Number(form?.querySelector('#p51-random-count')?.value);
+ const feedback=form?.querySelector('.p51-random-feedback');
+ if(!['task','routine','rule'].includes(kind)||!Number.isInteger(count)||count<1||count>100){if(feedback)feedback.textContent='Choose a whole number from 1 to 100.';return;}
+ const available=[...form.querySelectorAll('input[name="linkedItems"]')].filter(input=>input.value.startsWith(kind+':')&&!input.disabled);
+ if(!available.length){if(feedback)feedback.textContent='There are no available activities of that type.';return;}
+ const actual=Math.min(count,available.length);const pool=[...available];
+ for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+ available.forEach(x=>x.checked=false);pool.slice(0,actual).forEach(x=>x.checked=true);
+ const tab={task:'tasks',routine:'routines',rule:'rules'}[kind];
+ state.p64ChallengeTab=tab;
+ form.querySelectorAll('[data-p64-ch-panel]').forEach(el=>el.hidden=el.dataset.p64ChPanel!==tab);
+ form.querySelectorAll('[data-p64-action="challenge-tab"]').forEach(el=>el.classList.toggle('active',el.dataset.value===tab));
+ const selected=form.querySelector('#p64-ch-selected');if(selected)selected.textContent=`${form.querySelectorAll('input[name="linkedItems"]:checked').length} linked activities selected`;
+ if(feedback)feedback.textContent=`Selected ${actual} ${kind}${actual===1?'':'s'}${actual<count?' (all available)':''}. You can edit the choices before saving.`;
+},true);
+
+// Two-column ticket cards should keep the primary actions aligned on desktop;
+// compact screens use large, easy-to-tap buttons.
+const p51PreviousVoucher=p4VoucherHtml;
+p4VoucherHtml=function(v,details=false,guardianInline=false){
+ const root=document.createElement('div');root.innerHTML=p51PreviousVoucher(v,details,guardianInline);
+ const card=root.querySelector('.p4-ticket');if(!card)return root.innerHTML;
+ if(!details&&!guardianInline&&['redeemed','cancelled'].includes(v.status))card.classList.add('p51-memory-ticket');
+ return root.innerHTML;
+};
+const p51PreviousVoucherDetail=p4ChildVoucherDetail;
+p4ChildVoucherDetail=function(v){
+ const root=document.createElement('div');root.innerHTML=p51PreviousVoucherDetail(v);
+ const panel=root.querySelector('.p4-ticket-preview');const ticket=panel?.querySelector('.p4-ticket');
+ if(ticket){
+  const actions=ticket.querySelector('.p4-voucher-actions');
+  const ask=panel.querySelector('.p46-ticket-ask-wrap');
+  if(ask&&actions){actions.after(ask);ask.classList.add('p51-ticket-ask');}
+  const note=[...panel.querySelectorAll('p')].find(p=>/A guardian enters their PIN here to approve using this voucher/i.test(p.textContent||''));
+  if(note&&ask){note.classList.add('p51-ticket-ask-note');ask.append(note);}
+ }
+ return root.innerHTML;
+};
+
+// Use a coherent Guardian header/sidebar for the standalone timer page too.
+const p51PreviousRender=render;
+render=function(){
+ p51PreviousRender();
+ if(state.view==='guardian'&&safeGuardian()&&state.guardianTab==='manage'&&state.p2ManageTab==='tasks'){
+  app.querySelectorAll('[data-p2-action="task-edit"]').forEach(edit=>{
+   const card=edit.closest('.p2-card');if(!card)return;
+   card.classList.add('p51-task-card');
+   const actions=card.querySelector('.p2-task-actions');if(!actions)return;
+   actions.classList.add('p51-task-actions');
+   const timer=actions.querySelector('[data-p48-action="task-open"]');
+   if(timer){timer.classList.add('p51-full-task-timer');timer.textContent='⏳ Start Task Timer';}
+  });
+ }
+ if(state.view==='child'&&state.childTab==='tickets'){
+  const panel=app.querySelector('.p4-ticket-preview'),ticket=panel?.querySelector('.p4-ticket');
+  if(panel&&ticket){
+   const actions=ticket.querySelector('.p4-voucher-actions'),ask=panel.querySelector('.p46-ticket-ask-wrap');
+   if(actions&&ask&&!ticket.contains(ask)){actions.after(ask);ask.classList.add('p51-ticket-ask');}
+   if(ask){const note=[...panel.querySelectorAll('p')].find(p=>/A guardian enters their PIN here to approve using this voucher/i.test(p.textContent||''));if(note&&!ask.contains(note)){note.classList.add('p51-ticket-ask-note');ask.append(note);}}
+  }
+ }
+ if(state.view==='guardian'&&safeGuardian()&&state.guardianTab==='p47-timer'){
+  const reference=document.createElement('div');reference.innerHTML=p19GuardianDecorate(shell('<section></section>',true));
+  const main=app.querySelector('main'),top=reference.querySelector('main > header.topbar'),nav=reference.querySelector('.sidebar nav.nav');
+  if(main&&top){main.querySelector(':scope > header.topbar')?.replaceWith(top);top.classList.add('p43-standard-header');}
+  if(nav)app.querySelector('.sidebar nav.nav')?.replaceWith(nav);
+ }
+};
+
+// Storage inventory errors should be actionable and must never enable unsafe deletes.
+const p51PreviousSnapshotScan=p49ScanInventory;
+p49ScanInventory=async function(){
+ try{const result=await p51PreviousSnapshotScan();state.p51.storageNote='';return result;}
+ catch(e){const code=String(e?.code||'').toLowerCase(),msg=String(e?.message||e);
+  if(code.includes('permission-denied')||/missing or insufficient permissions/i.test(msg)){
+   state.p49.inventory=null;state.p51.storageNote='Cloud inventory access was denied. This may require owner account access and Firestore rules permitting the snapshot/proposal LIST operations. Existing Family Sync can work while this separate inventory query is denied. No data was deleted; hard-delete controls remain blocked.';
+   throw Error('Cloud inventory permission denied. Your family data is unchanged. Review the owner account and Firestore read rules; do not make the database public.');
+  }
+  state.p51.storageNote='';throw e;
+ }
+};
+const p51PreviousInventoryPanel=p49InventoryPanel;
+p49InventoryPanel=function(){
+ const root=document.createElement('div');root.innerHTML=p51PreviousInventoryPanel();
+ const panel=root.querySelector('.p49-recovery-panel');if(!panel)return root.innerHTML;
+ if(state.p51.storageNote)panel.querySelector('.p49-error')?.insertAdjacentHTML('afterend',`<div class="p51-storage-help"><strong>🛡️ Permission diagnosis</strong><p>${esc(state.p51.storageNote)}</p><p>You can still inspect the current published revision, if its individual document is readable. This does not grant deletion permission.</p></div>`);
+ const actions=panel.querySelector('.p2-actions');
+ if(actions)actions.insertAdjacentHTML('beforeend',`<button type="button" class="btn btn-soft" data-p51-action="storage-head" ${state.p51.storageBusy?'disabled':''}>${state.p51.storageBusy?'Checking…':'📦 Check Current Revision Only'}</button>`);
+ if(state.p51.headSize)panel.querySelector('.p2-actions')?.insertAdjacentHTML('beforebegin',`<p class="p51-storage-measure">Current published revision ${money(state.p51.headSize.revision)} · estimated JSON payload ${(state.p51.headSize.bytes/1048576).toFixed(2)} MiB. This is a payload estimate, not total Firestore billed storage. Full cleanup eligibility still needs the inventory scan.</p>`);
+ return root.innerHTML;
+};
+document.addEventListener('click',e=>{
+ const btn=e.target.closest('[data-p51-action="storage-head"]');if(!btn)return;
+ e.preventDefault();e.stopImmediatePropagation();if(state.p51.storageBusy)return;
+ state.p51.storageBusy=true;render();
+ (async()=>{
+  if(!p14OwnerVerified())throw Error('Sign in with the family owner account and unlock Guardian Mode first.');
+  const head=await p8CloudSyncDoc().get({source:'server'});if(!head.exists)throw Error('No current cloud snapshot is published.');
+  const id=head.data()?.snapshotId;if(!id)throw Error('The current snapshot pointer is missing.');
+  const snap=await p14SnapshotFetch(id),str=JSON.stringify(snap.backup);const bytes=new Blob([str],{type:'application/json'}).size;
+  state.p51.headSize={revision:Number(head.data()?.revision||snap.manifest.revision||0),bytes};
+ })().catch(err=>{state.p49.inventoryError='Current-revision check: '+String(err.message||err)+'. No changes were made to cloud data.';}).finally(()=>{state.p51.storageBusy=false;render();});
+},true);
+
+const P51_STYLE=String.raw`
+/* Child home */
+#app .p51-home-reminders .p6-rules-compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:13px 0}
+#app .p51-home-rule{display:flex;gap:10px;align-items:center;padding:11px 13px;border:1px solid #efd6e4;border-radius:14px;background:#fffafd;min-width:0}
+#app .p51-home-rule-icon{font-size:1.45rem;flex:none}#app .p51-home-rule .grow{min-width:0}#app .p51-home-rule strong{display:block;font-size:.87rem;overflow-wrap:anywhere}#app .p51-home-rule small{display:block;color:#8f7585;font-size:.74rem;margin-top:3px}#app .p51-home-rule-state{font-size:1.1rem}
+#app .p51-home-rule-hint{margin:9px 0 0!important;font-size:.85rem}
+/* Challenge page timeline, figures and sharing */
+#app .p51-challenge-figures{display:flex!important;gap:16px!important;align-items:center!important;justify-content:space-between!important;flex-wrap:wrap}
+#app .p51-star-count{margin-left:auto;white-space:nowrap}#app .p51-challenge-note{background:#fff9f1;border:1px solid #efdfce;border-radius:13px;padding:10px 13px;margin:10px 0!important;font-size:.85rem;color:#83677a}
+#app .p50-challenge-share-entry{margin:0 0 12px!important}
+#app .p51-challenge-timeline{display:grid;gap:12px;border:1px solid #efdae6;background:#fffafb;border-radius:18px;padding:16px;margin:14px 0}
+#app .p51-timeline-heading{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap}#app .p51-timeline-heading h3{margin:0}#app .p51-timeline-heading p{margin:4px 0 0;font-size:.83rem}
+#app .p51-timeline-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}#app .p51-timeline-day{display:grid;justify-items:center;align-content:center;gap:4px;border:1px solid #ebdce5;border-radius:12px;padding:9px 3px;background:#fff;min-width:0;color:#9e8395}#app .p51-timeline-day strong{font-size:1.1rem}#app .p51-timeline-day small{font-size:.69rem;text-align:center}#app .p51-timeline-day.is-done{background:#edf7ee;border-color:#cfe5d2;color:#467455}
+/* Scroll *body only* in the sharing modal. */
+#app .p68-share-dialog.p12-share-dialog.p51-day-modal{display:flex;flex-direction:column;max-height:min(94dvh,850px)!important;overflow:hidden!important}
+#app .p51-day-modal .p12-dialog-heading{flex:0 0 auto}
+#app .p51-day-modal .p12-share-form{display:flex!important;flex-direction:column!important;min-height:0!important;overflow:hidden!important;flex:1}
+#app .p51-day-modal .p51-day-scroll{overflow-y:auto;overscroll-behavior:contain;min-height:0;flex:1;padding:5px 2px 12px;scrollbar-gutter:stable;display:grid;gap:14px}
+#app .p51-day-modal .p12-dialog-footer{flex:none;margin:0!important;background:#fffafd;border-top:1px solid #eddae6;padding:12px 4px 2px}
+/* Memories and vouchers */
+#app .p51-memory-ticket{display:flex;flex-direction:column;gap:0;height:100%}
+#app .p51-memory-ticket>.btn,#app .p51-memory-ticket .p14-history-thanks{margin-top:auto!important}
+#app .p51-memory-ticket>.btn{width:100%;min-height:45px;margin-top:15px!important}
+#app .p51-memory-ticket .p14-history-thanks{margin-top:8px!important;display:grid}
+#app .p51-memory-ticket .p14-history-thanks .btn{width:100%;min-height:45px}
+#app .p51-ticket-ask{margin-top:12px!important;display:grid;gap:7px}#app .p51-ticket-ask>.btn{width:100%!important;min-height:50px}
+#app .p51-ticket-ask-note{margin:0!important;padding:10px 12px;border:1px solid #ecd9e6;border-radius:12px;background:#fff8fc;font-size:.8rem;line-height:1.5}
+/* Tasks and independent timer panel */
+#app .p51-task-card{display:flex;flex-direction:column;height:100%}
+#app .p51-task-card .p51-task-actions{margin-top:auto!important;padding-top:14px;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+#app .p51-task-card .p51-task-actions .btn{width:100%;min-width:0;white-space:normal}
+#app .p51-task-card .p51-full-task-timer{grid-column:1/-1;order:99;min-height:46px}
+#app .p51-review-timer-section{margin:14px 0 20px}#app .p51-review-timer-section .p48-daily-timers{border:0;background:transparent;padding:0}
+/* Challenge editor */
+#app .p51-challenge-icon-editor{display:grid;gap:10px;border:1px solid #efd7e3;border-radius:16px;padding:16px;background:#fffafd}
+#app .p51-challenge-icon-editor #p64-ch-icon{font-size:1.6rem;text-align:center;max-width:130px;background:#fff;border:1px solid #ddc9d8;border-radius:13px;padding:11px}
+#app .p51-challenge-icon-editor .p64-emoji-buttons{display:flex;gap:7px;flex-wrap:wrap}
+#app .p51-challenge-icon-editor .p64-emoji{width:46px;height:46px;display:grid;place-items:center;border-radius:12px}
+#app .p51-selected-icon{border:2px solid #af7198!important;background:#f7e4ee!important;box-shadow:0 0 0 2px #eed3e4}
+#app .p51-challenge-random{border:1px solid #e4d6e8;background:#faf6fe;border-radius:17px;padding:16px;display:grid;gap:12px;margin:13px 0}
+#app .p51-challenge-random p{margin:4px 0 0}#app .p51-random-controls{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.65fr) auto;align-items:end;gap:10px}
+#app .p51-random-controls label{display:grid;gap:7px;font-size:.84rem;font-weight:750;color:#775b71;min-width:0}
+#app .p51-random-controls input,#app .p51-random-controls select{min-width:0;width:100%;padding:11px 12px;border:1px solid #ddc9d8;border-radius:12px;background:#fff;font:inherit;box-sizing:border-box}
+#app .p51-random-controls .btn{min-height:48px}#app .p51-random-feedback{font-size:.83rem;color:#6e5a7a;font-weight:700;min-height:1em;margin:0}
+/* Snapshot diagnostics without bypassing Firestore rules */
+#app .p51-storage-help,#app .p51-storage-measure{padding:13px 15px;border-radius:14px;border:1px solid #e5c3ce;background:#fff4f7;color:#765666;line-height:1.5;margin:12px 0}#app .p51-storage-help p{margin:8px 0 0;font-size:.87rem}
+@media(max-width:700px){#app .p51-home-reminders .p6-rules-compact{grid-template-columns:1fr}#app .p51-random-controls{grid-template-columns:repeat(2,minmax(0,1fr))}#app .p51-random-controls>.btn{grid-column:1/-1;width:100%}#app .p51-timeline-days{grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}#app .p51-timeline-day{padding:8px 1px}#app .p51-timeline-day small{font-size:.58rem}}
+@media(max-width:410px){#app .p51-challenge-figures{gap:8px}#app .p51-timeline-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P51_BUILD}">${P51_STYLE}</style>`);
+/* ===== End Phase 6G.4 ===== */
+
 </script>
 </body>
 </html>
