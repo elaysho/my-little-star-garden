@@ -15387,7 +15387,7 @@ document.head.insertAdjacentHTML('beforeend',`<style id="${P51_BUILD}">${P51_STY
    delete any snapshot, or modify the star ledger. Automatic publishing now
    follows the five-minute quiet / twenty-minute continuous-edit cap above.
 */
-const P52_BUILD='mlsg-phase-6f2-firestore-sync-stabilization-20261119';
+const P52_BUILD='mlsg-phase-6f2.1-firestore-inventory-query-fix-20261119';
 state.p52={checking:false,access:null,healthBusy:false,health:null,stage:'',lastInventoryFailure:null};
 function p52PermissionError(error){
  const code=String(error?.code||'').toLowerCase(),msg=String(error?.message||error||'');
@@ -15405,7 +15405,40 @@ function p52FailureLabel(stage,error){
  return denied?`${action} was denied by Cloud Firestore security rules. This is a Firestore database operation, NOT Firebase Storage. Existing sync can still work if its individual reads are permitted. Cleanup stays disabled.`:
  `${action} failed: ${String(error?.message||error)}. No changes were made.`;
 }
-function p52StepStatus(s){return s?.ok?'Readable':s?.denied?'Permission denied':s?.skipped?'Not checked':s?.error?'Failed':'Not checked';}
+// Probe only bounded, authenticated, server-side Firestore collection queries.
+// A readable one-document query is not proof a 50-document query is permitted.
+const P521_PAGE_LIMITS=[50,20,10,5,1];
+async function p521AllowedPage(base,cursor=null,maximum=50){
+ let lastDenied=null;
+ for(const amount of P521_PAGE_LIMITS.filter(n=>n<=maximum)){
+  let q=base.limit(amount);
+  if(cursor)q=q.startAfter(cursor);
+  try{return {page:await q.get({source:'server'}),limit:amount};}
+  catch(e){if(!p52PermissionError(e))throw e;lastDenied=e;}
+ }
+ if(lastDenied)throw lastDenied;
+ throw Error('No authorized Firestore page size was available.');
+}
+async function p521ReadAll(base,stage){
+ const docs=[];let cursor=null,cap=50;
+ while(true){
+  const {page,limit}=await p521AllowedPage(base,cursor,cap);
+  cap=limit;
+  if(docs.length+page.size>500)throw Error(`More than 500 ${stage} were found. Cleanup requires a separate safety review.`);
+  docs.push(...page.docs);
+  if(page.size<limit)return {docs,limit};
+  if(docs.length===500){
+   // Check for a 501st record rather than claiming a 500-item scan is complete.
+   let extra=base.limit(1).startAfter(page.docs[page.docs.length-1]);
+   const tail=await extra.get({source:'server'});
+   if(tail.size)throw Error(`More than 500 ${stage} were found. Cleanup requires a separate safety review.`);
+   return {docs,limit};
+  }
+  if(!page.docs.length)return {docs,limit};
+  cursor=page.docs[page.docs.length-1];
+ }
+}
+function p52StepStatus(s){return s?.ok?(s.limit&&s.limit<50?`Readable · ${s.limit}/page`:'Readable'):s?.denied?'Permission denied':s?.skipped?'Not checked':s?.error?'Failed':'Not checked';}
 // A read-only operator-friendly check. It never publishes, archives, or deletes.
 async function p52CheckAccess(){
  if(!p14OwnerVerified())throw Error('Sign in as the verified family owner and unlock Guardian Mode first.');
@@ -15423,13 +15456,17 @@ async function p52CheckAccess(){
   // This query matches the existing snapshot-fetch path; it is not Storage.
   await attempt('chunks',()=>ref.collection('chunks').get({source:'server'}));
  }else{out.steps.manifest={skipped:true};out.steps.chunks={skipped:true};}
- await attempt('snapshots',()=>family.collection('snapshots').orderBy('revision','desc').limit(1).get({source:'server'}));
- await attempt('proposals',()=>family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId()).limit(1).get({source:'server'}));
+ const snapshotProbe=await attempt('snapshots',()=>p521AllowedPage(family.collection('snapshots').orderBy('revision','desc')));
+ if(snapshotProbe)out.steps.snapshots={ok:true,limit:snapshotProbe.limit};
+ const proposalProbe=await attempt('proposals',()=>p521AllowedPage(family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId())));
+ if(proposalProbe)out.steps.proposals={ok:true,limit:proposalProbe.limit};
  state.p52.access=out;
  return out;
 }
 // Keep normal owner-only hard-deletion safeguards, but identify the exact
 // Firestore operation that blocks the snapshot inventory.
+// Phase 6F.2.1: align the full inventory with rule-constrained list queries.
+// No permissions are bypassed. Any incomplete query blocks cleanup.
 const p52EarlierInventory=p49ScanInventory;
 p49ScanInventory=async function(){
  state.p52.lastInventoryFailure=null;
@@ -15440,38 +15477,27 @@ p49ScanInventory=async function(){
   const family=p8FamilyRef();
   const headSnap=await p8CloudSyncDoc().get({source:'server'});
   if(!headSnap.exists)throw Error('No published family revision exists.');
-  const head=headSnap.data(),all=[];let cursor=null;
+  const head=headSnap.data();
   stage='snapshots';
-  for(let round=0;round<10;round++){
-   let query=family.collection('snapshots').orderBy('revision','desc').limit(50);
-   if(cursor)query=query.startAfter(cursor);
-   const page=await query.get({source:'server'});
-   all.push(...page.docs.map(d=>({id:d.id,...d.data()})));
-   if(page.size<50)break;
-   cursor=page.docs[page.docs.length-1];
-   if(round===9)throw Error('More than 500 snapshots found; an inventory safety review is required.');
-  }
+  const snapshotScan=await p521ReadAll(family.collection('snapshots').orderBy('revision','desc'),'snapshots');
+  const all=snapshotScan.docs.map(d=>({id:d.id,...d.data()}));
   stage='proposals';
-  const dependencies=new Set();let pcursor=null;
-  for(let round=0;round<10;round++){
-   let q=family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId()).limit(50);
-   if(pcursor)q=q.startAfter(pcursor);
-   const page=await q.get({source:'server'});
-   for(const doc of page.docs){const p=doc.data();if(p.status==='pending')for(const rev of [p.baseRevision,p.remoteRevision]){
+  const proposalScan=await p521ReadAll(family.collection('proposals').orderBy(window.firebase.firestore.FieldPath.documentId()),'proposals');
+  const dependencies=new Set();
+  for(const doc of proposalScan.docs){
+   const p=doc.data();
+   if(p.status==='pending')for(const rev of [p.baseRevision,p.remoteRevision]){
     const n=Number(rev);if(Number.isSafeInteger(n)&&n>0)dependencies.add(n);
-   }}
-   if(page.size<50)break;
-   pcursor=page.docs[page.docs.length-1];
-   if(round===9)throw Error('More than 500 proposals found; cleanup requires a separate review.');
+   }
   }
   stage='head';
-  if(!all.some(s=>s.id===head.snapshotId))throw Error('The current published revision is missing from snapshot history. Cleanup is blocked.');
+  if(!all.some(s=>s.id===head.snapshotId))throw Error('The published revision is missing from snapshot history. Cleanup is blocked.');
   state.p49.readiness=null;state.p49.measure=null;
   state.p49.inventory={snapshots:all.sort((a,b)=>Number(b.revision)-Number(a.revision)),headId:head.snapshotId,headRevision:Number(head.revision||0),dependencies:[...dependencies],loadedAt:Date.now()};
   state.p51.storageNote='';
+  state.p52.inventoryPageSizes={snapshots:snapshotScan.limit,proposals:proposalScan.limit};
   return state.p49.inventory;
  }catch(e){
-  // Never preserve a stale inventory after permission or connectivity failures.
   state.p49.inventory=null;state.p49.readiness=null;state.p49.measure=null;
   state.p52.lastInventoryFailure={stage,denied:p52PermissionError(e),at:Date.now()};
   state.p51.storageNote=p52FailureLabel(stage,e);
@@ -15498,7 +15524,7 @@ function p52AccessPanel(){
   return `<div class="p52-check-row"><span>${esc(p52StageLabel(k))}</span><span class="${value.ok?'ok':value.denied?'error':'neutral'}">${esc(status)}</span></div>`;
  }).join(''):'';
  const health=h?`<div class="p52-health"><strong>Current Cloud Firestore revision: ${money(h.remoteRevision)}</strong><p>Last synced on this device: ${h.hasBaseline?'Revision '+money(h.localRevision):'No verified baseline'}</p><p>Local changes: ${h.dirty===null?'Unknown (no baseline)':h.dirty?'Awaiting sharing or review':'No changes since the device baseline'}</p><p>${h.remoteAhead?'A newer cloud revision exists. Conflict-aware Sync Now will compare changes.':'The cloud revision is not ahead of this device baseline.'}</p>${h.elapsed>0?`<p>Next automatic attempt in about ${esc(p28WaitDescription(h.elapsed))}.</p>`:''}</div>`:'';
- return `<section class="p52-panel" aria-label="Cloud Firestore diagnostics"><div class="p52-head"><div><strong>☁️ Cloud Firestore diagnostics</strong><p>Family Sync uses <strong>Cloud Firestore</strong>, not Firebase Storage. Reading snapshot history requires more permissions than reading the current published revision. This tool is read-only.</p></div></div><div class="p52-actions"><button class="btn btn-soft btn-small" data-p52-action="access" ${state.p52.checking?'disabled':''}>${state.p52.checking?'Checking…':'Check Firestore Access'}</button><button class="btn btn-plain btn-small" data-p52-action="health" ${state.p52.healthBusy?'disabled':''}>${state.p52.healthBusy?'Checking…':'Check This Device’s Sync Health'}</button></div>${rows?`<div class="p52-checks">${rows}</div>`:''}${a?.steps?.snapshots?.denied||a?.steps?.proposals?.denied?'<p class="p52-caution">Full inventory is not authorized. Existing sync may still be functional, but no archived revisions can be marked safe for permanent deletion.</p>':''}${health}${state.p52.accessError?`<p class="p49-error" role="alert">${esc(state.p52.accessError)}</p>`:''}${state.p52.healthError?`<p class="p49-error" role="alert">${esc(state.p52.healthError)}</p>`:''}<p class="p52-caption">This never uploads a snapshot. A complete live inventory and recovery checks remain necessary before individual permanent deletion.</p></section>`;
+ return `<section class="p52-panel" aria-label="Cloud Firestore diagnostics"><div class="p52-head"><div><strong>☁️ Cloud Firestore diagnostics</strong><p>Family Sync uses <strong>Cloud Firestore</strong>, not Firebase Storage. Snapshot inventory needs collection-list queries. Security rules can restrict page size, so this tool checks the permitted size without changing your Firestore rules. This tool is read-only.</p></div></div><div class="p52-actions"><button class="btn btn-soft btn-small" data-p52-action="access" ${state.p52.checking?'disabled':''}>${state.p52.checking?'Checking…':'Check Firestore Access'}</button><button class="btn btn-plain btn-small" data-p52-action="health" ${state.p52.healthBusy?'disabled':''}>${state.p52.healthBusy?'Checking…':'Check This Device’s Sync Health'}</button></div>${rows?`<div class="p52-checks">${rows}</div>`:''}${a?.steps?.snapshots?.denied||a?.steps?.proposals?.denied?'<p class="p52-caution">Full inventory is not authorized. Existing sync may still be functional, but no archived revisions can be marked safe for permanent deletion.</p>':''}${health}${state.p52.accessError?`<p class="p49-error" role="alert">${esc(state.p52.accessError)}</p>`:''}${state.p52.healthError?`<p class="p49-error" role="alert">${esc(state.p52.healthError)}</p>`:''}<p class="p52-caption">This never uploads a snapshot. A complete live inventory and recovery checks remain necessary before individual permanent deletion.</p></section>`;
 }
 const p52PriorCloudPage=p8CloudPage;
 p8CloudPage=function(){
@@ -15538,6 +15564,184 @@ const P52_STYLES=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P52_BUILD}">${P52_STYLES}</style>`);
 /* ===== End Phase 6F.2 ===== */
+
+/* ===== Phase 6F.2.2: one Snapshot History manager, quiet sync retained =====
+ * No Firebase Storage operations, no automated deletion and no permissions changed.
+ * The existing offline-first/owner-review sync engine stays unchanged.
+ */
+const P53_BUILD='mlsg-phase-6f2.2-consolidated-snapshot-history-20261119';
+state.p53={page:1,refreshBusy:false,refreshError:'',deleteBusy:false};
+function p53SnapshotReason(m,scan){
+ if(!scan||p49InventoryAge()>15*60*1000)return 'Run cleanup safety check';
+ if(m.id===scan.headId||Number(m.revision)===Number(scan.headRevision))return 'Current published revision';
+ if(scan.snapshots.slice(0,10).some(x=>x.id===m.id))return 'Among 10 newest revisions';
+ if(Number(p8GetBaseline()?.revision)===Number(m.revision))return 'This device’s sync baseline';
+ if(scan.dependencies.includes(Number(m.revision)))return 'Required by a pending proposal';
+ if(!m.archived)return 'Archive first';
+ if(m.sourceUid!==state.p8Cloud?.user?.uid)return 'Created by another Guardian';
+ if(p49InventoryEligible(m))return 'Eligible for individual review';
+ return 'Protected by cleanup safeguards';
+}
+function p53SnapshotSummary(){
+ const scan=state.p49.inventory, current=scan&&p49InventoryAge()<=15*60*1000;
+ const all=scan?.snapshots||[], chunks=all.reduce((n,m)=>n+Math.max(0,Number(m.chunks)||0),0);
+ const candidates=current?all.filter(p49InventoryEligible).length:0;
+ const head=state.p51?.headSize,measure=state.p49.measure;
+ const latest=measure&&current?measure.bytes:head?.bytes;
+ return `<div class="p53-history-tools" aria-label="Snapshot management">
+ <div class="p53-tools-heading"><div><strong>🌷 Recovery & storage</strong><p>See what is actually stored in <strong>Cloud Firestore</strong>, then manage old revisions below. Local changes remain saved immediately.</p></div><button type="button" class="btn btn-soft" data-p53-action="inspect" ${state.p53.refreshBusy?'disabled':''}>${state.p53.refreshBusy?'Inspecting…':scan?'↻ Refresh & Check Safety':'🔎 Inspect Snapshots & Check Safety'}</button></div>
+ ${scan?`<div class="p53-metrics"><div><strong>${money(all.length)}</strong><small>Snapshot manifests</small></div><div><strong>${money(chunks)}</strong><small>Data chunks</small></div><div><strong>${money(Math.min(10,all.length))}</strong><small>Newest revisions protected</small></div><div><strong>${money(candidates)}</strong><small>Eligible for deletion review</small></div></div><p class="p53-subnote">Published revision ${money(scan.headRevision)} · ${money(scan.dependencies.length)} pending-proposal revision references. ${current?'Safety scan is current.':'Safety scan is older than 15 minutes; refresh before deletion.'}</p>`:
+ '<p class="p53-instruction">Inspect the snapshots once to see the actual revision count and which archived revisions can be reviewed for deletion. Nothing is deleted during inspection.</p>'}
+ ${latest?`<p class="p53-size">Measured current snapshot JSON: <strong>${(latest/1048576).toFixed(2)} MiB</strong>. This is a payload estimate, <strong>not</strong> the total billed Firestore storage.</p>`:''}
+ ${scan?`<div class="p53-tools-actions"><button class="btn btn-plain btn-small" type="button" data-p53-action="measure" ${state.p49.measureBusy?'disabled':''}>${state.p49.measureBusy?'Measuring…':'Measure latest revision'}</button><button class="btn btn-plain btn-small" type="button" data-p53-action="device" ${state.p49.readinessBusy?'disabled':''}>${state.p49.readinessBusy?'Checking…':'Check this device’s recovery'}</button></div>`:''}
+ ${scan&&state.p49.readiness?`<p class="p53-readiness">This device: baseline ${state.p49.readiness.baseline?'revision '+money(state.p49.readiness.baseline):'unknown'} · ${state.p49.readiness.localDirty?'Unsynced local edits':state.p49.readiness.localDirty===false?'No edits since baseline':'Local change status unknown'} · ${state.p49.readiness.baseInCloud?'Baseline retained':'Baseline missing or unknown'}${state.p49.readiness.needsAttention?' · <strong>Review Family Sync before deletion</strong>':''}</p>`:''}
+ ${state.p53.refreshError||state.p49.inventoryError?`<p class="p49-error" role="alert">${esc(state.p53.refreshError||state.p49.inventoryError)}</p>`:''}
+ <p class="p53-warning">🛡️ Snapshots may be needed by devices that have been offline for a long time. Only the verified owner can delete an <strong>archived</strong>, eligible revision, one at a time, after a backup and device-safety acknowledgment. No automatic cleanup.</p>
+ </div>`;
+}
+const p53PreviousPage=p8CloudPage;
+p8CloudPage=function(){
+ const root=document.createElement('div');root.innerHTML=p53PreviousPage();
+ // Fix the old copy that described a now-automatic workflow as manual.
+ root.querySelectorAll('.p14-overview p').forEach(p=>{if(/Sync is manual and never merges conflicting star records automatically/i.test(p.textContent||''))p.textContent='Progress saves locally immediately. Automatic sharing waits five quiet minutes (up to twenty during continuous editing); changes that need Guardian review are not silently overwritten.';});
+ const duplicate=root.querySelector('.p49-recovery-panel');
+ const diagnostics=duplicate?.querySelector('.p52-panel');
+ if(diagnostics)diagnostics.remove();
+ if(duplicate)duplicate.remove();
+ if(!p14OwnerVerified())return root.innerHTML;
+ const history=root.querySelector('.p19-history-section,.p14-history');
+ if(!history)return root.innerHTML;
+ history.querySelector('h3')?.replaceChildren(document.createTextNode('🕰️ Snapshot History & Storage'));
+ const description=history.querySelector(':scope > .p14-row .p2-muted');
+ if(description)description.textContent='One place to inspect, preview, archive and safely manage recovery revisions.';
+ const heading=history.querySelector(':scope > .p14-row');
+ if(heading)heading.insertAdjacentHTML('afterend',p53SnapshotSummary());
+ history.querySelectorAll('.p26-snapshot-note,.p19-owner-warning').forEach(x=>x.remove());
+ history.querySelector('.p22-more-history')?.remove();
+ const list=history.querySelector('.p14-snapshot-list');
+ if(list){
+  const scan=state.p49.inventory;
+  const cards=[...list.querySelectorAll(':scope > .p14-snapshot')];
+  for(const card of cards){
+   if(card.hidden)continue;
+   const id=card.querySelector('[data-p14-action="snapshot-preview"]')?.dataset.id;
+   const row=(scan?.snapshots||state.p14History).find(m=>m.id===id);
+   if(!row)continue;
+   const stamp=document.createElement('span');stamp.className='p53-revision-status';
+   stamp.textContent=p53SnapshotReason(row,scan);
+   stamp.classList.toggle('eligible',stamp.textContent==='Eligible for individual review');
+   card.querySelector('.grow')?.append(stamp);
+  }
+  const visible=cards.filter(x=>!x.hidden),size=10,pages=Math.max(1,Math.ceil(visible.length/size));
+  state.p53.page=Math.min(pages,Math.max(1,state.p53.page));
+  visible.forEach((c,i)=>{c.hidden=i<(state.p53.page-1)*size||i>=state.p53.page*size;});
+  if(pages>1)list.insertAdjacentHTML('afterend',`<div class="p53-pager"><small>Showing ${Math.min(visible.length,(state.p53.page-1)*size+1)}–${Math.min(visible.length,state.p53.page*size)} of ${visible.length} snapshots</small><div><button type="button" class="btn btn-soft btn-small" data-p53-action="page" data-page="${state.p53.page-1}" ${state.p53.page===1?'disabled':''}>← Previous</button><span>Page ${state.p53.page} / ${pages}</span><button type="button" class="btn btn-soft btn-small" data-p53-action="page" data-page="${state.p53.page+1}" ${state.p53.page===pages?'disabled':''}>Next →</button></div></div>`);
+ }
+ if(diagnostics){
+  const details=document.createElement('details');details.className='p53-troubleshoot';
+  details.innerHTML='<summary>🔧 Troubleshooting — Firestore permissions & device sync</summary><p class="p2-muted tiny">Use these checks only if the snapshot inventory or Family Sync has a problem. They never modify cloud data.</p>';
+  details.append(diagnostics);history.append(details);
+ }
+ return root.innerHTML;
+};
+// Owner Snapshot History must use the exact paginated safety inventory rather
+// than the legacy fixed .limit(15) query, which can be denied by Firestore rules.
+async function p53LoadOwnerHistory(){
+ if(!p14OwnerVerified())throw Error('Only the verified family owner can inspect and manage cloud snapshots.');
+ if(state.p53.refreshBusy)return;
+ state.p53.refreshBusy=true;state.p53.refreshError='';state.p49.inventoryError='';state.p14HistoryLoading=true;render();
+ try{
+  const scan=await p49ScanInventory();
+  state.p14History=scan.snapshots.filter(m=>Number.isSafeInteger(Number(m.revision))&&Number(m.revision)>0&&Number(m.revision)<=scan.headRevision);
+  state.p14HistoryLoaded=true;
+  state.p22.moreHistory=false;
+  p8CloudStatus(`Found ${scan.snapshots.length} Firestore snapshot revisions. No data was deleted.`);
+ }catch(e){state.p49.inventory=null;state.p14HistoryLoaded=false;state.p53.refreshError=String(e.message||e);}
+ finally{state.p53.refreshBusy=false;state.p14HistoryLoading=false;render();}
+}
+const p53PriorHistoryLoad=p14HistoryLoad;
+p14HistoryLoad=async function(){
+ if(p14OwnerVerified())return p53LoadOwnerHistory();
+ return p53PriorHistoryLoad();
+};
+// Use source:'server' for all safety checks, rechecking the full inventory
+// at deletion time, including any pending proposals. Never delete based on
+// a partial list or an old, cached safety scan.
+p22PermanentlyDelete=async function(id){
+ if(!p14OwnerVerified())throw Error('Only the verified family owner can permanently delete old snapshots.');
+ if(!state.p49.backupAcknowledged||!state.p49.deviceAcknowledged)throw Error('Confirm your saved recovery backup and offline-device safety checks first.');
+ if(!navigator.onLine)throw Error('Connect to Firestore before attempting snapshot cleanup.');
+ const scan=await p49ScanInventory(),record=scan.snapshots.find(x=>x.id===id);
+ if(!record||!p49InventoryEligible(record))throw Error('This snapshot is protected, unarchived, or needed for recovery. Nothing was deleted.');
+ if(record.sourceUid!==state.p8Cloud?.user?.uid||record.archived!==true)throw Error('Only your own archived snapshots can be deleted.');
+ const family=p8FamilyRef(),head=await p8CloudSyncDoc().get({source:'server'});
+ if(!head.exists||head.data()?.snapshotId===id||Number(head.data()?.revision)!==scan.headRevision)throw Error('The cloud revision changed during cleanup. Please inspect again.');
+ const ref=family.collection('snapshots').doc(id),manifest=await ref.get({source:'server'});
+ if(!manifest.exists||!manifest.data().archived||manifest.data().sourceUid!==state.p8Cloud.user.uid||Number(manifest.data().revision)!==Number(record.revision))throw Error('The archived snapshot changed. No deletion occurred.');
+ const chunks=await ref.collection('chunks').get({source:'server'});
+ if(chunks.size!==Number(manifest.data().chunks))throw Error('Snapshot data chunks are incomplete; deletion is blocked.');
+ if(chunks.size>450)throw Error('Too many chunks for a safe single-browser batch. No deletion occurred.');
+ const backup=p8DownloadCloudChunks(manifest.data(),chunks);
+ // The user was required to export and acknowledge a backup before this point.
+ downloadText(`My-Little-Star-Garden-Deleted-Snapshot-Revision-${record.revision}.json`,JSON.stringify(backup,null,2),'application/json');
+ const db=state.p8Cloud.db;if(!db)throw Error('Cloud database connection is missing. No deletion occurred.');
+ const batch=db.batch();chunks.docs.forEach(d=>batch.delete(d.ref));batch.delete(ref);
+ await batch.commit();
+ state.p49.inventory=null;state.p49.readiness=null;state.p49.measure=null;
+ state.p49.backupAcknowledged=false;state.p49.deviceAcknowledged=false;
+ state.p14History=state.p14History.filter(x=>x.id!==id);
+ state.p14Snapshot=null;state.p14HistoryLoaded=false;
+ p8CloudStatus(`Archived snapshot revision ${record.revision} and its chunks were deleted. Your recovery JSON was prepared.`);
+};
+// Intercept snapshot refresh before legacy list queries and wire the controls
+// into the one consolidated Snapshot History manager.
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-p53-action], [data-p14-action="refresh-history"]');
+ if(!b||state.view!=='guardian'||!p14OwnerVerified())return;
+ e.preventDefault();e.stopImmediatePropagation();
+ const a=b.dataset.p53Action||'inspect';
+ if(a==='inspect'){p53LoadOwnerHistory();return;}
+ if(a==='page'){
+  const n=Number(b.dataset.page);if(Number.isInteger(n)&&n>=1){state.p53.page=n;render();}
+  return;
+ }
+ if(a==='measure'){
+  if(state.p49.measureBusy)return;
+  state.p49.measureBusy=true;state.p49.inventoryError='';render();
+  p49MeasureCurrent().catch(err=>{state.p49.inventoryError=String(err.message||err);}).finally(()=>{state.p49.measureBusy=false;render();});return;
+ }
+ if(a==='device'){
+  if(state.p49.readinessBusy)return;
+  state.p49.readinessBusy=true;state.p49.inventoryError='';render();
+  p49RunReadiness().catch(err=>{state.p49.inventoryError=String(err.message||err);}).finally(()=>{state.p49.readinessBusy=false;render();});return;
+ }
+},true);
+const P53_CSS=String.raw`
+#app .p53-history-tools{padding:17px;margin:14px 0 17px;background:linear-gradient(145deg,#fff9fc,#f9f5fd);border:1px solid #eddce8;border-radius:19px;display:grid;gap:12px}
+#app .p53-tools-heading{display:flex;align-items:center;justify-content:space-between;gap:13px;flex-wrap:wrap}
+#app .p53-tools-heading>div{flex:1 1 260px}
+#app .p53-tools-heading strong{font-size:1.13rem;color:#74546b}
+#app .p53-tools-heading p,#app .p53-subnote,#app .p53-instruction{font-size:.84rem;color:#866e81;margin:6px 0 0;line-height:1.55}
+#app .p53-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+#app .p53-metrics>div{padding:13px;background:white;border:1px solid #eadce6;border-radius:13px;display:grid;gap:3px}
+#app .p53-metrics strong{font-size:clamp(1.2rem,2.3vw,1.75rem);color:#74526b}
+#app .p53-metrics small{font-size:.75rem;color:#977d8f;line-height:1.4}
+#app .p53-size,#app .p53-readiness{margin:0;padding:11px 13px;background:#f7eff7;border-radius:12px;color:#755e72;font-size:.82rem;line-height:1.55}
+#app .p53-tools-actions{display:flex;gap:9px;flex-wrap:wrap}
+#app .p53-warning{margin:2px 0 0;padding:12px;background:#fff8eb;border:1px solid #efdec2;color:#7a624a;border-radius:13px;font-size:.82rem;line-height:1.6}
+#app .p53-revision-status{display:block;margin-top:6px;font-size:.76rem;color:#8e788a}
+#app .p53-revision-status.eligible{color:#487758;font-weight:700}
+#app .p53-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px}
+#app .p53-pager>div{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#app .p53-pager small{color:#8b7486}
+#app .p53-troubleshoot{margin:18px 0 4px;border:1px solid #e9dce6;border-radius:16px;padding:13px;background:#fffafd}
+#app .p53-troubleshoot summary{cursor:pointer;font-weight:750;color:#78556f}
+#app .p53-troubleshoot>.p2-muted{margin:12px 0 0}
+#app .p53-troubleshoot .p52-panel{margin:12px 0 0}
+@media(max-width:720px){#app .p53-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#app .p53-tools-heading>.btn{width:100%}#app .p53-pager>div{width:100%;justify-content:space-between}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P53_BUILD}">${P53_CSS}</style>`);
+/* ===== End Phase 6F.2.2 ===== */
 
 </script>
 </body>
