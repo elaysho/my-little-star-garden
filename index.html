@@ -15742,6 +15742,282 @@ const P53_CSS=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P53_BUILD}">${P53_CSS}</style>`);
 /* ===== End Phase 6F.2.2 ===== */
+/* ===== Phase 6F.2.3: owner-only batch archive and protected bulk deletion =====
+ * All data stays in Cloud Firestore; no Firebase Storage, backend, or rules changes.
+ * Archive is reversible metadata. Delete requires a full live scan, a per-revision
+ * recovery ZIP downloaded in advance, and explicit owner/device acknowledgements.
+ */
+const P54_BUILD='mlsg-phase-6f2.3-bulk-snapshot-cleanup-20261119';
+state.p54={mode:'delete',selected:[],dialog:'',busy:false,error:'',progress:'',results:[],prepared:null,zipBlob:null,downloaded:false,backupAck:false,devicesAck:false,limit:15};
+function p54Scan(){const scan=state.p49.inventory;return scan&&p49InventoryAge()<=15*60*1000?scan:null;}
+function p54ArchiveEligible(m,scan=p54Scan()){
+ if(!scan||!p14OwnerVerified()||!m||m.archived||m.sourceUid!==state.p8Cloud?.user?.uid)return false;
+ const newest=new Set(scan.snapshots.slice(0,10).map(x=>x.id));
+ const baseline=Number(p8GetBaseline()?.revision||0);
+ return !newest.has(m.id)&&m.id!==scan.headId&&Number(m.revision)<Number(scan.headRevision)&&Number(m.revision)!==baseline&&!scan.dependencies.includes(Number(m.revision));
+}
+function p54Eligible(m,mode=state.p54.mode,scan=p54Scan()){
+ return mode==='archive'?p54ArchiveEligible(m,scan):!!scan&&p49InventoryEligible(m);
+}
+function p54Selection(){
+ const scan=p54Scan();if(!scan)return [];
+ return state.p54.selected.map(id=>scan.snapshots.find(x=>x.id===id)).filter(x=>p54Eligible(x));
+}
+function p54ClearPrepare(){state.p54.prepared=null;state.p54.zipBlob=null;state.p54.downloaded=false;state.p54.backupAck=false;state.p54.devicesAck=false;}
+function p54Reconcile(){
+ const valid=new Set((p54Scan()?.snapshots||[]).filter(m=>p54Eligible(m)).map(m=>m.id));
+ state.p54.selected=state.p54.selected.filter(id=>valid.has(id)).slice(0,state.p54.limit);
+}
+function p54ArchiveLabel(m){return `Revision ${money(m.revision)} · ${money(Number(m.chunks||0))} chunk${Number(m.chunks)===1?'':'s'}`;}
+function p54Toolbar(){
+ const scan=p54Scan(),mode=state.p54.mode;
+ p54Reconcile();const n=p54Selection().length;
+ const available=scan?scan.snapshots.filter(m=>p54Eligible(m)).length:0;
+ const label=mode==='delete'?'Archived revisions ready for safe deletion':'Older revisions available for archiving';
+ const disabled=state.p54.busy?'disabled':'';
+ return `<div class="p54-toolbar" aria-label="Batch snapshot management">
+  <div class="p54-toolbar-top"><div><strong>🧺 Manage multiple snapshots</strong><p>Choose revisions across history pages. Only owner-created, unprotected revisions can be selected.</p></div><span class="p54-selection-chip">${n} selected · up to ${state.p54.limit}</span></div>
+  <div class="p54-mode-row"><button type="button" data-p54-action="mode" data-mode="delete" class="btn btn-small ${mode==='delete'?'btn-primary':'btn-plain'}" ${disabled}>🗑 Delete archived</button><button type="button" data-p54-action="mode" data-mode="archive" class="btn btn-small ${mode==='archive'?'btn-primary':'btn-plain'}" ${disabled}>📦 Archive old revisions</button></div>
+  <div class="p54-actions"><small>${scan?`${available} ${label.toLowerCase()}`:'Inspect snapshots first to unlock eligible selections.'}</small><div><button class="btn btn-plain btn-small" type="button" data-p54-action="select-page" ${!scan||state.p54.busy||!available?'disabled':''}>Select eligible on this page</button><button class="btn btn-plain btn-small" type="button" data-p54-action="select-all" ${!scan||state.p54.busy||!available?'disabled':''}>Select up to ${state.p54.limit}</button><button class="btn btn-plain btn-small" type="button" data-p54-action="clear" ${!n||state.p54.busy?'disabled':''}>Clear</button></div></div>
+  <button type="button" class="btn ${mode==='delete'?'p54-delete-button':'btn-soft'}" data-p54-action="open" ${!n||state.p54.busy?'disabled':''}>${mode==='delete'?`Review & Back Up ${n} for Deletion`:`Archive ${n} Selected Revision${n===1?'':'s'}`}</button>
+  <p class="p54-caution">Bulk deletion is permanent. The current revision, newest 10, pending proposal dependencies, and this device’s sync baseline stay protected. Other offline devices cannot be detected automatically.</p>
+  ${state.p54.progress?`<p class="p54-progress" role="status">${esc(state.p54.progress)}</p>`:''}
+  ${state.p54.error?`<p class="p49-error" role="alert">${esc(state.p54.error)}</p>`:''}
+  ${state.p54.results.length?`<details class="p54-results" open><summary>Last batch results</summary>${state.p54.results.map(r=>`<div class="p54-result"><span>Revision ${esc(r.revision)}</span><span class="${r.ok?'good':'bad'}">${r.ok?'✓ '+(r.mode==='archive'?'Archived':'Deleted'):'Not changed · '+esc(r.error)}</span></div>`).join('')}</details>`:''}
+ </div>`;
+}
+function p54Dialog(){
+ const s=state.p54;if(!s.dialog)return '';
+ const rows=p54Selection(),n=rows.length;
+ const valid=!!p54Scan()&&n>0&&n===s.selected.length;
+ const archive=s.mode==='archive';
+ const confirmWord=archive?`ARCHIVE ${n}`:`DELETE ${n}`;
+ const ready=s.prepared&&s.prepared.ids.join('|')===rows.map(m=>m.id).join('|')&&Date.now()-s.prepared.at<10*60*1000;
+ const listed=rows.map(r=>`<span class="p54-pill">#${money(r.revision)}</span>`).join('');
+ return `<div class="p54-overlay" role="presentation"><section class="p54-dialog" role="dialog" aria-modal="true" aria-labelledby="p54-title">
+ <div class="p54-dialog-header"><div><p class="eyebrow">Guardian · Owner recovery</p><h2 id="p54-title">${archive?'📦 Archive Selected Snapshots':'🗑 Permanently Delete Archived Snapshots'}</h2></div><button type="button" class="btn btn-plain btn-small" data-p54-action="close" ${s.busy?'disabled':''}>✕ Close</button></div>
+ <div class="p54-dialog-body"><p>${archive?'Archive metadata only; recovery data and all chunks remain stored in Firestore.':`Delete <strong>${n}</strong> archived revisions and their chunks. The latest published garden and spendable stars will not be touched.`}</p>
+ <div class="p54-pills">${listed}</div>
+ ${archive?'<p class="p54-caution">Archiving does not reclaim Firestore storage. It is a separate, reversible step before permanent deletion.</p>':
+ `<div class="p54-backup-section"><strong>01 · Download a recovery ZIP</strong><p>One ZIP containing a separate, app-compatible JSON backup for every revision. Keep it in a private folder before continuing.</p>
+ <div class="p54-backup-buttons"><button type="button" class="btn btn-soft" data-p54-action="prepare" ${s.busy||!valid?'disabled':''}>${s.busy?'Preparing…':ready?'↻ Prepare Again':'01 · Prepare Recovery ZIP'}</button>
+ <button type="button" class="btn btn-primary" data-p54-action="download" ${s.busy||!ready||!s.zipBlob?'disabled':''}>⬇ 02 · Download ZIP</button></div>
+ ${ready?`<p class="p54-ready">Prepared ${s.prepared.count} revision${s.prepared.count===1?'':'s'} · ${((s.prepared.bytes||0)/1048576).toFixed(2)} MiB. ${s.downloaded?'Download started—verify the ZIP opens on your device.':'Now select Download ZIP; this second tap helps on iPhone Safari.'}</p>`:''}
+ </div><div class="p54-safety"><label><input id="p54-backup-ack" type="checkbox" ${s.backupAck?'checked':''} ${!ready||!s.downloaded||s.busy?'disabled':''}> I have saved the recovery ZIP and checked that it contains the selected revision backups.</label>
+ <label><input id="p54-device-ack" type="checkbox" ${s.devicesAck?'checked':''} ${!ready||!s.downloaded||s.busy?'disabled':''}> I have checked the family devices I know about. I understand a device offline for a long time may still need one of these revisions.</label></div>`}
+ <label class="p54-type"><strong>Type ${confirmWord} to confirm</strong><input id="p54-confirm-word" value="" autocomplete="off" spellcheck="false" placeholder="${confirmWord}" ${s.busy?'disabled':''}></label>
+ ${s.progress?`<p class="p54-progress" role="status">${esc(s.progress)}</p>`:''}${s.error?`<p role="alert" class="p49-error">${esc(s.error)}</p>`:''}
+ </div><div class="p54-dialog-footer"><button type="button" class="btn ${archive?'btn-primary':'p54-delete-button'}" data-p54-action="confirm" ${!valid||s.busy||(!archive&&!ready)?'disabled':''}>${s.busy?'Working…':archive?`Archive ${n} Revisions`:`Permanently Delete ${n} Revisions`}</button><button type="button" class="btn btn-plain" data-p54-action="close" ${s.busy?'disabled':''}>Cancel</button></div>
+ </section></div>`;
+}
+// Create a portable ZIP without loading a library or using Firebase Storage.
+// Entries are ordinary, individually restorable JSON backups (stored, not compressed).
+function p54Zip(entries){
+ const encoder=new TextEncoder(),parts=[],center=[];let pos=0,total=0;
+ const crc=bytes=>{let x=0xffffffff;for(const b of bytes){x^=b;for(let i=0;i<8;i++)x=x&1?(x>>>1)^0xedb88320:x>>>1;}return (x^0xffffffff)>>>0;};
+ const u16=(v,i,n)=>v.setUint16(i,n,true),u32=(v,i,n)=>v.setUint32(i,n>>>0,true);
+ for(const e of entries){const name=encoder.encode(e.name),content=encoder.encode(e.text);if(name.length>65535)throw Error('Invalid backup filename.');
+  total+=content.length;if(total>80*1048576)throw Error('Combined recovery ZIP exceeds 80 MiB. Select fewer snapshots in this batch. Nothing was deleted.');
+  const sum=crc(content),header=new Uint8Array(30+name.length),h=new DataView(header.buffer);u32(h,0,0x04034b50);u16(h,4,20);u16(h,6,0x0800);u16(h,8,0);u32(h,14,sum);u32(h,18,content.length);u32(h,22,content.length);u16(h,26,name.length);header.set(name,30);parts.push(header,content);
+  const central=new Uint8Array(46+name.length),c=new DataView(central.buffer);u32(c,0,0x02014b50);u16(c,4,20);u16(c,6,20);u16(c,8,0x0800);u32(c,16,sum);u32(c,20,content.length);u32(c,24,content.length);u16(c,28,name.length);u32(c,42,pos);central.set(name,46);center.push(central);pos+=header.length+content.length;
+ }
+ const centerSize=center.reduce((n,a)=>n+a.length,0),end=new Uint8Array(22),d=new DataView(end.buffer);u32(d,0,0x06054b50);u16(d,8,entries.length);u16(d,10,entries.length);u32(d,12,centerSize);u32(d,16,pos);
+ return new Blob([...parts,...center,end],{type:'application/zip'});
+}
+function p54DownloadZip(blob,filename){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+async function p54Prepare(){
+ const s=state.p54;if(s.busy||s.mode!=='delete')return;
+ s.busy=true;s.error='';s.progress='Checking every selected revision and its dependencies…';p54ClearPrepare();render();
+ try{
+  if(!p14OwnerVerified())throw Error('Owner authentication is required.');
+  const scan=await p49ScanInventory(),ids=s.selected.slice(),rows=ids.map(id=>scan.snapshots.find(m=>m.id===id));
+  if(!ids.length||ids.length>s.limit||rows.some(m=>!p49InventoryEligible(m)))throw Error('Some selected revisions are no longer eligible. Refresh and select again.');
+  const entries=[],info=[];
+  for(let i=0;i<rows.length;i++){
+   const m=rows[i];s.progress=`Reading backup ${i+1} of ${rows.length} · revision ${m.revision}`;render();
+   const found=await p14SnapshotFetch(m.id);
+   if(Number(found.manifest.revision)!==Number(m.revision)||!found.manifest.archived||found.manifest.sourceUid!==state.p8Cloud.user.uid)throw Error(`Revision ${m.revision} changed during backup preparation.`);
+   const filename=`My-Little-Star-Garden-Revision-${m.revision}.json`;
+   entries.push({name:filename,text:JSON.stringify(found.backup,null,2)});
+   info.push({id:m.id,revision:Number(m.revision),chunks:Number(m.chunks||0),filename});
+  }
+  entries.push({name:'READ-ME-FIRST.txt',text:'My Little Star Garden - bulk snapshot safety backups\n\nEach Revision-*.json file is a separate My Little Star Garden backup. Extract the JSON you need from this ZIP before using Restore JSON in the app.\n\nThese are private family backups. Do not share the archive publicly.\n\nBulk deletion does not affect the current published revision, but older offline family devices may still require a deleted revision.\n'});
+  const blob=p54Zip(entries);
+  s.zipBlob=blob;
+  s.prepared={ids,info,at:Date.now(),headId:scan.headId,headRevision:scan.headRevision,count:rows.length,bytes:blob.size};
+  s.progress='Recovery ZIP is prepared. Select Download ZIP, verify it opens, then acknowledge the safety checks.';
+ }catch(e){s.error=String(e.message||e);s.prepared=null;s.progress='No snapshots deleted.';}
+ finally{s.busy=false;render();}
+}
+async function p54Archive(){
+ const s=state.p54,ids=s.selected.slice(),list=ids.map(id=>p54Scan()?.snapshots.find(m=>m.id===id));
+ if(!ids.length||ids.length>s.limit||list.some(m=>!p54ArchiveEligible(m)))throw Error('Please refresh and select eligible, older revisions.');
+ let done=0;
+ for(const m of list){
+  s.progress=`Archiving ${done+1} of ${list.length}: revision ${m.revision}`;render();
+  try{
+   const scan=await p49ScanInventory(),fresh=scan.snapshots.find(x=>x.id===m.id);
+   if(!p54ArchiveEligible(fresh,scan))throw Error('Protected or changed since selection.');
+   const head=await p8CloudSyncDoc().get({source:'server'});
+   if(!head.exists||head.data()?.snapshotId===m.id||Number(head.data()?.revision)!==Number(scan.headRevision))throw Error('Published revision changed; refresh and try again.');
+   const ref=p8FamilyRef().collection('snapshots').doc(m.id),doc=await ref.get({source:'server'});
+   if(!doc.exists||doc.data()?.archived||doc.data()?.sourceUid!==state.p8Cloud.user.uid||Number(doc.data()?.revision)!==Number(m.revision))throw Error('Snapshot changed on server.');
+   await ref.update({archived:true,archivedAt:window.firebase.firestore.FieldValue.serverTimestamp(),archivedByUid:state.p8Cloud.user.uid});
+   s.results.push({revision:m.revision,mode:'archive',ok:true});done++;
+   s.selected=s.selected.filter(id=>id!==m.id);
+  }catch(e){s.results.push({revision:m.revision,mode:'archive',ok:false,error:String(e.message||e)});throw Error(`Stopped at revision ${m.revision}: ${e.message||e}. ${done} archived.`);}
+ }
+ s.progress=`Archived ${done} revision${done===1?'':'s'}. Storage is unchanged until permanent deletion.`;
+}
+async function p54Delete(){
+ const s=state.p54,prepared=s.prepared,ids=s.selected.slice();
+ if(!prepared||!s.downloaded||ids.length===0||ids.length>s.limit||prepared.ids.join('|')!==ids.join('|')||Date.now()-prepared.at>10*60*1000)throw Error('Your recovery backup is missing or expired. Prepare it again.');
+ if(!s.backupAck||!s.devicesAck)throw Error('Confirm that the recovery ZIP was saved and the family devices were checked.');
+ const baseline=await p49RunReadiness();
+ if(baseline.needsAttention||baseline.localDirty!==false||!baseline.baseline||!baseline.baseInCloud)throw Error('This device has outstanding local changes or a missing sync baseline; resolve Family Sync before deleting.');
+ let done=0;
+ for(const entry of prepared.info){
+  s.progress=`Permanently deleting ${done+1} of ${ids.length}: revision ${entry.revision}`;render();
+  try{
+   const scan=await p49ScanInventory(),m=scan.snapshots.find(x=>x.id===entry.id);
+   if(scan.headId!==prepared.headId||Number(scan.headRevision)!==Number(prepared.headRevision))throw Error('Published cloud revision changed since backup.');
+   if(!p49InventoryEligible(m)||Number(m.revision)!==entry.revision||Number(m.chunks)!==entry.chunks)throw Error('Snapshot no longer passes live safety checks.');
+   const ref=p8FamilyRef().collection('snapshots').doc(entry.id),doc=await ref.get({source:'server'});
+   if(!doc.exists||!doc.data()?.archived||doc.data()?.sourceUid!==state.p8Cloud.user.uid||Number(doc.data()?.revision)!==entry.revision||Number(doc.data()?.chunks)!==entry.chunks)throw Error('Manifest changed since backup was prepared.');
+   const head=await p8CloudSyncDoc().get({source:'server'});
+   if(!head.exists||head.data()?.snapshotId!==prepared.headId||Number(head.data()?.revision)!==Number(prepared.headRevision))throw Error('Cloud revision changed during cleanup.');
+   const chunks=await ref.collection('chunks').get({source:'server'});
+   if(chunks.size!==entry.chunks||chunks.size>450)throw Error('Unexpected chunk count; deletion blocked.');
+   const batch=state.p8Cloud.db.batch();chunks.docs.forEach(d=>batch.delete(d.ref));batch.delete(ref);
+   await batch.commit();
+   s.results.push({revision:entry.revision,mode:'delete',ok:true});done++;
+   s.selected=s.selected.filter(id=>id!==entry.id);
+  }catch(e){s.results.push({revision:entry.revision,mode:'delete',ok:false,error:String(e.message||e)});throw Error(`Stopped at revision ${entry.revision}: ${e.message||e}. ${done} deleted. Remaining revisions were not changed.`);}
+ }
+ s.progress=`Permanently deleted ${done} archived revisions and their chunks. Keep the recovery ZIP.`;
+}
+async function p54Confirm(){
+ const s=state.p54;if(s.busy)return;
+ const rows=p54Selection(),n=rows.length,expected=(s.mode==='archive'?'ARCHIVE ':'DELETE ')+n;
+ const typed=String(document.getElementById('p54-confirm-word')?.value||'').trim().toUpperCase();
+ s.backupAck=!!document.getElementById('p54-backup-ack')?.checked;s.devicesAck=!!document.getElementById('p54-device-ack')?.checked;
+ if(typed!==expected){s.error=`Type ${expected} exactly to proceed.`;render();return;}
+ if(!p14OwnerVerified()||!navigator.onLine){s.error='You must be online and signed in as the verified owner.';render();return;}
+ if(!n||n!==s.selected.length||n>s.limit){s.error='Some revisions changed. Refresh the inventory and select again.';render();return;}
+ if(s.mode==='delete'&&(!s.backupAck||!s.devicesAck)){s.error='Confirm your recovery ZIP and offline-device checks.';render();return;}
+ s.busy=true;s.error='';s.results=[];render();
+ try{
+  if(s.mode==='archive')await p54Archive();else await p54Delete();
+  s.dialog='';s.selected=[];p54ClearPrepare();
+ }catch(e){s.error=String(e.message||e);s.dialog='';p54ClearPrepare();}
+ finally{
+  s.busy=false;state.p49.inventory=null;state.p49.readiness=null;state.p49.measure=null;
+  state.p14HistoryLoaded=false;state.p14History=[];
+  // A partial result must always trigger a fresh inventory before new deletion.
+  try{await p53LoadOwnerHistory();}catch(e){s.error=s.error||String(e.message||e);}
+  render();
+ }
+}
+const p54PriorPage=p8CloudPage;
+p8CloudPage=function(){
+ const root=document.createElement('div');root.innerHTML=p54PriorPage();
+ if(!p14OwnerVerified())return root.innerHTML;
+ const history=root.querySelector('.p19-history-section,.p14-history');if(!history)return root.innerHTML;
+ const list=history.querySelector('.p14-snapshot-list');
+ if(list){
+  list.before(document.createRange().createContextualFragment(p54Toolbar()));
+  const rows=[...list.querySelectorAll('.p14-snapshot')];
+  rows.forEach(card=>{
+   const id=card.querySelector('[data-p14-action="snapshot-preview"]')?.dataset.id;
+   const m=p54Scan()?.snapshots.find(x=>x.id===id);
+   if(!m||!p54Eligible(m))return;
+   const checked=state.p54.selected.includes(id);
+   const choice=document.createElement('label');choice.className='p54-choice';choice.innerHTML=`<input type="checkbox" data-p54-id="${esc(id)}" ${checked?'checked':''} ${state.p54.busy||(!checked&&state.p54.selected.length>=state.p54.limit)?'disabled':''} aria-label="Select revision ${money(m.revision)}"><span>Select</span>`;
+   card.prepend(choice);card.classList.add('p54-selectable');
+  });
+ }
+ return root.innerHTML;
+};
+const p54PriorRender=render;
+render=function(){p54PriorRender();
+ if((state.view!=='guardian'||!p14OwnerVerified())&&state.p54.prepared)p54ClearPrepare();
+ if(state.p54.dialog&&state.view==='guardian'&&p14OwnerVerified()&&!document.querySelector('.p54-overlay'))app.querySelector('main')?.insertAdjacentHTML('beforeend',p54Dialog());
+};
+// Render occurs on each action; all selections are checked against the latest loaded scan.
+document.addEventListener('change',event=>{
+ const input=event.target.closest('[data-p54-id]');if(!input)return;
+ const id=input.dataset.p54Id,scan=p54Scan(),m=scan?.snapshots.find(r=>r.id===id);
+ if(!p54Eligible(m)||state.p54.busy){render();return;}
+ const current=new Set(state.p54.selected);if(input.checked&&current.size<state.p54.limit)current.add(id);else if(!input.checked)current.delete(id);
+ state.p54.selected=[...current];p54ClearPrepare();state.p54.error='';render();
+},true);
+document.addEventListener('change',event=>{
+ if(event.target?.id==='p54-backup-ack')state.p54.backupAck=event.target.checked;
+ if(event.target?.id==='p54-device-ack')state.p54.devicesAck=event.target.checked;
+},true);
+document.addEventListener('click',event=>{
+ const b=event.target.closest('[data-p54-action]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();const s=state.p54,a=b.dataset.p54Action;
+ if(s.busy)return;
+ if(a==='mode'){s.mode=b.dataset.mode==='archive'?'archive':'delete';s.selected=[];s.error='';s.results=[];s.dialog='';p54ClearPrepare();render();return;}
+ if(a==='clear'){s.selected=[];s.error='';p54ClearPrepare();render();return;}
+ if(a==='select-all'||a==='select-page'){
+  const scan=p54Scan();if(!scan)return;
+  const eligible=scan.snapshots.filter(m=>p54Eligible(m));
+  let choices=eligible;
+  if(a==='select-page'){
+   const list=app.querySelector('.p14-snapshot-list');const visible=new Set([...list?.querySelectorAll('.p14-snapshot:not([hidden]) [data-p14-action="snapshot-preview"]')||[]].map(x=>x.dataset.id));
+   choices=eligible.filter(m=>visible.has(m.id));
+  }
+  s.selected=[...new Set([...s.selected,...choices.map(m=>m.id)])].slice(0,s.limit);s.error='';p54ClearPrepare();render();return;
+ }
+ if(a==='open'){p54Reconcile();if(!s.selected.length)return;s.dialog='review';s.error='';s.progress='';s.results=[];p54ClearPrepare();render();return;}
+ if(a==='close'){s.dialog='';s.error='';s.progress='';p54ClearPrepare();render();return;}
+ if(a==='prepare'){p54Prepare();return;}
+ if(a==='download'){
+  const valid=s.prepared&&s.zipBlob&&Date.now()-s.prepared.at<10*60*1000;
+  if(!valid){s.error='Recovery ZIP expired. Prepare a new backup first.';render();return;}
+  p54DownloadZip(s.zipBlob,`My-Little-Star-Garden-Snapshot-Recovery-${dateStamp()}.zip`);
+  s.downloaded=true;s.progress='Download requested. Open the ZIP and verify it includes the selected revisions.';render();return;
+ }
+ if(a==='confirm'){p54Confirm();return;}
+},true);
+const P54_CSS=String.raw`
+#app .p54-toolbar{margin:16px 0;padding:18px;border:1.5px solid #ead2e0;border-radius:18px;background:#fff8fc;display:grid;gap:13px;min-width:0}
+#app .p54-toolbar-top,#app .p54-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+#app .p54-toolbar-top>div{flex:1 1 220px}#app .p54-toolbar-top strong{color:#79556d;font-size:1.08rem}
+#app .p54-toolbar-top p{font-size:.81rem;color:#8f7587;line-height:1.5;margin:4px 0 0}
+#app .p54-selection-chip{border:1px solid #efd2e1;border-radius:99px;background:#fceaf3;padding:7px 11px;color:#88576f;font-size:.8rem;font-weight:750}
+#app .p54-mode-row,#app .p54-actions>div{display:flex;flex-wrap:wrap;gap:8px}
+#app .p54-actions small{color:#977b8d}#app .p54-toolbar .btn{white-space:normal}
+#app .p54-delete-button{background:#9e536c;color:white;border:1px solid #9e536c;border-radius:13px;padding:12px 15px;font:inherit;font-weight:750}
+#app .p54-delete-button:disabled{opacity:.5;cursor:not-allowed}
+#app .p54-caution{background:#fff3e8;border:1px solid #eedac3;border-radius:13px;padding:12px 13px;line-height:1.6;color:#82644c;font-size:.8rem;margin:0}
+#app .p54-choice{display:flex;align-items:center;gap:7px;font-size:.84rem;color:#79576c;font-weight:700;padding:8px;background:#fff1f7;border-radius:11px;cursor:pointer;flex:none}
+#app .p54-choice input{width:19px;height:19px;accent-color:#a45a80}
+#app .p54-selectable{gap:10px;flex-wrap:wrap}
+#app .p54-progress{padding:12px;border-radius:12px;background:#f1f7f3;color:#4e765b;font-size:.83rem;margin:0}
+#app .p54-results{border:1px solid #e5d6e0;border-radius:13px;padding:10px}#app .p54-results summary{cursor:pointer;font-weight:700}
+#app .p54-result{display:flex;justify-content:space-between;gap:12px;padding:9px 4px;border-bottom:1px solid #f2e8ef;font-size:.82rem}
+#app .p54-result:last-child{border-bottom:0}#app .p54-result .good{color:#367548}#app .p54-result .bad{color:#a24e62}
+.p54-overlay{position:fixed;inset:0;z-index:100020;background:#3b283c88;display:grid;place-items:center;padding:12px}
+.p54-dialog{width:min(680px,100%);max-height:calc(100dvh - 24px);overflow:hidden;display:flex;flex-direction:column;box-sizing:border-box;background:#fffcfe;border:1px solid #eccddd;border-radius:24px;box-shadow:0 22px 70px #422c4255;color:#664e61}
+.p54-dialog-header,.p54-dialog-footer{padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;flex:none}
+.p54-dialog-header{border-bottom:1px solid #eddde6;flex-wrap:nowrap}.p54-dialog-header>div{flex:1;min-width:0}.p54-dialog-header h2{margin:4px 0;font-size:clamp(1.15rem,3.2vw,1.65rem);line-height:1.22}.p54-dialog-header>.btn{flex:none}
+.p54-dialog-footer{border-top:1px solid #eddde6;justify-content:flex-start}
+.p54-dialog-body{overflow-y:auto;padding:18px 22px;min-height:0;display:grid;gap:15px;font-size:.92rem}
+.p54-dialog-body>p{margin:0;line-height:1.6}
+.p54-pills{display:flex;flex-wrap:wrap;gap:7px}.p54-pill{background:#f9e9f1;border-radius:99px;padding:6px 12px;color:#80516e;font-size:.84rem;font-weight:750}
+.p54-backup-section{padding:14px;border-radius:15px;background:#f9f4fa;border:1px solid #ecdde7;display:grid;gap:9px}
+.p54-backup-section p{font-size:.82rem;color:#856d7e;margin:0;line-height:1.5}
+.p54-ready{color:#477351!important;font-weight:700}
+.p54-safety{display:grid;gap:12px}.p54-safety label{display:flex;align-items:flex-start;gap:10px;line-height:1.55;font-size:.84rem}
+.p54-safety input{margin-top:4px;flex:none;accent-color:#a15b7e}
+.p54-type{display:grid;gap:7px}.p54-type input{padding:13px 14px;border:1px solid #debece;border-radius:13px;background:white;color:#664e61;font:inherit;width:100%;box-sizing:border-box}
+@media(max-width:600px){.p54-dialog-header,.p54-dialog-footer{padding:13px 14px}.p54-dialog-header h2{font-size:1.12rem}.p54-dialog-body{padding:14px}.p54-dialog-footer>.btn{flex:1 1 155px}.p54-mode-row>.btn{flex:1 1 160px}.p54-actions>div{width:100%}.p54-actions>div>.btn{flex:1 1 auto}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P54_BUILD}">${P54_CSS}</style>`);
+/* ===== End Phase 6F.2.3 ===== */
 
 </script>
 </body>
