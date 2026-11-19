@@ -16177,6 +16177,335 @@ const P55_STYLES=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="${P55_BUILD}">${P55_STYLES}</style>`);
 /* ===== End Phase 6F.2.4 ===== */
 
+
+/* ===== Phase 6F.2.5 · Guardian polish, merge clarity, star provenance, saving goal ===== */
+const P56_BUILD='mlsg-6f25-guardian-refinements-20261119';
+const p56ActorId=()=>state.p64CurrentGuardian||'owner';
+const p56ActorName=(id=p56ActorId())=>id==='owner'?(state.settings?.ownerGuardianName||'Guardian'):state.p64Profiles?.find(g=>g.id===id)?.name||'Guardian';
+const p56IncidentOn=(id,date)=>Array.isArray(state.p2Incidents)&&state.p2Incidents.some(row=>row.date===date&&!row.reversedAt&&(row.ruleId===id||Array.isArray(row.ruleIds)&&row.ruleIds.includes(id)));
+
+// The exact record-level merge already exists; expose type and batch selection in that UI.
+function p56RecordType(c){
+ const store=String(c.store||'');const id=String(c.id||'');const row=c.local||c.cloud||c.base||{};
+ if(store==='records'){
+  if(/^guardian-request:/.test(id))return 'Child request';
+  if(/^p37-|guest-/.test(id))return 'Guest confirmation';
+  if(/rule|incident|checkin|follow-rule/.test(id))return 'Rule check-in';
+  if(/snapshot|cloud|merge|proposal/.test(id))return 'Sync record';
+  if(/voucher|reward|wish/.test(id))return 'Reward or voucher';
+  if(/completion|quest|task/.test(id))return 'Quest record';
+  if(row.kind==='p17-proposal-merge')return 'Merge audit';
+  return 'Saved record';
+ }
+ return ({tasks:'Task',rules:'Rule',challenges:'Challenge',rewards:'Reward',vouchers:'Voucher',transactions:'Star transaction',completions:'Task completion',incidents:'Rule incident',milestones:'Milestone',collectibles:'Collectible',usageSessions:'Reward usage',timers:'Timer',worldLayout:'World layout',media:'Saved media'})[store]||P18_STORE_NAMES[store]||'Garden record';
+}
+const p56PriorReviewHtml=p17ReviewHtml;
+p17ReviewHtml=function(){
+ const html=p56PriorReviewHtml();const review=state.p17.review;
+ if(!review?.plan)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const conflicts=[...root.querySelectorAll('.p17-conflict')];
+ conflicts.forEach((item,i)=>{
+  const c=review.plan.conflicts[i];if(!c)return;
+  const heading=item.querySelector('strong');
+  if(heading)heading.insertAdjacentHTML('beforebegin',`<span class="p56-record-type">${esc(p56RecordType(c))}</span>`);
+  const detail=item.querySelector('small');if(detail)detail.textContent='Record: '+String(c.id||'').slice(0,100)+' · Select which version to keep';
+ });
+ if(conflicts.length){
+  const first=conflicts[0];
+  first.insertAdjacentHTML('beforebegin',`<div class="p56-merge-quick"><div><strong>Choose a starting point for ${conflicts.length} differences</strong><p class="p2-muted">You can still change each selection individually before previewing or publishing. These shortcuts do not publish changes.</p></div><div class="p2-actions"><button type="button" class="btn btn-soft" data-p56-action="all-device">📱 Keep All Submitted</button><button type="button" class="btn btn-plain" data-p56-action="all-cloud">☁️ Keep All Family Changes</button></div></div>`);
+ }
+ root.querySelectorAll('[data-p17-action="review-reject"]').forEach(b=>b.textContent='✕ Dismiss Submission');
+ const confirm=root.querySelector('.p14-confirm');
+ if(confirm){const paragraph=confirm.querySelector('p');if(paragraph)paragraph.textContent='Mark this submission Not Applied (including one from your own device). No cloud snapshot or local work is deleted. The submitting device may still need to reconcile or resubmit its unsynced changes.';
+  const b=confirm.querySelector('[data-p17-action="review-reject-confirm"]');if(b)b.textContent='Dismiss Without Publishing';}
+ return root.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const b=event.target.closest('[data-p56-action="all-device"],[data-p56-action="all-cloud"]');if(!b)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ if(!p14OwnerVerified()||!state.p17.review?.plan)return;
+ const side=b.dataset.p56Action==='all-device'?'device':'cloud';
+ for(const c of state.p17.review.plan.conflicts)state.p17.decisions[c.key]=side;
+ state.p17.preview=null;state.p17.review.errors='';render();
+},true);
+
+// Same-day incidents prevent an additional "followed" check-in for that rule.
+const p56PriorRuleCheckin=p31RulePage;
+p31RulePage=function(){
+ const root=document.createElement('div');root.innerHTML=p56PriorRuleCheckin();
+ const date=state.p2ReviewDate||p2Date(),excluded=[];
+ root.querySelectorAll('label.p31-rule').forEach(label=>{
+  const input=label.querySelector('input[name="ruleIds"]');if(!input||!p56IncidentOn(input.value,date))return;
+  excluded.push(p2Rule(input.value));label.remove();
+ });
+ if(excluded.length){
+  const form=root.querySelector('#p31-rules-form,#p41-zero-rule-form');
+  form?.insertAdjacentHTML('beforeend',`<div class="p56-incident-exclusion"><strong>🛡️ Already recorded as an incident on ${esc(date)}</strong><p class="p2-muted">These rules are excluded from today's positive check-in. An incident does not automatically deduct stars.</p><div>${excluded.map(r=>`<span class="chip">${esc(r?.icon||'🛡️')} ${esc(r?.name||'Rule')}</span>`).join('')}</div></div>`);
+  const avail=root.querySelectorAll('input[name="ruleIds"]').length;
+  const select=root.querySelector('[data-p62-action="rule-select-all"]');if(select&&!avail)select.disabled=true;
+  const submit=form?.querySelector('button[type="submit"]');if(submit&&!avail)submit.disabled=true;
+  const heading=[...root.querySelectorAll('h3')].find(h=>/rules? ready to confirm/.test(h.textContent||''));if(heading)heading.textContent=`${avail} rule${avail===1?'':'s'} ready to confirm`;
+ }
+ return root.innerHTML;
+};
+document.addEventListener('submit',event=>{
+ if(!['p31-rules-form','p41-zero-rule-form'].includes(event.target.id))return;
+ const fd=new FormData(event.target),date=String(fd.get('date')||state.p2ReviewDate||p2Date());
+ if(fd.getAll('ruleIds').some(id=>p56IncidentOn(id,date))){
+  event.preventDefault();event.stopImmediatePropagation();notice('A selected rule already has an incident on this date. Remove it from the positive check-in.',true);
+ }
+},true);
+
+// Milestones: stars are a first-class reward type, once per milestone, with a
+// deterministic transaction ID. The existing collectible path still stores the
+// unlock; the star transaction is distinct and never re-awarded on refresh.
+const p56PriorMilestonePage=p40MilestonePage;
+p40MilestonePage=function(){
+ const root=document.createElement('div');root.innerHTML=p56PriorMilestonePage();
+ const form=root.querySelector('#p40-milestone-form'),m=state.p40MilestoneId&&state.p40MilestoneId!=='new'?p40Milestone(state.p40MilestoneId):null;
+ if(form){
+  const select=form.querySelector('#p5a-reward-kind');
+  if(select){select.add(new Option('⭐ Bonus Stars (one-time milestone reward)','stars'));if(m?.rewardType==='stars')select.value='stars';}
+  const field=document.createElement('div');field.className='field p56-milestone-stars';field.hidden=select?.value!=='stars';
+  field.innerHTML=`<label for="p56-milestone-star-amount">Stars to award once unlocked</label><input id="p56-milestone-star-amount" name="bonusStars" type="number" min="1" max="1000000" step="1" required value="${Number(m?.bonusStars)||25}"><p class="field-help">Added to the wallet and lifetime total once when the lifetime-star threshold is first reached. Never awarded twice by reopening or editing.</p>`;
+  if(field.hidden)field.querySelector('input').disabled=true;
+  select?.closest('.field')?.after(field);
+  if(m?.rewardType==='stars'&&state.summary.transactions.some(t=>t.id==='milestone-stars:'+m.id)){
+   const input=field.querySelector('input');if(input)input.readOnly=true;
+   field.insertAdjacentHTML('beforeend','<p class="p2-note">Already awarded. This star amount is locked to protect the historical ledger.</p>');
+  }
+ }
+ root.querySelectorAll('.p40-pathrow').forEach(row=>{
+  const m=state.p40Milestones.find(x=>row.querySelector(`[data-p40-action="milestone-edit"][data-id="${CSS.escape(x.id)}"]`));
+  if(m?.rewardType==='stars'){
+   const desc=row.querySelector('.muted');if(desc)desc.textContent=`${money(m.stars)} lifetime stars required · +${money(m.bonusStars||0)} ⭐ one-time reward`;
+   const gift=row.querySelector('[data-p40-action="milestone-gift"]');if(gift){const status=document.createElement('span');status.className='chip';status.textContent='Awarded automatically at the milestone';gift.replaceWith(status);}
+  }
+ });
+ return root.innerHTML;
+};
+document.addEventListener('change',event=>{
+ if(event.target.id==='p5a-reward-kind'){
+  const field=event.target.closest('form')?.querySelector('.p56-milestone-stars');if(field){field.hidden=event.target.value!=='stars';const input=field.querySelector('input');if(input)input.disabled=event.target.value!=='stars';}
+ }
+},false);
+document.addEventListener('submit',async event=>{
+ const form=event.target;if(form.id!=='p40-milestone-form')return;
+ const fd=new FormData(form),id=String(fd.get('editId')||''),old=p40Milestone(id),kind=String(fd.get('rewardType')||'packet');
+ if(kind!=='stars'&&old?.rewardType!=='stars')return;
+ event.preventDefault();event.stopImmediatePropagation();
+ try{
+  if(!safeGuardian())throw Error('Unlock Guardian Mode first.');
+  if(kind!=='stars')throw Error('A stars milestone cannot change reward type. Archive it and create a new milestone.');
+  const name=String(fd.get('name')||'').trim().slice(0,60),stars=Number(fd.get('stars')),amount=Number(fd.get('bonusStars'));
+  if(!name||!Number.isSafeInteger(stars)||stars<1||stars>100000)throw Error('Enter a valid milestone threshold.');
+  if(!Number.isSafeInteger(amount)||amount<1||amount>1000000)throw Error('Enter between 1 and 1,000,000 reward stars.');
+  if(old&&state.summary.transactions.some(t=>t.id==='milestone-stars:'+old.id)&&amount!==Number(old.bonusStars))throw Error('This milestone already awarded stars. Its reward amount cannot be changed.');
+  const record={...old,id:old?.id||uniqueId(),name,stars,icon:p2Icon(String(fd.get('icon')||'🌟')),area:old?.area||'garden',rewardType:'stars',bonusStars:amount,description:String(fd.get('description')||'').slice(0,200),archived:fd.has('archived'),createdAt:old?.createdAt||iso(),updatedAt:iso()};
+  await put('milestones',record);state.p40MilestoneId=null;await refresh();render();notice('⭐ Stars milestone saved!');
+ }catch(error){notice(error.message||'Could not save milestone.',true);}
+},true);
+const p56OldSummaries=summaries;
+summaries=async function(){const data=await p56OldSummaries();return {...data,lifetime:data.lifetime+data.transactions.filter(t=>t.type==='milestone'&&!t.reversedAt).reduce((n,t)=>n+Math.max(0,Number(t.amount)||0),0)};};
+const p56OldRefresh=refresh;
+refresh=async function(){
+ await p56OldRefresh();if(!state.profile)return;
+ const eligible=state.p40Milestones.filter(m=>m.rewardType==='stars'&&!m.archived&&Number(m.stars)<=Number(state.summary.lifetime));
+ let made=false;
+ for(const m of eligible){
+  const id='milestone-stars:'+m.id,amount=Number(m.bonusStars);
+  if(!Number.isSafeInteger(amount)||amount<1||amount>1000000||await get('transactions',id))continue;
+  try{
+   await atomic(['transactions'],tx=>tx.objectStore('transactions').add({id,type:'milestone',amount,reason:`Milestone: ${m.name}`,milestoneId:m.id,createdAt:iso(),source:'milestone',guardianId:'system',guardianName:'Milestone reward'}));
+   made=true;
+  }catch(err){if(err?.name!=='ConstraintError')throw err;}
+  const collectible=await get('collectibles','p5a-milestone:'+m.id);
+  if(collectible&&collectible.kind!=='p5a-stars')await put('collectibles',{...collectible,kind:'p5a-stars'});
+ }
+ if(made)await p56OldRefresh();
+};
+
+// Provenance for new local awards: update only transactions created by the
+// current successful operation; never guess the Guardian for old records.
+async function p56AttributeNew(callback){
+ const before=new Set((await getAll('transactions')).map(t=>t.id));
+ const result=await callback();const actor=p56ActorId(),name=p56ActorName(actor),rows=await getAll('transactions');
+ const newRows=rows.filter(t=>!before.has(t.id)&&t.source!=='milestone'&&!t.guardianName&&(['task','bonus','rule-earned','challenge','deduction','earning-correction'].includes(t.type)));
+ if(newRows.length){await atomic(['transactions'],tx=>{for(const t of newRows)tx.objectStore('transactions').put({...t,guardianId:t.guardianId||actor,guardianName:t.guardianId&&t.guardianId!==actor?p56ActorName(t.guardianId):name});});await refresh();}
+ return result;
+}
+const p56OldTaskSave=p2SaveCompletion;p2SaveCompletion=async function(...args){return p56AttributeNew(()=>p56OldTaskSave(...args));};
+const p56OldBatchSave=p2BatchReview;p2BatchReview=async function(...args){return p56AttributeNew(()=>p56OldBatchSave(...args));};
+const p56OldRulesSave=p31AwardRules;p31AwardRules=async function(...args){return p56AttributeNew(()=>p56OldRulesSave(...args));};
+const p56OldBonus=grantBonus;grantBonus=async function(...args){return p56AttributeNew(()=>p56OldBonus(...args));};
+const p56OldIncident=p2SaveIncident;p2SaveIncident=async function(...args){return p56AttributeNew(()=>p56OldIncident(...args));};
+const p56OldChallengeAward=p2AwardChallenge;p2AwardChallenge=async function(...args){return p56AttributeNew(()=>p56OldChallengeAward(...args));};
+const p56OldGuestResolve=p37Resolve;p37Resolve=async function(...args){return p56AttributeNew(()=>p56OldGuestResolve(...args));};
+function p56LedgerActor(t){
+ if(!['welcome','bonus','task','rule-earned','challenge','deduction','milestone','earning-correction','correction','refund'].includes(t.type))return '';
+ if(t.type==='milestone')return 'Automatically earned milestone bonus';
+ const id=t.guardianId||t.approvedBy||t.reversedByGuardianId||'';
+ const known=t.guardianName||t.approvedByName|| (id&&id!=='system'?p56ActorName(id):id==='system'?'Automatically awarded':'');
+ return known?`By ${known}`:'Guardian not recorded in this older entry';
+}
+const p56OldLedger=ledgerList;
+ledgerList=function(limit){
+ const html=p56OldLedger(limit),root=document.createElement('div');root.innerHTML=html;
+ const rows=state.summary.transactions.slice(0,limit||9999);
+ root.querySelectorAll('.ledger-entry').forEach((el,i)=>{
+  const t=rows[i];if(!t)return;const who=p56LedgerActor(t);
+  if(who){const p=el.querySelector('.muted');p?.insertAdjacentHTML('beforeend',`<span class="p56-ledger-actor"> · ${esc(who)}</span>`);}
+ });return root.innerHTML;
+};
+const p56OldHistory=p5bHistoryPage;
+p5bHistoryPage=function(){
+ const root=document.createElement('div');root.innerHTML=p56OldHistory();
+ const start=state.p5bHistoryStart,end=state.p5bHistoryEnd,type=state.p5bHistoryType,q=state.p5bHistorySearch.toLowerCase();
+ const matches=state.summary.transactions.filter(t=>p5bInRange(p5bDateForStamp(t.createdAt),start,end)&&(type==='all'||t.type===type)&&(`${t.reason} ${t.type}`).toLowerCase().includes(q));
+ const section=[...root.querySelectorAll('section.panel')].find(s=>/^Star Transactions/.test(s.querySelector('h3')?.textContent||''));
+ section?.querySelectorAll('.p2-list > .p2-card').forEach((card,i)=>{const who=p56LedgerActor(matches[i]||{});if(!who)return;card.querySelector('.p2-muted')?.insertAdjacentHTML('beforeend',`<span class="p56-ledger-actor"> · ${esc(who)}</span>`);});
+ return root.innerHTML;
+};
+
+// Show positive and corrective star history to the child without exposing
+// private incident notes or guessing the Guardian on older un-attributed data.
+function p56ChildTransactionDate(t){
+ if(t.type==='task'&&t.completionId){const c=state.p2Completions?.find(x=>x.id===t.completionId);if(c?.date)return c.date;}
+ if(t.type==='rule-earned'&&p2ValidDate(t.ruleDate))return t.ruleDate;
+ if(t.type==='deduction'&&t.incidentId){const inc=state.p2Incidents?.find(x=>x.id===t.incidentId);if(p2ValidDate(inc?.date))return inc.date;}
+ if(p2ValidDate(t.awardDate))return t.awardDate;
+ return p5bDateForStamp(t.createdAt||'');
+}
+function p56ChildStarLabel(t){
+ if(t.type==='task')return state.p2Tasks?.find(x=>x.id===t.taskId)?.name||'Quest completed';
+ if(t.type==='rule-earned')return 'Rule followed';
+ if(t.type==='deduction')return 'Rule reminder';
+ if(t.type==='bonus')return 'Bonus stars';
+ if(t.type==='challenge')return 'Challenge completed';
+ if(t.type==='milestone')return 'Milestone reached';
+ if(t.type==='refund')return 'Stars returned';
+ if(t.type==='purchase')return 'Star Shop reward';
+ if(t.type==='earning-correction')return 'Award correction';
+ return 'Star Garden update';
+}
+const p56PreviousJournalPage=p11JournalPage;
+p11JournalPage=function(){
+ const html=p56PreviousJournalPage(),root=document.createElement('div');root.innerHTML=html;
+ const day=p11Date(state.p11JournalDay)?state.p11JournalDay:p2Date();
+ const relevant=['task','rule-earned','deduction','bonus','challenge','milestone','earning-correction','correction','refund','purchase','welcome'];
+ const items=(state.summary?.transactions||[]).filter(t=>relevant.includes(t.type)&&p56ChildTransactionDate(t)===day&&!t.reversedAt);
+ if(!items.length)return html;
+ const rows=items.map(t=>{
+  const who=p56LedgerActor(t),neutral=t.type==='purchase'||t.type==='refund';
+  const actor=neutral?(t.type==='purchase'?'Spent in the Star Shop':'Stars returned'):
+   t.type==='milestone'?'Automatically awarded for reaching a milestone':
+   (who==='Guardian not recorded in this older entry'?'Guardian not recorded in this older entry':
+   (t.amount<0?'Deducted '+(who.startsWith('By ')?'by '+who.slice(3):'· '+who):'Awarded '+(who.startsWith('By ')?'by '+who.slice(3):'· '+who)));
+  return `<div class="p56-child-ledger-row"><span class="p56-child-ledger-icon" aria-hidden="true">${t.amount<0?'🌱':'⭐'}</span><div class="grow"><strong>${esc(p56ChildStarLabel(t))}</strong><small>${esc(actor)}</small></div><span class="p2-pill">${t.amount>0?'+':''}${money(t.amount)} ⭐</span></div>`;
+ }).join('');
+ const section=document.createElement('section');section.className='panel p56-child-star-history';
+ section.innerHTML=`<div class="panel-head"><div><p class="eyebrow">Today's little star story</p><h3>⭐ Who helped my stars grow?</h3></div></div><p class="p2-muted">Your Guardians help recognize your efforts. Older entries may not show a Guardian's name.</p><div class="p56-child-ledger-list">${rows}</div>`;
+ const target=[...root.querySelectorAll('section.panel')].find(s=>s.querySelector('.p11-journal-heading'));
+ if(target)target.after(section);else root.append(section);
+ return root.innerHTML;
+};
+
+// A single voluntary Star Shop saving target; separate from wishes and actual
+// wallet money. Stored as one synced app record, never reserves or spends stars.
+state.p56SavingGoal=null;
+const p56PrevRefreshGoal=refresh;
+refresh=async function(){await p56PrevRefreshGoal();if(!state.profile)return;const row=await get('records','p56-saving-goal');state.p56SavingGoal=row?.rewardId||null;};
+const p56OldRewardCard=p4RewardCard;
+p4RewardCard=function(r){const root=document.createElement('div');root.innerHTML=p56OldRewardCard(r);
+ const card=root.querySelector('article');if(!card||state.view!=='child')return root.innerHTML;
+ const selected=state.p56SavingGoal===r.id;card.classList.toggle('p56-selected-reward',selected);
+ card.insertAdjacentHTML('beforeend',`<button type="button" class="btn ${selected?'btn-rose':'btn-soft'} p56-save-goal-btn" data-p56-action="saving-toggle" data-id="${esc(r.id)}">${selected?'🎯 Saving for this reward ✓':'🌟 Save stars for this reward'}</button>`);
+ return root.innerHTML;
+};
+const p56OldShop=childShop;
+childShop=function(){const html=p56OldShop();if(state.view!=='child'||state.p4SelectedRewardId||state.p64WishOpen)return html;
+ const root=document.createElement('div');root.innerHTML=html;
+ const reward=state.p4Rewards.find(r=>r.id===state.p56SavingGoal&&!r.archived&&!r.draft&&!r.hidden);
+ const firstPanel=root.querySelector('section.panel');if(!firstPanel)return html;
+ if(reward){const price=Math.max(0,p38Price(reward)),wallet=Math.max(0,state.summary.wallet),remaining=Math.max(0,price-wallet),percent=price?Math.min(100,Math.round(wallet/price*100)):100;
+  firstPanel.insertAdjacentHTML('afterbegin',`<div class="p56-saving-banner"><span class="p56-saving-icon">${esc(reward.icon||'🎁')}</span><div class="grow"><strong>🎯 I'm saving for ${esc(reward.name)}</strong><p>${remaining?'Just '+money(remaining)+' more stars to go!':"You've saved enough stars for this reward!"}</p><div class="p56-saving-bar" role="progressbar" aria-label="Savings progress for ${esc(reward.name)}" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><span style="width:${percent}%"></span></div><small>${money(wallet)} / ${money(price)} stars available · Not reserved or spent</small></div><button type="button" class="btn btn-plain btn-small" data-p56-action="saving-clear">Change</button></div>`);
+ }else{firstPanel.insertAdjacentHTML('afterbegin','<p class="p56-saving-intro">🌟 Pick a reward you would love to save your stars for!</p>');}
+ return root.innerHTML;
+};
+document.addEventListener('click',async e=>{
+ const b=e.target.closest('[data-p56-action="saving-toggle"],[data-p56-action="saving-clear"]');if(!b)return;
+ e.preventDefault();e.stopImmediatePropagation();
+ if(state.view!=='child')return;
+ try{
+  const id=b.dataset.p56Action==='saving-clear'?null:(state.p56SavingGoal===b.dataset.id?null:b.dataset.id);
+  if(id&&!state.p4Rewards.some(r=>r.id===id&&!r.archived&&!r.draft&&!r.hidden))throw Error('This reward is not available in the Star Shop.');
+  await put('records',{key:'p56-saving-goal',rewardId:id,updatedAt:iso()});await refresh();render();
+ }catch(error){notice(error.message||'Could not update the savings goal.',true);}
+},true);
+
+// Presentation-only consistency: no new routes or timer engines.
+const p56OldRender=render;
+render=function(){
+ p56OldRender();
+ const root=app; if(!root||state.view!=='guardian')return;
+ const daily=root.querySelector('.p51-review-timer-section');daily?.remove();
+ // The editor is separate from the review, but both reuse task buttons.
+ root.querySelectorAll('.p51-task-card .p51-full-task-timer').forEach(button=>button.classList.add('p56-half-timer'));
+ const form=root.querySelector('#p2-challenge-form');
+ if(form){const fieldset=[...form.querySelectorAll('fieldset')].find(f=>/Linked Activities/.test(f.querySelector('legend')?.textContent||''));
+  if(fieldset){fieldset.classList.add('p56-linked-fieldset');
+   const tabs=fieldset.querySelector('.p64-ch-tabs');const count=fieldset.querySelector('#p64-ch-selected');
+   if(count&&tabs&&!fieldset.querySelector('.p56-linked-summary')){
+    const info=document.createElement('p');info.className='p56-linked-summary';info.textContent='Choose activities below; selected items stay selected when switching tabs.';tabs.before(info);
+    count.classList.add('p56-selected-count');
+   }
+  }
+ }
+};
+const P56_STYLES=String.raw`
+#app .p56-merge-quick{display:grid;gap:10px;margin:12px 0 18px;padding:15px;background:#f6f0fb;border:1px solid #e9d9ef;border-radius:18px}
+#app .p56-merge-quick .p2-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-start}
+#app .p56-record-type{display:inline-flex;font-size:.72rem;font-weight:850;letter-spacing:.03em;padding:5px 10px;border-radius:999px;background:#e8f0f6;color:#5a6980;justify-self:start;width:max-content}
+#app .p56-incident-exclusion{padding:15px;border:1px solid #eedac0;background:#fffaf1;border-radius:17px;display:grid;gap:8px}
+#app .p56-incident-exclusion>div{display:flex;flex-wrap:wrap;gap:7px}
+#app .p56-milestone-stars[hidden]{display:none!important}
+#app .p56-milestone-stars{padding:14px;background:#fff9e7;border:1px solid #efddac;border-radius:17px}
+#app .p56-ledger-actor{font-weight:700;color:#7a6684}
+#app .p56-child-ledger-list{display:grid;gap:8px;margin-top:13px}
+#app .p56-child-ledger-row{display:flex;align-items:center;gap:12px;padding:11px;border:1px solid #eedbe8;border-radius:14px;background:#fffafc}
+#app .p56-child-ledger-row .grow{display:grid;gap:3px;min-width:0;flex:1}
+#app .p56-child-ledger-row .grow small{font-size:.8rem;color:#886d82}
+#app .p56-child-ledger-row .p2-pill{white-space:nowrap}
+#app .p56-child-ledger-icon{font-size:1.4rem}
+
+#app .p56-save-goal-btn{width:100%;margin-top:12px;min-width:0;white-space:normal}
+#app .p56-selected-reward{border-color:#d8a56d!important;box-shadow:inset 0 0 0 2px #fbe3a8}
+#app .p56-saving-banner{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:linear-gradient(110deg,#fff6db,#fff5fc);border:1px solid #eacdb0;border-radius:19px;padding:17px;margin:0 0 17px}
+#app .p56-saving-banner .grow{min-width:190px;display:grid;gap:5px}
+#app .p56-saving-banner .grow p{margin:0;color:#7d6078}
+#app .p56-saving-banner .grow small{font-size:.76rem;color:#896f7b}
+#app .p56-saving-icon{font-size:2.15rem}
+#app .p56-saving-bar{height:11px;background:#ecdde8;border-radius:99px;overflow:hidden;margin:5px 0}
+#app .p56-saving-bar span{display:block;height:100%;background:linear-gradient(90deg,#deb574,#ca79ab);border-radius:99px}
+#app .p56-saving-intro{margin-bottom:15px;padding:13px;border-radius:15px;background:#fff4fa;color:#855c7a}
+#app .p51-task-card .p51-task-actions .p56-half-timer{grid-column:1/2!important;max-width:100%;order:99}
+#app .p56-linked-fieldset{display:grid;gap:13px}
+#app .p56-linked-fieldset .p64-ch-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+#app .p56-linked-fieldset .p64-ch-tabs button{min-width:0;white-space:normal}
+#app .p56-linked-fieldset .p64-ch-choices{padding:16px;max-height:365px;background:#fffafc}
+#app .p56-linked-fieldset [data-p64-ch-panel]:not([hidden]){display:grid;gap:9px;grid-template-columns:repeat(2,minmax(0,1fr))}
+#app .p56-linked-fieldset .p64-challenge-option{border:1px solid #eed9e5;background:#fff!important;border-radius:14px;min-width:0;align-items:flex-start}
+#app .p56-linked-fieldset .p64-challenge-option:has(input:checked){background:#faeaf3!important;border-color:#cc91b1}
+#app .p56-linked-summary{color:#8d7686;font-size:.85rem}
+#app .p56-selected-count{padding:10px 13px;border-radius:13px;background:#f2effa;color:#765781;font-weight:750}
+#app .p14-dialog,#app .p14-dialog *,#app .p38-dialog,#app .p38-dialog *,#app .p38-confirm-dialog,#app .p38-confirm-dialog *,#app [role="alertdialog"],#app [role="alertdialog"] *{font-family:var(--font)!important}
+@media(max-width:720px){#app .p56-linked-fieldset [data-p64-ch-panel]:not([hidden]){grid-template-columns:1fr}}
+@media(max-width:520px){#app .p56-merge-quick .btn{flex:1 1 100%}#app .p56-saving-banner>button{width:100%}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P56_BUILD}">${P56_STYLES}</style>`);
+/* ===== End Phase 6F.2.5 ===== */
+
 </script>
 </body>
 </html>
