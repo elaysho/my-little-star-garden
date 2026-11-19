@@ -16506,6 +16506,223 @@ const P56_STYLES=String.raw`
 document.head.insertAdjacentHTML('beforeend',`<style id="${P56_BUILD}">${P56_STYLES}</style>`);
 /* ===== End Phase 6F.2.5 ===== */
 
+/* ===== Phase 6F.2.6: inline attribution, saving-goal UX, guardian review polish ===== */
+const P57_BUILD='mlsg-6f26-attribution-and-ux-20261120';
+
+// Remove the extra journal ledger block; provenance belongs beside the
+// individual completion or rule, not in a second Adventure Journal list.
+const p57OldJournalPage=p11JournalPage;
+p11JournalPage=function(){const root=document.createElement('div');root.innerHTML=p57OldJournalPage();root.querySelectorAll('.p56-child-star-history').forEach(el=>el.remove());return root.innerHTML;};
+function p57ReadableApprover(t){
+ if(!t)return 'Guardian not recorded in this older award';
+ if(t.type==='milestone'||t.guardianId==='system')return 'Awarded automatically';
+ const raw=t.guardianName||t.approvedByName||(t.guardianId==='owner'?(state.settings?.ownerGuardianName||'Primary Guardian'):state.p64Profiles?.find(g=>g.id===t.guardianId)?.name||'');
+ return raw?'Approved by '+raw:'Guardian not recorded in this older award';
+}
+function p57TaskAward(t,date){
+ const completions=(state.p2Completions||[]).filter(c=>c.taskId===t.id&&c.date===date&&!c.correctedAt&&Number(c.starsAwarded||0)>=0);
+ const ledger=(state.summary?.transactions||[]).filter(tx=>tx.type==='task'&&!tx.reversedAt&&(tx.taskId===t.id||completions.some(c=>tx.completionId===c.id)));
+ const relevant=ledger.filter(tx=>completions.some(c=>tx.completionId===c.id)||(tx.taskId===t.id&&p56ChildTransactionDate(tx)===date));
+ return relevant.length?[...relevant].sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||''))).at(-1):null;
+}
+const p57OldTaskDetail=p3ChildTaskDetail;
+p3ChildTaskDetail=function(task,date=p2Date()){
+ const root=document.createElement('div');root.innerHTML=p57OldTaskDetail(task,date);
+ if(task.type==='checklist'){
+  const steps=p45RoutineState(task,date);
+  const cards=[...root.querySelectorAll('section.panel .p2-list > .p2-card')];
+  steps.members.forEach((m,i)=>{if(!m.credited||!cards[i]||!m.task)return;
+   const actor=p57TaskAward(m.task,date);if(!actor)return;
+   const n=document.createElement('p');n.className='p57-approved-by';n.textContent='⭐ '+p57ReadableApprover(actor);
+   (cards[i].querySelector('.p45-member-status')||cards[i]).after(n);
+  });
+  return root.innerHTML;
+ }
+ const panel=root.querySelector('.p6-quest-detail');
+ if(panel){
+  const award=p57TaskAward(task,date);
+  if(award){const line=document.createElement('p');line.className='p57-approved-by';line.textContent='⭐ '+p57ReadableApprover(award);(panel.querySelector('.p6-quest-progress')||panel.querySelector('.p6-quest-banner'))?.after(line);}
+  const actions=panel.querySelector('.p6-approval .p6-approval-actions');
+  if(actions&&!actions.querySelector('[data-p6-action="immediate-open"][data-kind="task"]')){
+   const pending=!!p31Existing('task',task.id,date),button=document.createElement('button');button.type='button';button.className='btn btn-rose';button.dataset.p6Action='immediate-open';button.dataset.kind='task';button.dataset.id=task.id;button.textContent=pending?'🔐 Check Pending Request Now':'🔐 Ask Guardian Now';actions.append(button);
+  }
+ }
+ return root.innerHTML;
+};
+const p57OldRulesPage=p6RulesPage;
+p6RulesPage=function(){const root=document.createElement('div');root.innerHTML=p57OldRulesPage();const date=p2Date();
+ root.querySelectorAll('.p61-rule-card').forEach((card,i)=>{
+  const rule=p6VisibleRules()[i];if(!rule)return;
+  const tx=(state.summary?.transactions||[]).find(t=>t.type==='rule-earned'&&!t.reversedAt&&t.ruleId===rule.id&&p56ChildTransactionDate(t)===date);
+  if(tx){const n=document.createElement('p');n.className='p57-approved-by';n.textContent='⭐ '+p57ReadableApprover(tx);
+   (card.querySelector('.p61-rule-card-head')||card).after(n);}
+  // Only show deduction attribution when the original rule incident is
+  // explicitly child-visible; never expose private Guardian notes.
+  const incident=p61VisibleIncident(rule);
+  if(incident){const deducted=(state.summary?.transactions||[]).find(t=>t.type==='deduction'&&!t.reversedAt&&t.incidentId===incident.id);
+   if(deducted){const name=p57ReadableApprover(deducted).replace(/^Approved by /,'Reviewed by ');
+    const d=document.createElement('p');d.className='p57-approved-by p57-reviewed-by';d.textContent='🌱 '+name;card.append(d);}
+  }
+ });return root.innerHTML;
+};
+
+// Challenge certificates also identify their approving Guardian.
+const p57OldChallengeDetail=p63ChallengeDetail;
+p63ChallengeDetail=function(ch){const root=document.createElement('div');root.innerHTML=p57OldChallengeDetail(ch);
+ if(p2ChallengeClaimed(ch,p2Date())){
+  const tx=(state.summary?.transactions||[]).filter(t=>t.type==='challenge'&&!t.reversedAt&&t.challengeId===ch.id).at(-1);
+  if(tx){const n=document.createElement('p');n.className='p57-approved-by';n.textContent='⭐ '+p57ReadableApprover(tx);
+   (root.querySelector('.p63-challenge-result')||root.querySelector('section.panel'))?.after(n);}
+ }return root.innerHTML;
+};
+
+// Keep the goal card outside/below the star-wallet container, not embedded in it.
+const p57OldShop=childShop;
+childShop=function(){const root=document.createElement('div');root.innerHTML=p57OldShop();
+ if(state.view!=='child'||state.p4SelectedRewardId||state.p64WishOpen)return root.innerHTML;
+ const first=root.querySelector('section.panel'),banner=first?.querySelector('.p56-saving-banner,.p56-saving-intro');
+ if(first&&banner){banner.remove();first.after(banner);}return root.innerHTML;
+};
+// Existing saving-goal storage is reused. No new reservation or star deduction.
+const p57OldCard=p4RewardCard;
+p4RewardCard=function(r){const root=document.createElement('div');root.innerHTML=p57OldCard(r);
+ const goal=root.querySelector('[data-p56-action="saving-toggle"]');if(!goal||state.view!=='child')return root.innerHTML;
+ const affordable=Math.max(0,Number(state.summary.wallet||0))>=Math.max(0,p38Price(r));
+ goal.textContent=state.p56SavingGoal===r.id?'🎯 Saving for this ✓':affordable?'⭐ Already affordable':'🌷 Save for this';
+ // An existing goal may be deselected, even if it has since become affordable.
+ if(affordable&&state.p56SavingGoal!==r.id){goal.disabled=true;goal.title='You have enough stars to claim this reward; no need to save.';}
+ return root.innerHTML;
+};
+// Re-validate even if an outdated client manually invokes the saving action.
+document.addEventListener('click',event=>{
+ const b=event.target.closest('[data-p56-action="saving-toggle"]');if(!b||state.view!=='child')return;
+ const reward=p4Reward(b.dataset.id);
+ if(!reward)return;
+ if(state.p56SavingGoal!==reward.id&&state.summary.wallet>=p38Price(reward)){
+  event.preventDefault();event.stopImmediatePropagation();notice('You already have enough stars for this reward! You can ask a Guardian to claim it.',false);
+ }
+},true);
+
+// When spending on another reward, gently warn that the current savings goal
+// will take longer. Confirmation happens *before* the existing request/PIN flow.
+const p57AllowedRewardClick=new WeakSet();
+document.addEventListener('click',async event=>{
+ const b=event.target.closest('[data-p6-action="claim-send"],[data-p31-action="request-claim"],[data-p4-action="claim-request"],[data-p6-action="immediate-open"][data-kind="claim"]');
+ if(!b||state.view!=='child'||p57AllowedRewardClick.has(b)||b.disabled)return;
+ const target=p4Reward(b.dataset.id),goal=p4Reward(state.p56SavingGoal);
+ if(!goal||!target||target.id===goal.id||goal.archived||goal.hidden||goal.draft)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const ok=await p38Confirm(`You're saving for “${goal.name}”. Asking to claim “${target.name}” may leave fewer stars for your goal. Continue with this other reward?`);
+ if(!ok||!b.isConnected)return;
+ p57AllowedRewardClick.add(b);try{b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));}finally{p57AllowedRewardClick.delete(b);}
+},true);
+
+// Remove duplicated surprise-set type selector. The chosen challenge tab is
+// authoritative, and its selection is the only kind affected by randomizing.
+const p57OldChallengeEditor=p2ChallengeEditor;
+p2ChallengeEditor=function(){const root=document.createElement('div');root.innerHTML=p57OldChallengeEditor();const form=root.querySelector('#p2-challenge-form');
+ if(!form)return root.innerHTML;
+ const select=form.querySelector('#p51-random-type');
+ if(select){const kind={tasks:'task',routines:'routine',rules:'rule'}[state.p64ChallengeTab]||'task';
+  const input=document.createElement('input');input.type='hidden';input.id='p51-random-type';input.value=kind;
+  const label=select.closest('label');if(label)label.replaceWith(input);else select.replaceWith(input);
+  const count=form.querySelector('#p51-random-count');const labelCount=count?.closest('label');if(labelCount){const txt=labelCount.childNodes[0];if(txt?.nodeType===3)txt.textContent='How many from this tab?';}
+  const feedback=form.querySelector('.p51-random-feedback');if(feedback)feedback.textContent='Uses the selected Tasks, Routines or Rules tab above.';
+ }
+ return root.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const tab=event.target.closest('[data-p64-action="challenge-tab"]');if(!tab)return;
+ const form=tab.closest('#p2-challenge-form'),hidden=form?.querySelector('#p51-random-type');
+ if(hidden)hidden.value=({tasks:'task',routines:'routine',rules:'rule'})[tab.dataset.value]||'task';
+},true);
+
+// Review Guardian Changes: replace duplicated warnings with a compact, readable
+// summary and expandable explanation; keep the title/buttons fixed on scroll.
+const p57OldReviewHtml=p17ReviewHtml;
+p17ReviewHtml=function(){const root=document.createElement('div');root.innerHTML=p57OldReviewHtml();
+ const dialog=root.querySelector('.p14-dialog');if(!dialog)return root.innerHTML;
+ dialog.classList.add('p57-review-dialog');
+ const body=dialog.querySelector(':scope > .p14-dialog-body');if(body){
+  const warning=body.querySelector('.p55-manual-recovery');
+  const noticeBox=body.querySelector('.p14-safe-note');
+  if(warning){
+   const details=document.createElement('details');details.className='p57-review-explanation';
+   details.innerHTML='<summary>⚠️ Why does this require manual review?</summary><p></p>';
+   details.querySelector('p').textContent=warning.textContent;
+   warning.replaceWith(details);
+  }
+  if(noticeBox){const total=state.p17.review?.plan?.conflicts?.length||0;const safe=state.p17.review?.plan?.auto?.length||0;
+   noticeBox.innerHTML=`<strong>🛡️ ${total} difference${total===1?'':'s'} to review</strong><span>${safe} records can combine automatically. Nothing has been published yet.</span>`;
+   noticeBox.classList.add('p57-review-summary');
+  }
+ }
+ return root.innerHTML;
+};
+
+// Timer card actions: put Start Task Timer next to Archive, not in a separate row.
+const p57OldRender=render;
+render=function(){p57OldRender();
+ if(state.view==='guardian'&&state.guardianTab==='manage'&&state.p2ManageTab==='tasks'){
+  app.querySelectorAll('.p51-task-card .p51-task-actions').forEach(actions=>{
+   const timer=actions.querySelector('[data-p48-action="task-open"]'),archive=actions.querySelector('[data-p2-action="task-archive"]');
+   if(timer&&archive){archive.after(timer);timer.classList.add('p57-inline-task-timer');timer.style.order='unset';}
+  });
+ }
+ // Prevent an outdated alternate full-screen-timer menu from replacing the
+ // standard Guardian menu. Preserve the normal sidebar/header and bottom nav.
+ if(state.view==='guardian'&&state.guardianTab==='p47-timer'&&safeGuardian()){
+  const nav=app.querySelector('.sidebar nav.nav');
+  if(nav){nav.querySelectorAll('[data-guardian-tab]').forEach(b=>{const label=b.querySelector('span:last-child');if(b.dataset.guardianTab==='dashboard'&&label)label.textContent='Dashboard';});
+   const timer=nav.querySelector('[data-guardian-tab="p47-timer"]'),settings=nav.querySelector('[data-guardian-tab="settings"]');
+   if(timer&&settings)settings.before(timer);
+  }
+ }
+};
+
+// In completed tickets, gift status is short metadata, not a large button/card.
+const p57OldVoucherHtml=p4VoucherHtml;
+p4VoucherHtml=function(v,details=false,guardianInline=false){const root=document.createElement('div');root.innerHTML=p57OldVoucherHtml(v,details,guardianInline);
+ if(!details&&!guardianInline){const card=root.querySelector('.p4-ticket');
+  if(card&&['redeemed','cancelled'].includes(v.status)){
+   card.classList.add('p57-memory-ticket');
+   const gift=[...card.querySelectorAll('.p31-summary')].find(n=>/gift from your guardian/i.test(n.textContent||''));
+   if(gift){const pill=document.createElement('span');pill.className='p57-gift-pill';pill.textContent='🎁 Guardian gift';
+     if(v.giftMessage)pill.title=v.giftMessage;
+     const head=card.querySelector('.p4-ticket-head');(head||card).append(pill);
+     if(v.giftMessage){const msg=document.createElement('p');msg.className='p57-gift-note';msg.textContent=v.giftMessage;head?head.after(msg):card.prepend(msg);}
+     gift.remove();}
+  }
+ }
+ return root.innerHTML;
+};
+const P57_STYLES=String.raw`
+#app .p57-approved-by{display:inline-flex;align-items:center;gap:5px;margin:8px 0 12px;padding:7px 11px;border-radius:999px;background:#eaf6ed;border:1px solid #cfe6d5;color:#476e58;font-weight:700;font-size:.84rem;max-width:100%}
+#app .p56-saving-banner,#app .p56-saving-intro{margin:15px 0 20px!important;width:100%;box-sizing:border-box}
+#app button.p56-save-goal-btn:disabled{opacity:.6;cursor:not-allowed;box-shadow:none}
+#app .p57-review-dialog{display:flex;flex-direction:column;max-height:min(92dvh,900px);overflow:hidden}
+#app .p57-review-dialog>.p14-dialog-head{flex-shrink:0;background:var(--card,#fffafc);z-index:2}
+#app .p57-review-dialog>.p14-dialog-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:22px}
+#app .p57-review-summary{display:flex;flex-direction:column;gap:7px;padding:13px 16px!important;margin:0 0 13px!important;background:#f4effb!important;border:1px solid #e7dbee!important;border-radius:16px;color:#765c7d}
+#app .p57-review-summary strong{font-size:1.03rem}
+#app .p57-review-explanation{margin:0 0 13px;padding:12px 15px;border:1px solid #edd6ab;border-radius:16px;background:#fff7eb;color:#795d3c}
+#app .p57-review-explanation summary{cursor:pointer;font-weight:800}
+#app .p57-review-explanation p{margin:9px 0 0;line-height:1.5;font-size:.92rem}
+#app .p51-task-card .p51-task-actions .p57-inline-task-timer{grid-column:auto!important;order:unset!important;margin-top:0!important;width:100%!important;max-width:unset!important}
+#app .p57-memory-ticket .p14-history-thanks{display:block;margin-top:9px!important;width:100%}
+#app .p57-memory-ticket .p14-history-thanks .btn{width:100%;margin:0;min-height:44px}
+#app .p57-memory-ticket>.btn{width:100%;min-height:44px}
+#app .p51-challenge-random .p51-random-controls{grid-template-columns:minmax(150px,1fr) auto;align-items:end}
+#app .p57-gift-note{font-size:.84rem;color:#84697b;margin:6px 0 10px;line-height:1.4}
+#app .p57-reviewed-by{background:#fff6e7;border-color:#e9d3b4;color:#796344}
+#app .p57-gift-pill{display:inline-flex;align-items:center;justify-content:center;background:#f9e8f4;border:1px solid #edcee0;color:#985676;border-radius:999px;padding:6px 11px;margin:7px 0 0;font-size:.82rem;font-weight:800;width:max-content;max-width:100%;white-space:normal}
+#app .p57-memory-ticket .p4-ticket-head{flex-wrap:wrap}
+#app .p57-memory-ticket .p57-gift-pill{margin-left:0}
+@media(max-width:650px){#app .p51-challenge-random .p51-random-controls{grid-template-columns:1fr}#app .p57-review-dialog{max-height:calc(100dvh - 24px)}#app .p57-review-dialog>.p14-dialog-head{padding:15px 18px}#app .p57-review-dialog>.p14-dialog-body{padding:15px 18px 25px}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P57_BUILD}">${P57_STYLES}</style>`);
+/* ===== End Phase 6F.2.6 ===== */
+
 </script>
 </body>
 </html>
