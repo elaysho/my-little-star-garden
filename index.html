@@ -1328,7 +1328,7 @@ async function p31GiftReward(form){const fd=new FormData(form),r=p4Reward(fd.get
 }
 const p31OldPreview=previewBackup;
 previewBackup=function(obj){const summary=p31OldPreview(obj);const d=obj.data;for(const r of d.rules){if(r.earnStars!==undefined&&!p4Whole(r.earnStars,0,40))throw new Error('Invalid positive-star setting on a rule.');}for(const r of d.rewards){if(r.requiredTaskIds!==undefined&&(!Array.isArray(r.requiredTaskIds)||r.requiredTaskIds.some(id=>typeof id!=='string'||!d.tasks.some(t=>t.id===id))))throw new Error('A reward requires an unknown task.');}for(const v of d.vouchers){if(v.requiredTaskIds!==undefined&&(!Array.isArray(v.requiredTaskIds)||v.requiredTaskIds.some(id=>typeof id!=='string'||!d.tasks.some(t=>t.id===id))))throw new Error('A voucher requires an unknown task.');}
- for(const r of d.records.filter(x=>x.key?.startsWith('guardian-request:'))){if(!['task','claim','activate'].includes(r.kind)||!['pending','approved','declined'].includes(r.status)||typeof r.targetId!=='string'||!p2ValidDate(r.date)||!Number.isFinite(Date.parse(r.createdAt||'')))throw new Error('Invalid guardian request in backup.');}return summary;};
+ for(const r of d.records.filter(x=>x.key?.startsWith('guardian-request:'))){if(!['task','claim','activate','challenge'].includes(r.kind)||!['pending','approved','declined'].includes(r.status)||typeof r.targetId!=='string'||!p2ValidDate(r.date)||!Number.isFinite(Date.parse(r.createdAt||'')))throw new Error('Invalid guardian request in backup.');}return summary;};
 const p31OldLedger=ledgerList;
 ledgerList=function(limit){return p31OldLedger(limit).replaceAll('rule-earned','Rule Followed');};
 app.addEventListener('click',async event=>{
@@ -16873,6 +16873,151 @@ p47FinishIfNeeded=function(){p59EnsureGuardianTimer();return p59BeforeTimerFinis
 const p59BeforeRender=render;
 render=function(){p59EnsureGuardianTimer();return p59BeforeRender();};
 /* End Phase 6F.2.8 */
+
+
+/* ===== Phase 6F.2.10: Challenge-award sync recovery and preservation =====
+   Family Sync stores records in Cloud FIRESTORE; no Firebase Storage.
+   Never repair a missing/fingerprint-mismatched ancestor by trusting it as a
+   common base. Manual two-sided review against CURRENT cloud is required.
+*/
+const P60_BUILD='mlsg-6f210-guardian-challenge-recovery-20261120';
+
+// The original request validator now accepts the 'challenge' request kind
+// created by p63RequestChallenge. Status, timestamps, IDs and dates remain
+// subject to the existing strict checks.
+
+function p60Wallet(data){return (data?.transactions||[]).reduce((total,t)=>total+Number(t.amount||0),0);}
+function p60MissingChallengeAwards(submitted,cloud){
+ const cloudIds=new Set((cloud?.transactions||[]).map(t=>String(t.id)));
+ return (submitted?.transactions||[]).filter(t=>
+  t&&t.type==='challenge'&&t.challengeId&&!t.reversedAt&&Number(t.amount)>0&&
+  String(t.id||'').startsWith('challenge:')&&!cloudIds.has(String(t.id)));
+}
+function p60AbsentTransactions(local,remote){
+ const cloudIds=new Set((remote?.transactions||[]).map(t=>String(t.id)));
+ return (local?.transactions||[]).filter(t=>t&&typeof t.id==='string'&&!cloudIds.has(t.id));
+}
+
+// Automatic download safety: a proposal marked resolved, or a restored
+// cloud revision, must not overwrite recorded local ledger transactions.
+// This block is intentionally stronger than comparing wallet totals.
+const p60PriorDownloadRemote=p17DownloadRemote;
+p17DownloadRemote=async function(remote,expectedLocalHash){
+ const local=await getBackupData();
+ const nowHash=await p8LocalHash(local);
+ if(nowHash!==expectedLocalHash)throw Error('Local progress changed while checking Family Sync; nothing was overwritten.');
+ const missing=p60AbsentTransactions(local,remote?.snapshot?.data);
+ if(missing.length){
+  await p17KeepSafetyBackup(local,`Protected ${missing.length} local star transaction(s) before loading cloud revision ${remote?.revision||'unknown'}`);
+  const positive=missing.filter(t=>Number(t.amount)>0).reduce((n,t)=>n+Number(t.amount||0),0);
+  const negative=missing.filter(t=>Number(t.amount)<0).reduce((n,t)=>n+Number(t.amount||0),0);
+  throw Error(`Cloud revision ${remote?.revision||'?'} omits ${missing.length} star transaction(s) saved on this device (${positive>0?'+'+positive+' earned stars':'no new earnings'}${negative?', '+negative+' deductions':''}). The local copy was NOT replaced. Please review the submission against current family data before choosing a version.`);
+ }
+ return p60PriorDownloadRemote(remote,expectedLocalHash);
+};
+
+// The previous fallback only handled a deleted ancestor. Restoring a cloud
+// snapshot can also leave an archived revision with a different fingerprint.
+// Never attempt a three-way merge using a nonmatching ancestor. Instead open
+// the already-existing conservative manual two-way review.
+const p60PriorOpenProposal=p17OpenProposal;
+p17OpenProposal=async function(id){
+ await p60PriorOpenProposal(id);
+ const message=String(state.p17.review?.error||'');
+ if(!/No archived revision \d+ matches this device's saved baseline fingerprint/i.test(message))return;
+ state.p17.review={loading:true,id};state.p17.preview=null;state.p17.decisions={};render();
+ try{
+  if(!p14OwnerVerified())throw Error('Verified family-owner access is required.');
+  const proposal=await p17FetchProposal(id),remote=await p8CloudFetchSnapshot();
+  if(!remote.snapshot)throw Error('No published family snapshot exists.');
+  if(remote.snapshot.data.records.some(r=>r.kind==='p17-proposal-merge'&&r.proposalId===id))throw Error('The submission has already been applied to the published garden.');
+  // Does not trust the rejected archived revision: every differing record
+  // remains an explicit choice until owner preview, integrity validation,
+  // and the publishing confirmation.
+  const plan=p55LatestCloudPlan(proposal.data,remote.snapshot.data);
+  state.p17.review={id,proposal,remote,plan,
+   remoteHash:await p8LocalHash(remote.snapshot.data),errors:'',loading:false,
+   latestCloudRecovery:true,baselineFingerprintMismatch:true};
+ }catch(e){state.p17.review={id,error:e?.message||'Could not open the manual recovery review.'};}
+ render();
+};
+
+// The owner should see the wallet difference and the actual new challenge
+// ledger IDs. A convenient starting decision keeps all CURRENT family records
+// and selectively adds only unique positive challenge transactions. This is
+// selection assistance, not publishing or automatic merging.
+const p60PriorReviewHtml=p17ReviewHtml;
+p17ReviewHtml=function(){
+ const html=p60PriorReviewHtml(),r=state.p17.review;
+ if(!r?.plan||!r.proposal?.data||!r.remote?.snapshot?.data)return html;
+ const submitted=r.proposal.data,cloud=r.remote.snapshot.data;
+ const extra=p60MissingChallengeAwards(submitted,cloud);
+ const doc=document.createElement('div');doc.innerHTML=html;
+ const section=doc.querySelector('.p56-merge-quick')||doc.querySelector('.p14-safe-note');
+ if(section){
+  const caution=document.createElement('section');caution.className='p60-recovery-summary';
+  const sum=extra.reduce((n,t)=>n+Number(t.amount||0),0);
+  caution.innerHTML=`<strong>⭐ Compare star records before publishing</strong>
+    <div class="p60-comparison"><span>Submitted device: <b>${money(p60Wallet(submitted))} stars</b></span><span>Current family: <b>${money(p60Wallet(cloud))} stars</b></span></div>
+    ${extra.length?`<p>Found <strong>${extra.length} challenge award(s), totaling +${money(sum)} stars</strong>, in the submitted copy but not in the current family cloud. These are real ledger records to inspect, not a balance adjustment.</p><div class="p60-awards">${extra.slice(0,8).map(t=>`<span>🏆 ${esc(String(t.reason||'Challenge'))} · +${money(t.amount)} stars · ${esc(String(t.id).slice(0,96))}</span>`).join('')}</div>`:''}
+    ${r.latestCloudRecovery?'<p class="p60-small">The original comparison baseline is unavailable or mismatched. This is a manual comparison only. Other edits must not be silently overwritten.</p>':''}
+    ${r.latestCloudRecovery&&extra.length?'<button type="button" class="btn btn-soft" data-p60-action="family-plus-challenges">Start with Family + Unshared Challenge Awards</button><p class="p60-small">This chooses current family records for other differences and the submitted version only for these missing challenge transactions. Review every difference and the combined preview before publishing. No changes are applied by this button.</p>':''}`;
+  section.before(caution);
+ }
+ if(state.p17.preview){
+  const missing=p60MissingChallengeAwards(submitted,state.p17.preview);
+  if(missing.length){
+   const amount=missing.reduce((n,t)=>n+Number(t.amount||0),0);
+   const preview=doc.querySelector('.p17-preview');
+   if(preview){
+    const warning=document.createElement('label');warning.className='p60-loss-ack';
+    warning.innerHTML=`<input type="checkbox" id="p60-loss-ack" required><span><strong>Warning: this proposed result excludes +${money(amount)} earned challenge stars</strong> from ${missing.length} local transaction(s). I understand these awards would not be included in the published family copy.</span>`;
+    preview.insertBefore(warning,preview.querySelector('[data-p17-action="review-publish"]'));
+   }
+  }
+ }
+ return doc.innerHTML;
+};
+document.addEventListener('click',event=>{
+ const button=event.target.closest?.('[data-p60-action="family-plus-challenges"]');
+ if(!button)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const review=state.p17.review;
+ if(!p14OwnerVerified()||!review?.plan||!review.latestCloudRecovery)return;
+ const awards=p60MissingChallengeAwards(review.proposal.data,review.remote.snapshot.data);
+ const transactionKeys=new Set(awards.map(t=>'transactions|'+t.id));
+ // No permanent mutation here: just a preliminary choice for each visible
+ // conflict. Owners can override every decision manually.
+ for(const c of review.plan.conflicts){
+  state.p17.decisions[c.key]=transactionKeys.has(c.key)?'device':'cloud';
+ }
+ state.p17.preview=null;review.errors='';render();
+},true);
+
+const p60PriorPublishProposal=p17PublishProposal;
+p17PublishProposal=async function(){
+ const r=state.p17.review;
+ const candidate=state.p17.preview;
+ if(r?.proposal?.data&&candidate){
+  const lost=p60MissingChallengeAwards(r.proposal.data,candidate);
+  if(lost.length&&!document.getElementById('p60-loss-ack')?.checked)
+   throw Error('Your selected merge would exclude recorded challenge stars. Review the star warning and acknowledge this decision, or include the missing award transactions before publishing.');
+ }
+ return p60PriorPublishProposal();
+};
+
+const P60_STYLES=String.raw`
+#app .p60-recovery-summary{border:1px solid #ebc4d8;background:#fff9fc;border-radius:16px;padding:15px 17px;display:grid;gap:10px;margin:16px 0}
+#app .p60-recovery-summary>strong{color:#76506c;font-size:1.04rem}
+#app .p60-comparison{display:flex;gap:12px;flex-wrap:wrap}
+#app .p60-comparison span{padding:10px 13px;border-radius:10px;border:1px solid #eed6e3;background:#fff;flex:1;min-width:150px}
+#app .p60-awards{display:grid;gap:5px;color:#75566e;font-size:.85rem;overflow-wrap:anywhere}
+#app .p60-small{font-size:.83rem;line-height:1.5;color:#846f7a;margin:0}
+#app .p60-loss-ack{display:flex;align-items:flex-start;gap:12px;background:#fff0de;border:1px solid #eac791;border-radius:12px;padding:13px;color:#77543a;line-height:1.5}
+#app .p60-loss-ack input{width:20px;height:20px;flex:none;accent-color:#b17d46;margin-top:2px}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P60_BUILD}">${P60_STYLES}</style>`);
+/* ===== End Phase 6F.2.10 ===== */
 
 </script>
 </body>
