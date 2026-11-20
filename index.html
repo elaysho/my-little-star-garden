@@ -756,7 +756,7 @@ async function p2Click(action,node){
  if(action==='incident-open'){state.p2IncidentRuleId=null;state.guardianTab='incident-editor';render();return;}
  if(action==='incident-to-rules'){state.guardianTab='manage';state.p2ManageTab='rules';render();return;}
 }
-app.addEventListener('click',async e=>{const node=e.target.closest('[data-p2-action]');if(!node)return;e.preventDefault();if(state.p2FormBusy)return;state.p2FormBusy=true;try{if(state.unlocked)touchSession();await p2Click(node.dataset.p2Action,node);}catch(err){notice(err.message||'Something went wrong.',true);}finally{state.p2FormBusy=false;}});
+app.addEventListener('click',async e=>{const node=e.target.closest('[data-p2-action]');if(!node)return;e.preventDefault();if(state.p2FormBusy)return;state.p2FormBusy=true;try{if(state.unlocked)touchSession();await p2Click(node.dataset.p2Action,node);}catch(err){console.error('[My Little Star Garden] Quest navigation error:',err);notice(err.message||'Something went wrong.',true);}finally{state.p2FormBusy=false;}});
 app.addEventListener('submit',async e=>{const form=e.target;if(!['p2-task-form','p2-rule-form','p2-complete-form','p2-incident-form','p2-review-form'].includes(form.id))return;e.preventDefault();e.stopImmediatePropagation();if(state.p2FormBusy)return;if(!safeGuardian()){notice('Guardian Mode must be unlocked first.',true);return;}state.p2FormBusy=true;const button=form.querySelector('button[type=submit]');if(button)button.disabled=true;try{
  if(form.id==='p2-task-form')await p2SaveTask(form);
  if(form.id==='p2-rule-form')await p2SaveRule(form);
@@ -3218,7 +3218,12 @@ async function p63RequestChallenge(ch){if(p31Existing('challenge',ch.id,p2Date()
 // If an existing Challenge bonus is approved through Guardian Mode, Child
 // Mode can discover it in history and no extra award is created.
 const p63PreviousMessageList=p62Messages;
-p62Messages=function(){const old=p63PreviousMessageList();const challengeRequests=(state.p31Requests||[]).filter(r=>r.kind==='challenge').map(r=>({type:'request',id:r.id,stamp:r.resolvedAt||r.createdAt,unread:r.status!=='pending'&&!r.childSeenAt,request:r}));return [...old.filter(m=>m.request?.kind!=='challenge'),...challengeRequests].sort((a,b)=>(b.stamp||'').localeCompare(a.stamp||''));};
+// Phase 6F.2.9: The base message list already includes ALL Guardian requests,
+// including challenges. Do not inject another challenge row with a different
+// {request} shape: Child Home and My Notifications expect {row}, and would
+// throw when reading m.row.status. Returning the original also avoids duplicate
+// challenge notifications. No persisted records or sync data are changed.
+p62Messages=function(){return p63PreviousMessageList();};
 
 // Only active sticker-world milestones should be advertised on Child Home.
 const p63LegacyMilestone=m=>!m||m.archived||(['garden','room'].includes(m.area)&&!m.rewardType)||m.rewardType==='legacy';
@@ -3444,7 +3449,7 @@ async function p64SaveChallenge(form){if(!safeGuardian())throw new Error('Guardi
  if(entries.some(e=>!['task','routine','rule'].includes(e.kind)||!(e.kind==='rule'?p2Rule(e.id)&&!p2Rule(e.id).archived:p2Task(e.id)&&!p2Task(e.id).archived&&(e.kind==='routine'?(p2Task(e.id).type==='checklist'):(p2Task(e.id).type!=='checklist')))))throw new Error('One or more linked activities are unavailable.');
  const old=state.p2Challenges.find(c=>c.id===String(fd.get('editId')||'')),name=String(fd.get('name')||'').trim(),stars=Number(fd.get('stars')),targetCount=Number(fd.get('targetCount'));if(!name||name.length>90||!Number.isSafeInteger(stars)||stars<0||!p4Whole(targetCount,1,100))throw new Error('Check the challenge title, bonus, and target.');
  const tasks=entries.filter(e=>e.kind==='task').map(x=>x.id),first=tasks[0]||entries.find(e=>e.kind==='routine')?.id||state.p2Tasks[0]?.id||'';
- const row={...old,id:old?.id||uniqueId(),name,icon:p2Icon(String(fd.get('icon')||'🏆')),taskId:first,taskIds:tasks.length?tasks:undefined,linkedItems:entries,matchMode:fd.get('matchMode')==='any'?'any':'all',targetCount,stars,period:fd.get('period')==='all'?'all':'weekly',distinctDays:fd.has('distinctDays'),archived:old?.archived||false,createdAt:old?.createdAt||iso(),updatedAt:iso()};
+ const row={...old,id:old?.id||uniqueId(),name,icon:p2Icon(String(fd.get('icon')||'🏆')),taskId:first,taskIds:tasks.length?tasks:undefined,linkedItems:entries,autoIncludeKinds:fd.getAll('autoIncludeKinds').map(String).filter(k=>['task','routine','rule'].includes(k)),matchMode:fd.get('matchMode')==='any'?'any':'all',targetCount,stars,period:fd.get('period')==='all'?'all':'weekly',distinctDays:fd.has('distinctDays'),archived:old?.archived||false,createdAt:old?.createdAt||iso(),updatedAt:iso()};
  await put('challenges',row);await refresh();state.guardianTab='manage';state.p2ManageTab='challenges';state.p2ChallengeId=null;state.p64ChallengeTab='tasks';state.p64ChallengeSearch='';render();notice('🏆 Challenge saved.');
 }
 function p64EntryInfo(item,date){if(item.kind==='rule'){const r=p2Rule(item.id);return {name:r?.name||'Unavailable rule',icon:r?.icon||'🛡️',ok:!!r&&!r.archived&&p41RuleFollowed(r.id,date),kind:'Rule'};}
@@ -14176,7 +14181,7 @@ document.addEventListener('fullscreenchange',()=>{if(state.p47.big&&!document.fu
 setInterval(()=>{
  const finished=p47FinishIfNeeded();
  if(finished){render();return;}
- if(state.p47.timer.status!=='running')return;
+ if(state.p47.timer?.status!=='running')return;
  const val=p47Text(),progress=p47Percent().toFixed(3)+'%';
  document.querySelectorAll('[data-p47-clock]').forEach(el=>el.textContent=val);
  document.querySelectorAll('.p47-ring').forEach(el=>el.style.setProperty('--progress',progress));
@@ -16722,6 +16727,152 @@ const P57_STYLES=String.raw`
 `;
 document.head.insertAdjacentHTML('beforeend',`<style id="${P57_BUILD}">${P57_STYLES}</style>`);
 /* ===== End Phase 6F.2.6 ===== */
+
+/* ===== Phase 6F.2.7: challenge category selection & child UI corrections ===== */
+const P58_BUILD='mlsg-6f27-challenge-category-select-all-child-ux';
+
+// Entire-category challenges expand at read time. The original linkedItems
+// remain a saved starting snapshot so backup/restore remains compatible.
+// Other challenges retain their original explicit selected list.
+const p58OriginalItems=p64ChallengeItems;
+p64ChallengeItems=function(ch){
+ const base=p58OriginalItems(ch),dynamic=[...new Set((Array.isArray(ch?.autoIncludeKinds)?ch.autoIncludeKinds:[]).filter(k=>['task','routine','rule'].includes(k)))];
+ if(!dynamic.length)return base;
+ const results=new Map(base.filter(item=>!dynamic.includes(item.kind)).map(item=>[item.kind+':'+item.id,item]));
+ for(const kind of dynamic){
+  const rows=kind==='rule'?state.p2Rules.filter(r=>!r.archived):state.p2Tasks.filter(t=>!t.archived&&(kind==='routine'?(t.type==='checklist'):t.type!=='checklist'));
+  for(const item of rows)results.set(kind+':'+item.id,{kind,id:item.id});
+ }
+ return [...results.values()];
+};
+
+const p58PreviousChallengeEditor=p2ChallengeEditor;
+p2ChallengeEditor=function(){
+ const root=document.createElement('div');root.innerHTML=p58PreviousChallengeEditor();
+ const form=root.querySelector('#p2-challenge-form');if(!form)return root.innerHTML;
+ const active=state.p2Challenges.find(c=>c.id===state.p2ChallengeId);
+ const dynamic=Array.isArray(active?.autoIncludeKinds)?active.autoIncludeKinds:[];
+ for(const [panelName,kind,plural] of [['tasks','task','tasks'],['routines','routine','routines'],['rules','rule','rules']]){
+  const panel=form.querySelector('[data-p64-ch-panel="'+panelName+'"]');if(!panel)continue;
+  const toolbar=document.createElement('div');toolbar.className='p58-select-toolbar';
+  toolbar.innerHTML=`<div class="p58-select-buttons"><button type="button" class="btn btn-soft btn-small" data-p58-action="all" data-kind="${kind}">✓ Select All ${plural[0].toUpperCase()+plural.slice(1)}</button><button type="button" class="btn btn-plain btn-small" data-p58-action="clear" data-kind="${kind}">Clear ${plural[0].toUpperCase()+plural.slice(1)}</button></div><label class="p58-auto-label"><input type="checkbox" name="autoIncludeKinds" value="${kind}" ${dynamic.includes(kind)?'checked':''}> Include new ${plural} automatically</label><p class="p58-auto-explain">Use <strong>Select All</strong> for every current ${kind==='rule'?'rule':kind==='routine'?'routine':'task'} and automatically include new ones in future. Uncheck to keep a fixed selection.</p>`;
+  const choiceList=form.querySelector('.p64-ch-choices');
+  if(choiceList){toolbar.dataset.p58Tab=panelName;toolbar.hidden=state.p64ChallengeTab!==panelName;choiceList.before(toolbar);}
+  else panel.prepend(toolbar);
+ }
+ const selected=form.querySelector('#p64-ch-selected');if(selected){
+  const count=form.querySelectorAll('input[name="linkedItems"]:checked').length;
+  selected.textContent=`${count} linked activities selected${dynamic.length?' · Entire categories: '+dynamic.map(x=>x==='rule'?'Rules':x==='task'?'Tasks':'Routines').join(', '):''}`;
+ }
+ return root.innerHTML;
+};
+function p58UpdateChoiceCount(form){
+ const count=form.querySelectorAll('input[name="linkedItems"]:checked').length;
+ const dyn=[...form.querySelectorAll('input[name="autoIncludeKinds"]:checked')].map(x=>x.value);
+ const summary=form.querySelector('#p64-ch-selected');if(summary)summary.textContent=`${count} linked activities selected${dyn.length?' · New '+dyn.map(x=>x==='rule'?'rules':x==='task'?'tasks':'routines').join(', ')+' included automatically':''}`;
+}
+document.addEventListener('click',event=>{
+ const button=event.target.closest('[data-p58-action]');if(!button)return;
+ const form=button.closest('#p2-challenge-form');if(!form)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const kind=button.dataset.kind; if(!['task','routine','rule'].includes(kind))return;
+ const items=[...form.querySelectorAll('input[name="linkedItems"]')].filter(el=>el.value.startsWith(kind+':')&&!el.disabled);
+ const checkAll=button.dataset.p58Action==='all';
+ for(const item of items)item.checked=checkAll;
+ const auto=form.querySelector('input[name="autoIncludeKinds"][value="'+kind+'"]');if(auto)auto.checked=checkAll;
+ const info=form.querySelector('.p51-random-feedback');if(info)info.textContent=checkAll?`All ${items.length} current ${kind}s selected; new ones will be included automatically.`:`Cleared ${kind}s from this challenge.`;
+ p58UpdateChoiceCount(form);
+},true);
+document.addEventListener('click',event=>{
+ const tab=event.target.closest('[data-p64-action="challenge-tab"]');if(!tab)return;
+ const form=tab.closest('#p2-challenge-form');if(!form)return;
+ for(const toolbar of form.querySelectorAll('.p58-select-toolbar[data-p58-tab]'))toolbar.hidden=toolbar.dataset.p58Tab!==tab.dataset.value;
+},true);
+document.addEventListener('change',event=>{
+ const input=event.target,form=input?.closest?.('#p2-challenge-form');if(!form)return;
+ if(input.matches('input[name="linkedItems"]')){
+  const kind=input.value.split(':')[0],auto=form.querySelector('input[name="autoIncludeKinds"][value="'+kind+'"]');
+  // A manual exception changes the category back to an explicit selection.
+  if(!input.checked&&auto?.checked)auto.checked=false;
+ }
+ if(input.matches('input[name="linkedItems"],input[name="autoIncludeKinds"]'))p58UpdateChoiceCount(form);
+},false);
+
+// More reliably target the live "Finished your quest?" section, which can
+// differ across later rendering layers. Reuse the existing PIN action handler.
+const p58PreviousTaskDetail=p3ChildTaskDetail;
+p3ChildTaskDetail=function(task,date=p2Date()){
+ const root=document.createElement('div');root.innerHTML=p58PreviousTaskDetail(task,date);
+ if(task?.type==='checklist')return root.innerHTML;
+ const section=[...root.querySelectorAll('.p6-approval')].find(x=>/finished your quest/i.test(x.querySelector('h3')?.textContent||''));
+ if(!section)return root.innerHTML;
+ let actions=section.querySelector('.p6-approval-actions');
+ if(!actions){actions=document.createElement('div');actions.className='p6-approval-actions';section.append(actions);}
+ const pending=!!p31Existing('task',task.id,date);
+ let immediate=actions.querySelector('[data-p6-action="immediate-open"][data-kind="task"]');
+ if(!immediate){
+  immediate=document.createElement('button');immediate.type='button';immediate.className='btn btn-rose';
+  immediate.dataset.p6Action='immediate-open';immediate.dataset.kind='task';immediate.dataset.id=task.id;
+  actions.append(immediate);
+ }
+ immediate.textContent=pending?'🔐 Check Pending Request Now':'🔐 Ask Guardian Now';
+ immediate.hidden=false;immediate.removeAttribute('aria-hidden');
+ actions.classList.add('p58-quest-approval-row');
+ return root.innerHTML;
+};
+
+// No introductory saving-for-a-reward notice until the child actually chooses
+// a saving goal. The selected reward's progress card remains unchanged.
+const p58PreviousShop=childShop;
+childShop=function(){const root=document.createElement('div');root.innerHTML=p58PreviousShop();root.querySelectorAll('.p56-saving-intro').forEach(n=>n.remove());return root.innerHTML;};
+
+// Match secondary gratitude actions to the full width of View Ticket.
+const P58_CSS=String.raw`
+#app .p51-memory-ticket .p14-history-thanks,
+#app .p57-memory-ticket .p14-history-thanks{display:block!important;width:100%!important;box-sizing:border-box!important;padding:0!important;margin:10px 0 0!important}
+#app .p51-memory-ticket .p14-history-thanks .btn,
+#app .p57-memory-ticket .p14-history-thanks .btn,
+#app .p51-memory-ticket > .btn,
+#app .p57-memory-ticket > .btn{display:flex;width:100%!important;min-height:46px;box-sizing:border-box;align-items:center;justify-content:center;margin:0!important}
+#app .p58-select-toolbar[hidden]{display:none!important}
+#app .p58-select-toolbar{display:grid;gap:9px;grid-column:1/-1;padding:12px 14px;margin-bottom:8px;background:#fff8fc;border:1px solid #eed7e5;border-radius:15px}
+#app .p58-select-buttons{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+#app .p58-select-buttons .btn{min-height:41px;white-space:normal}
+#app .p58-auto-label{display:flex;gap:10px;align-items:center;font-weight:800;color:#7e5471;font-size:.88rem;cursor:pointer}
+#app .p58-auto-label input{width:18px;height:18px;flex:none;accent-color:#b06592}
+#app .p58-auto-explain{margin:0;font-size:.8rem;line-height:1.5;color:#8c7584}
+#app .p58-quest-approval-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#app .p58-quest-approval-row >.btn{width:100%;min-width:0;white-space:normal}
+#app .p48-challenge-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+#app .p48-challenge-actions [data-p2-action="challenge-award"]{width:100%!important;max-width:none!important;grid-column:1/2!important}
+@media(max-width:640px){#app .p58-quest-approval-row{grid-template-columns:1fr}#app .p58-select-buttons{display:grid;grid-template-columns:1fr 1fr}#app .p58-select-buttons .btn{width:100%;min-width:0}}
+`;
+document.head.insertAdjacentHTML('beforeend',`<style id="${P58_BUILD}">${P58_CSS}</style>`);
+/* ===== End Phase 6F.2.7 ===== */
+
+
+/* ===== Phase 6F.2.8 — Child Mode status crash recovery =====
+ * The independent Guardian Timer is local-only state. The 6E.1 render layer
+ * calls p47FinishIfNeeded even while viewing Child Mode. Older/interrupted
+ * sessions can leave the in-memory timer missing; guard this independently
+ * from family records, which must never be reset to resolve a UI crash.
+ */
+const P59_BUILD='mlsg-6f28-child-mode-status-recovery-20261120';
+function p59EnsureGuardianTimer(){
+ const own=state.p47;
+ const t=own?.timer;
+ const valid=t&&typeof t==='object'&&['ready','running','paused','finished'].includes(t.status)
+    &&Number.isFinite(Number(t.durationMs))&&Number(t.durationMs)>0;
+ if(valid)return false;
+ const recovered=p47Load();
+ state.p47={...(own&&typeof own==='object'?own:{}),timer:recovered,big:false,previous:own?.previous||'dashboard'};
+ return true;
+}
+const p59BeforeTimerFinish=p47FinishIfNeeded;
+p47FinishIfNeeded=function(){p59EnsureGuardianTimer();return p59BeforeTimerFinish();};
+const p59BeforeRender=render;
+render=function(){p59EnsureGuardianTimer();return p59BeforeRender();};
+/* End Phase 6F.2.8 */
 
 </script>
 </body>
